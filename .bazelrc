@@ -1,0 +1,56 @@
+# ==========================================
+# 1. HARDWARE & STORAGE CONFIGURATION
+# ==========================================
+
+# Directs all local compilation actions, external dependency downloads, 
+# and repository metadata to your high-throughput 240GB scratch disk.
+# This prevents NVMe boot drive wear and isolates compiler churn.
+startup --output_user_root=/home/matatan/scratch/bazel-cache
+
+# ==========================================
+# 2. NIXOS HERMETICITY & TOOLCHAIN FIXES
+# ==========================================
+
+# Forces Bazel to inherit standard environment variables set by your Nix flake devShell.
+# Without this, Bazel wipes your PATH for purity, meaning it won't find compilers 
+# or libraries provisioned by direnv.
+build --action_env=PATH
+build --action_env=DIRENV_DIFF
+build --action_env=SSH_AUTH_SOCK
+
+# Ensures host toolchains use the exact tools provided by Nix, not fallback system wrappers.
+build --host_action_env=PATH
+
+# ==========================================
+# 3. BUILD OPTIMIZATIONS & CACHING
+# ==========================================
+
+# Enables the bytes-saving disk cache. If you clean your workspace or switch branches, 
+# Bazel can reconstruct binaries instantly from this block without rebuilding.
+build --disk_cache=/home/matatan/scratch/bazel-disk-cache
+
+# Enables UI clarity. Shows progress bars, action counters, and compilation speeds.
+build --show_progress_rate_limit=0.5
+build --show_task_finish
+
+# Uses hardware capabilities efficiently. Bazel automatically tracks your CPU threads, 
+# but you can bound it here if you want to save cycles for local LLMs or background processes.
+# build --jobs=12 
+
+# ==========================================
+# 4. STRICTNESS & CODE QUALITY (Google Style)
+# ==========================================
+
+# Ensures build layouts are uniform and strictly checks that header files match compilation targets.
+build --experimental_sibling_repository_layout
+test --test_output=errors
+
+# ==========================================
+# 5. USER / ENVIRONMENT SPECIFIC OVERRIDES
+# ==========================================
+
+# This line imports an optional machine-specific configuration file.
+# If you ever want your Forgejo CI runner to apply different compilation flags than 
+# your local interactive dev session, you can put those rules inside a local `.bazelrc.local`
+# file which is safely ignored by Git.
+try-import %workspace%/.bazelrc.local

@@ -1,0 +1,24 @@
+# Bazel symlinks and outputs
+/bazel-*
+
+# direnv cache / Nix environment files
+/.direnv/
+
+# IDE and Editor files
+/.idea/
+/.vscode/
+*.swp
+*~
+.classpath
+.project
+.settings/
+.factorypath
+
+# OS metadata files
+.DS_Store
+Thumbs.db
+
+# Local environment/secrets files
+.env
+.env.local
+.env.*.local
