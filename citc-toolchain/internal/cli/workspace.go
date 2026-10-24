@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"citc-toolchain/internal/cli/config"
+	"citc-toolchain/internal/cli/skills"
 	citcv1 "citc-toolchain/proto/v1"
 
 	"github.com/spf13/cobra"
@@ -140,6 +141,13 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 			if daemonPID > 0 {
 				pollMountActive(cmd.OutOrStdout(), daemonPID, resolvedMountDir, scratchDir)
 			}
+
+			// Opportunistically ensure agent harness spokes are linked for any installed harnesses
+			go func() {
+				if hubDir, err := skills.EnsureHub(""); err == nil {
+					_, _ = skills.SyncSpokes(hubDir, false, "")
+				}
+			}()
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q created successfully.\n", name)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Base CL   : %d\n", resp.BaseCl)
