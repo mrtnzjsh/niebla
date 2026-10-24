@@ -9,6 +9,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 
 	"citc-toolchain/pkg/tree"
 	"github.com/alecthomas/chroma/v2"
@@ -379,6 +380,27 @@ func ComputeSideBySideDiff(filePath string, baseContent, modContent []byte, chan
 	return detail, nil
 }
 
+var (
+	syntaxStyleMu     sync.RWMutex
+	activeSyntaxStyle = "dracula"
+)
+
+// SetSyntaxStyle configures the Chroma syntax highlighting theme (e.g. "catppuccin-mocha", "tokyonight-night").
+func SetSyntaxStyle(styleName string) {
+	syntaxStyleMu.Lock()
+	defer syntaxStyleMu.Unlock()
+	if strings.TrimSpace(styleName) != "" {
+		activeSyntaxStyle = strings.TrimSpace(styleName)
+	}
+}
+
+// GetSyntaxStyle returns the current Chroma syntax highlighting theme name.
+func GetSyntaxStyle() string {
+	syntaxStyleMu.RLock()
+	defer syntaxStyleMu.RUnlock()
+	return activeSyntaxStyle
+}
+
 // HighlightLines tokenizes and formats file content into HTML line slices using Chroma.
 func HighlightLines(filename, content string) []template.HTML {
 	if content == "" {
@@ -394,7 +416,11 @@ func HighlightLines(filename, content string) []template.HTML {
 	}
 	lexer = chroma.Coalesce(lexer)
 
-	style := styles.Get("dracula")
+	syntaxStyleMu.RLock()
+	currentStyle := activeSyntaxStyle
+	syntaxStyleMu.RUnlock()
+
+	style := styles.Get(currentStyle)
 	if style == nil {
 		style = styles.Fallback
 	}

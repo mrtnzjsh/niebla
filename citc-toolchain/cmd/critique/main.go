@@ -15,8 +15,11 @@ import (
 	"syscall"
 	"time"
 
+	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
+	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/handlers"
+	"citc-toolchain/internal/web/views"
 	"citc-toolchain/pkg/cas"
 )
 
@@ -37,24 +40,63 @@ func getEnvInt(key string, defaultVal int) int {
 }
 
 func main() {
-	hostFlag := flag.String("host", getEnv("CITC_HOST", "0.0.0.0"), "Host address for Critique web service")
-	portFlag := flag.Int("port", getEnvInt("CRITIQUE_PORT", 8080), "Port number for Critique web service")
-	dbURLFlag := flag.String("db-url", getEnv("DATABASE_URL", "postgres:///citc?host=/run/postgresql"), "PostgreSQL connection string")
-	blobPathFlag := flag.String("blob-path", getEnv("CITC_BLOB_PATH", "/devpool/citc_blobs"), "Path to CAS blob storage")
+	configFlag := flag.String("config", "", "Path to configuration file (defaults to ~/.config/citc-toolchain/config.toml)")
+	hostFlag := flag.String("host", "", "Host address for Critique web service (overrides config)")
+	portFlag := flag.Int("port", 0, "Port number for Critique web service (overrides config)")
+	dbURLFlag := flag.String("db-url", "", "PostgreSQL connection string (overrides config)")
+	blobPathFlag := flag.String("blob-path", "", "Path to CAS blob storage (overrides config)")
 	assetsDirFlag := flag.String("assets-dir", getEnv("CITC_ASSETS_DIR", "./assets"), "Path to assets directory")
 	flag.Parse()
 
+	// 0. Load and validate unified configuration
+	var cfg *config.Config
+	var err error
+	if *configFlag != "" {
+		cfg, err = config.LoadFromPath(*configFlag)
+	} else {
+		cfg, err = config.Load()
+	}
+	if err != nil {
+		log.Fatalf("❌ Configuration error:\n%v", err)
+	}
+
+	// Apply explicit command line flag overrides if provided
+	if *hostFlag != "" {
+		cfg.Critique.Host = *hostFlag
+	}
+	if *portFlag != 0 {
+		cfg.Critique.Port = *portFlag
+	}
+	if *dbURLFlag != "" {
+		cfg.Server.DBURL = *dbURLFlag
+	}
+	if *blobPathFlag != "" {
+		cfg.Server.BlobPath = *blobPathFlag
+	}
+
+	// Fast-fail re-validation in case CLI flags introduced invalid parameters
+	if err := config.Validate(cfg); err != nil {
+		log.Fatalf("❌ Configuration validation error:\n%v", err)
+	}
+
+	// Resolve active theme and wire into Critique views & Chroma syntax highlighting
+	activeTheme := config.ResolveTheme(cfg.Critique.Theme)
+	views.SetActiveThemeCSS(activeTheme.ToCSSVariables())
+	diff.SetSyntaxStyle(activeTheme.SyntaxStyle)
+
 	log.Printf("Starting Critique Code Review Web Service...")
-	log.Printf("Target bind address : %s:%d", *hostFlag, *portFlag)
-	log.Printf("CAS blob path       : %s", *blobPathFlag)
-	log.Printf("PostgreSQL URL      : %s", *dbURLFlag)
+	log.Printf("Target bind address : %s:%d", cfg.Critique.Host, cfg.Critique.Port)
+	log.Printf("Live reload proxy   : port %d", cfg.Critique.ProxyPort)
+	log.Printf("Theme Preset        : %s (syntax: %s)", activeTheme.Name, activeTheme.SyntaxStyle)
+	log.Printf("Default Reviewer    : %s", cfg.Critique.DefaultReviewer)
+	log.Printf("CAS blob path       : %s", cfg.Server.BlobPath)
+	log.Printf("PostgreSQL URL      : %s", cfg.Server.DBURL)
 	log.Printf("Assets directory    : %s", *assetsDirFlag)
 
 	// 1. Initialize CAS local blob storage engine
-	casStorage, err := cas.NewStorage(*blobPathFlag)
+	casStorage, err := cas.NewStorage(cfg.Server.BlobPath)
 	if err != nil {
-		log.Printf("Warning: CAS storage initialization at %s returned: %v (will retry or use fallback)", *blobPathFlag, err)
-		// Fallback to local temporary directory if default not accessible
+		log.Printf("Warning: CAS storage initialization at %s returned: %v (will retry or use fallback)", cfg.Server.BlobPath, err)
 		fallbackDir := filepath.Join(os.TempDir(), "citc_blobs")
 		casStorage, err = cas.NewStorage(fallbackDir)
 		if err != nil {
@@ -67,7 +109,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dbConfig := db.DefaultConfig(*dbURLFlag)
+	dbConfig := db.DefaultConfig(cfg.Server.DBURL)
 	database, err := db.Connect(ctx, dbConfig)
 	if err != nil {
 		log.Printf("⚠️  PostgreSQL connection unavailable (%v)", err)
@@ -121,7 +163,7 @@ func main() {
 	})
 
 	// 5. Start HTTP server
-	addr := fmt.Sprintf("%s:%d", *hostFlag, *portFlag)
+	addr := fmt.Sprintf("%s:%d", cfg.Critique.Host, cfg.Critique.Port)
 	server := &http.Server{
 		Addr:         addr,
 		Handler:      mux,
