@@ -1,0 +1,79 @@
+# ==============================================================================
+# CitC Toolchain Unified Configuration
+# Location: ~/.config/citc-toolchain/config.toml
+# ==============================================================================
+
+version = 1
+
+[core]
+# Address of the active CitC gRPC repository service
+server_addr = "127.0.0.1:50051"
+
+# Default workspace name if unspecified in CLI invocations
+default_workspace = "default"
+
+[server]
+# Bind address for citc-server gRPC daemon
+host = "0.0.0.0"
+port = 50051
+
+# PostgreSQL connection URI (PostgreSQL socket or TCP URL)
+db_url = "postgres:///citc?host=/run/postgresql"
+
+# Local root path for content-addressable storage (CAS) blob store
+blob_path = "/devpool/citc_blobs"
+
+# Maximum number of tree nodes cached in LRU memory
+cache_size = 10000
+
+[fs]
+# Root mount directory for virtual FUSE workspaces
+mount_base = "/citc"
+
+# Cache directory for local blob chunks (supports $HOME expansion)
+cache_dir = "$HOME/.cache/citc/blobs"
+
+[critique]
+# HTTP server address for Critique code review web UI
+host = "0.0.0.0"
+port = 8080
+
+# Live-reloading proxy port (used by templ generate --watch)
+proxy_port = 7331
+
+# Default author/reviewer identity for comments and verdicts
+# Dynamically resolves to $USER or current OS user if set to "$USER" or empty
+default_reviewer = "$USER"
+
+# ------------------------------------------------------------------------------
+# Critique Theme & Visual Styling
+# ------------------------------------------------------------------------------
+[critique.theme]
+# Built-in presets:
+#   "catppuccin-mocha"     - Dark pastel (default)
+#   "catppuccin-macchiato" - Dark medium
+#   "catppuccin-frappe"    - Low contrast dark
+#   "catppuccin-latte"     - Warm light mode
+#   "tokyo-night"          - Cyberpunk indigo/blue
+#   "dracula"              - Gothic purple
+#   "nord"                 - Arctic blue
+#   "github-dark"          - Monokai / GitHub dark
+#   "custom"               - Define completely custom palette in [critique.theme.colors]
+preset = "catppuccin-mocha"
+
+# Syntax highlighting style (Chroma style name; defaults to matching the preset)
+syntax_style = "catppuccin-mocha"
+
+# Optional color overrides (override individual preset colors, or provide all for "custom")
+[critique.theme.colors]
+# bg_canvas       = "#1e1e2e"                  # Deep canvas background
+# bg_surface      = "#181825"                  # Top navbar, sticky toolbars
+# bg_card         = "#11111b"                  # Elevated cards and file table background
+# border          = "#313244"                  # Table, row, and card borders
+# text_primary    = "#cdd6f4"                  # Primary text, file paths, and code
+# text_muted      = "#a6adc8"                  # Line numbers, timestamps, subtitles
+# accent          = "#89b4fa"                  # Primary action buttons and badges
+# diff_add_bg     = "rgba(166, 227, 161, 0.20)" # Subtle green diff tint
+# diff_add_border = "#a6e3a1"                   # Left border on added lines
+# diff_del_bg     = "rgba(243, 139, 168, 0.20)" # Subtle red diff tint
+# diff_del_border = "#f38ba8"                   # Left border on deleted lines
