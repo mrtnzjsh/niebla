@@ -39,3 +39,5 @@ CREATE TABLE IF NOT EXISTS workspaces (
 INSERT INTO changelists (cl_id, author, description, root_tree_hash, status)
 VALUES (1, 'system', 'Depot root initialized', '\xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'submitted')
 ON CONFLICT DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('changelists', 'cl_id'), COALESCE((SELECT MAX(cl_id) FROM changelists), 1));
