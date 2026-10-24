@@ -34,6 +34,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewShelveCmd(flags))
 	rootCmd.AddCommand(NewSubmitCmd(flags))
 	rootCmd.AddCommand(NewSkillsCmd(flags))
+	rootCmd.AddCommand(NewConfigCmd(flags))
 
 	return rootCmd
 }
