@@ -1,13 +1,22 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"citc-toolchain/internal/db"
 	"citc-toolchain/internal/web/views"
+)
+
+var (
+	demoCommentsMu    sync.RWMutex
+	demoCommentsStore = make(map[string][]db.Comment)
+	nextCommentID     int64 = 100
 )
 
 // CommentsHandler handles HTMX endpoints for inline code reviews.
@@ -56,9 +65,18 @@ func (h *CommentsHandler) HandleGetCommentBox(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	comments, err := h.db.ListCommentsForLine(r.Context(), clID, filePath, line, side)
-	if err != nil {
-		log.Printf("error listing comments for line: %v", err)
+	var comments []db.Comment
+	if h.db != nil {
+		var err error
+		comments, err = h.db.ListCommentsForLine(r.Context(), clID, filePath, line, side)
+		if err != nil {
+			log.Printf("error listing comments for line: %v", err)
+		}
+	} else {
+		demoCommentsMu.RLock()
+		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, line, side)
+		comments = demoCommentsStore[key]
+		demoCommentsMu.RUnlock()
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -113,22 +131,43 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 	}
 
 	resolved := r.FormValue("resolved") == "true"
+	var comments []db.Comment
 
-	newComment, err := h.db.CreateComment(r.Context(), clID, psNum, filePath, line, side, author, body, nil)
-	if err != nil {
-		log.Printf("failed to insert comment: %v", err)
-		http.Error(w, "failed to record comment", http.StatusInternalServerError)
-		return
-	}
+	if h.db != nil {
+		newComment, err := h.db.CreateComment(r.Context(), clID, psNum, filePath, line, side, author, body, nil)
+		if err != nil {
+			log.Printf("failed to insert comment: %v", err)
+			http.Error(w, "failed to record comment", http.StatusInternalServerError)
+			return
+		}
 
-	if resolved {
-		_ = h.db.ResolveComment(r.Context(), newComment.ID, true)
-	}
+		if resolved {
+			_ = h.db.ResolveComment(r.Context(), newComment.ID, true)
+		}
 
-	// Fetch updated comments list for this line
-	comments, err := h.db.ListCommentsForLine(r.Context(), clID, filePath, line, side)
-	if err != nil {
-		log.Printf("error fetching updated comments: %v", err)
+		comments, err = h.db.ListCommentsForLine(r.Context(), clID, filePath, line, side)
+		if err != nil {
+			log.Printf("error fetching updated comments: %v", err)
+		}
+	} else {
+		demoCommentsMu.Lock()
+		nextCommentID++
+		c := db.Comment{
+			ID:             nextCommentID,
+			CLID:           clID,
+			PatchsetNumber: psNum,
+			FilePath:       filePath,
+			LineNumber:     line,
+			Side:           side,
+			Author:         author,
+			Body:           body,
+			Resolved:       resolved,
+			CreatedAt:      time.Now(),
+		}
+		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, line, side)
+		demoCommentsStore[key] = append(demoCommentsStore[key], c)
+		comments = demoCommentsStore[key]
+		demoCommentsMu.Unlock()
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -158,25 +197,56 @@ func (h *CommentsHandler) HandleResolveComment(w http.ResponseWriter, r *http.Re
 	}
 
 	resolved := r.URL.Query().Get("resolved") == "true"
-	if err := h.db.ResolveComment(r.Context(), commentID, resolved); err != nil {
-		log.Printf("failed to resolve comment %d: %v", commentID, err)
-		http.Error(w, "failed to update comment state", http.StatusInternalServerError)
+
+	if h.db != nil {
+		if err := h.db.ResolveComment(r.Context(), commentID, resolved); err != nil {
+			log.Printf("failed to resolve comment %d: %v", commentID, err)
+			http.Error(w, "failed to update comment state", http.StatusInternalServerError)
+			return
+		}
+
+		comment, err := h.db.GetComment(r.Context(), commentID)
+		if err != nil {
+			http.Error(w, "comment not found", http.StatusNotFound)
+			return
+		}
+
+		comments, err := h.db.ListCommentsForLine(r.Context(), comment.CLID, comment.FilePath, comment.LineNumber, comment.Side)
+		if err != nil {
+			log.Printf("error querying comments for resolved line: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		component := views.CommentBox(comment.CLID, comment.PatchsetNumber, comment.FilePath, comment.LineNumber, comment.Side, comments)
+		_ = component.Render(r.Context(), w)
 		return
 	}
 
-	comment, err := h.db.GetComment(r.Context(), commentID)
-	if err != nil {
+	demoCommentsMu.Lock()
+	var matched *db.Comment
+	var matchedKey string
+	for k, list := range demoCommentsStore {
+		for i := range list {
+			if list[i].ID == commentID {
+				list[i].Resolved = resolved
+				matched = &list[i]
+				matchedKey = k
+				break
+			}
+		}
+	}
+	var comments []db.Comment
+	if matched != nil {
+		comments = demoCommentsStore[matchedKey]
+	}
+	demoCommentsMu.Unlock()
+
+	if matched == nil {
 		http.Error(w, "comment not found", http.StatusNotFound)
 		return
 	}
 
-	// Query all comments for that line to refresh thread view
-	comments, err := h.db.ListCommentsForLine(r.Context(), comment.CLID, comment.FilePath, comment.LineNumber, comment.Side)
-	if err != nil {
-		log.Printf("error querying comments for resolved line: %v", err)
-	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.CommentBox(comment.CLID, comment.PatchsetNumber, comment.FilePath, comment.LineNumber, comment.Side, comments)
+	component := views.CommentBox(matched.CLID, matched.PatchsetNumber, matched.FilePath, matched.LineNumber, matched.Side, comments)
 	_ = component.Render(r.Context(), w)
 }

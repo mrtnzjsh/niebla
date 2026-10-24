@@ -63,17 +63,21 @@ func main() {
 		log.Printf("Using fallback CAS directory: %s", fallbackDir)
 	}
 
-	// 2. Connect to database & apply migrations
+	// 2. Connect to database & apply migrations (or fallback to UI Dev Mode)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	dbConfig := db.DefaultConfig(*dbURLFlag)
 	database, err := db.Connect(ctx, dbConfig)
 	if err != nil {
-		log.Fatalf("Failed to connect to database and apply migrations: %v", err)
+		log.Printf("⚠️  PostgreSQL connection unavailable (%v)", err)
+		log.Printf("🚀 Starting Critique in standalone UI Dev Mode with seeded CLs.")
+		log.Printf("   Interactive review, Myers diffs, and HTMX comments are active.")
+		database = nil
+	} else {
+		defer database.Close()
+		log.Printf("Connected to PostgreSQL and verified Critique schema migrations.")
 	}
-	defer database.Close()
-	log.Printf("Connected to PostgreSQL and verified Critique schema migrations.")
 
 	// 3. Initialize HTTP handlers
 	clHandler := handlers.NewCLHandler(database, casStorage)
@@ -158,7 +162,9 @@ func main() {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
-	log.Println("Closing database connections...")
-	database.Close()
+	if database != nil {
+		log.Println("Closing database connections...")
+		database.Close()
+	}
 	log.Println("Critique web server stopped gracefully.")
 }
