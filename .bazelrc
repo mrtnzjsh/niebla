@@ -5,7 +5,7 @@
 # Directs all local compilation actions, external dependency downloads, 
 # and repository metadata to your high-throughput 240GB scratch disk.
 # This prevents NVMe boot drive wear and isolates compiler churn.
-startup --output_user_root=/home/matatan/scratch/bazel-cache
+startup --output_user_root=/scratch/bazel-cache
 
 # ==========================================
 # 2. NIXOS HERMETICITY & TOOLCHAIN FIXES
@@ -27,7 +27,7 @@ build --host_action_env=PATH
 
 # Enables the bytes-saving disk cache. If you clean your workspace or switch branches, 
 # Bazel can reconstruct binaries instantly from this block without rebuilding.
-build --disk_cache=/home/matatan/scratch/bazel-disk-cache
+build --disk_cache=/scratch/bazel-disk-cache
 
 # Enables UI clarity. Shows progress bars, action counters, and compilation speeds.
 build --show_progress_rate_limit=0.5
