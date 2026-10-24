@@ -3,6 +3,9 @@
 
 # direnv cache / Nix environment files
 /.direnv/
+/bin/
+/tmp/
+citc-toolchain/tmp/
 
 # IDE and Editor files
 /.idea/

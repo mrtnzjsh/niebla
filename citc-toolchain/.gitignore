@@ -10,7 +10,9 @@
 *.dylib
 /citc-server
 /citcfs
+/critique
 bin/
+tmp/
 
 # Test binary, built with `go test -c`
 *.test
