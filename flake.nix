@@ -9,7 +9,6 @@
   outputs = {
     nixpkgs,
     flake-utils,
-    arion,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -30,7 +29,7 @@
 
           shellHook = ''
             echo "⚡ Monorepo Environment Activated ⚡"
-            echo "Available tools: $(bazel --version) | $(arion --version)"
+            echo "Available tools: $(bazel --version) | arion $(arion version)"
           '';
         };
       }
