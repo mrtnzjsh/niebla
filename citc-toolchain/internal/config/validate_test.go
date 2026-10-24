@@ -97,3 +97,82 @@ func TestValidateSyntaxStyle(t *testing.T) {
 		t.Errorf("expected unrecognized Chroma style error, got: %s", errStr)
 	}
 }
+
+func TestValidateVersion(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Version = 0
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatalf("expected validation error for version 0, got nil")
+	}
+	if !strings.Contains(err.Error(), "version must be at least 1") {
+		t.Errorf("expected version error, got: %v", err)
+	}
+}
+
+func TestValidateServerAddr(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Core.ServerAddr = "invalid-address-without-port"
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatalf("expected validation error for invalid ServerAddr, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid server address format") {
+		t.Errorf("expected server address format error, got: %v", err)
+	}
+}
+
+func TestValidateInterServicePortCollisions(t *testing.T) {
+	// Server vs Critique Port
+	cfg1 := DefaultConfig()
+	cfg1.Server.Port = 8080
+	cfg1.Critique.Port = 8080
+
+	err1 := Validate(cfg1)
+	if err1 == nil || !strings.Contains(err1.Error(), "critique.port conflicts with server.port") {
+		t.Errorf("expected critique.port conflicts with server.port, got: %v", err1)
+	}
+
+	// Server vs Critique ProxyPort
+	cfg2 := DefaultConfig()
+	cfg2.Server.Port = 7331
+	cfg2.Critique.ProxyPort = 7331
+
+	err2 := Validate(cfg2)
+	if err2 == nil || !strings.Contains(err2.Error(), "critique.proxy_port conflicts with server.port") {
+		t.Errorf("expected critique.proxy_port conflicts with server.port, got: %v", err2)
+	}
+}
+
+func TestValidateDBURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Server.DBURL = "mysql://root@localhost/db"
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "unsupported PostgreSQL connection string format") {
+		t.Errorf("expected db_url format error, got: %v", err)
+	}
+}
+
+func TestValidateFSMountBase(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.FS.MountBase = "relative/path/not/absolute"
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "mount_base must be an absolute path") {
+		t.Errorf("expected absolute path error, got: %v", err)
+	}
+}
+
+func TestValidateDefaultReviewer(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Critique.DefaultReviewer = "bad user with spaces"
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "default_reviewer cannot contain whitespace") {
+		t.Errorf("expected whitespace error for reviewer, got: %v", err)
+	}
+}
+

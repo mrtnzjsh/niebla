@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -70,7 +71,38 @@ func Validate(cfg *Config) error {
 
 	var errs ValidationErrors
 
-	// 1. Server validation
+	// 1. Version validation
+	if cfg.Version < 1 {
+		errs = append(errs, ValidationError{
+			Field:   "version",
+			Value:   fmt.Sprintf("%d", cfg.Version),
+			Message: "version must be at least 1",
+			Hint:    "Set 'version = 1' at the top level of your configuration file.",
+		})
+	}
+
+	// 2. Core settings validation
+	if cfg.Core.ServerAddr != "" {
+		host, port, err := net.SplitHostPort(cfg.Core.ServerAddr)
+		if err != nil || host == "" || port == "" {
+			errs = append(errs, ValidationError{
+				Field:   "core.server_addr",
+				Value:   cfg.Core.ServerAddr,
+				Message: "invalid server address format",
+				Hint:    "Expected 'host:port' format (e.g. '127.0.0.1:50051' or 'localhost:50051').",
+			})
+		}
+	}
+	if cfg.Core.DefaultWorkspace != "" && strings.ContainsAny(cfg.Core.DefaultWorkspace, "/\\ \t\r\n") {
+		errs = append(errs, ValidationError{
+			Field:   "core.default_workspace",
+			Value:   cfg.Core.DefaultWorkspace,
+			Message: "default_workspace contains invalid characters",
+			Hint:    "Workspace names cannot contain path separators or whitespace (e.g. 'default' or 'main').",
+		})
+	}
+
+	// 3. Server daemon validation
 	if cfg.Server.Port != 0 && (cfg.Server.Port < 1 || cfg.Server.Port > 65535) {
 		errs = append(errs, ValidationError{
 			Field:   "server.port",
@@ -87,8 +119,30 @@ func Validate(cfg *Config) error {
 			Hint:    "Specify 0 to disable memory caching, or a positive integer (default: 10000).",
 		})
 	}
+	if cfg.Server.DBURL != "" {
+		if !strings.HasPrefix(cfg.Server.DBURL, "postgres://") &&
+			!strings.HasPrefix(cfg.Server.DBURL, "postgresql://") &&
+			!strings.Contains(cfg.Server.DBURL, "=") {
+			errs = append(errs, ValidationError{
+				Field:   "server.db_url",
+				Value:   cfg.Server.DBURL,
+				Message: "unsupported PostgreSQL connection string format",
+				Hint:    "Use a URI format like 'postgres:///citc?host=/run/postgresql' or key-value format.",
+			})
+		}
+	}
 
-	// 2. Critique HTTP server validation
+	// 4. FS configuration validation
+	if cfg.FS.MountBase != "" && !strings.HasPrefix(cfg.FS.MountBase, "/") {
+		errs = append(errs, ValidationError{
+			Field:   "fs.mount_base",
+			Value:   cfg.FS.MountBase,
+			Message: "mount_base must be an absolute path",
+			Hint:    "Specify an absolute directory path starting with '/' (e.g. '/citc').",
+		})
+	}
+
+	// 5. Critique HTTP server validation
 	if cfg.Critique.Port != 0 && (cfg.Critique.Port < 1 || cfg.Critique.Port > 65535) {
 		errs = append(errs, ValidationError{
 			Field:   "critique.port",
@@ -105,12 +159,40 @@ func Validate(cfg *Config) error {
 			Hint:    "Live reload proxy port must be between 1 and 65535 (default: 7331).",
 		})
 	}
+
+	// Inter-service port collision checks
 	if cfg.Critique.Port != 0 && cfg.Critique.Port == cfg.Critique.ProxyPort {
 		errs = append(errs, ValidationError{
 			Field:   "critique.proxy_port",
 			Value:   fmt.Sprintf("%d", cfg.Critique.ProxyPort),
 			Message: "critique.proxy_port conflicts with critique.port",
 			Hint:    "The live reload proxy and upstream HTTP server must listen on different ports (e.g. 7331 and 8080).",
+		})
+	}
+	if cfg.Server.Port != 0 && cfg.Server.Port == cfg.Critique.Port {
+		errs = append(errs, ValidationError{
+			Field:   "critique.port",
+			Value:   fmt.Sprintf("%d", cfg.Critique.Port),
+			Message: "critique.port conflicts with server.port",
+			Hint:    "CitC gRPC server and Critique web UI must use different ports (e.g. 50051 and 8080).",
+		})
+	}
+	if cfg.Server.Port != 0 && cfg.Server.Port == cfg.Critique.ProxyPort {
+		errs = append(errs, ValidationError{
+			Field:   "critique.proxy_port",
+			Value:   fmt.Sprintf("%d", cfg.Critique.ProxyPort),
+			Message: "critique.proxy_port conflicts with server.port",
+			Hint:    "CitC gRPC server and Critique live-reload proxy must use different ports (e.g. 50051 and 7331).",
+		})
+	}
+
+	// Critique default reviewer validation
+	if cfg.Critique.DefaultReviewer != "" && strings.ContainsAny(cfg.Critique.DefaultReviewer, " \t\r\n") {
+		errs = append(errs, ValidationError{
+			Field:   "critique.default_reviewer",
+			Value:   cfg.Critique.DefaultReviewer,
+			Message: "default_reviewer cannot contain whitespace",
+			Hint:    "Specify a valid username like 'matatan' or '$USER'.",
 		})
 	}
 
