@@ -22,6 +22,11 @@
           arion
           docker-compose
           sops
+          go
+          templ
+          tailwindcss
+          air
+          gnumake
         ];
       in {
         devShells.default = pkgs.mkShell {

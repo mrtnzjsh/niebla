@@ -42,6 +42,14 @@
         '';
       };
 
+      critiquePkg = pkgs.buildGoModule {
+        pname = "critique";
+        version = "0.1.0";
+        src = ./.;
+        subPackages = [ "cmd/critique" ];
+        vendorHash = null;
+      };
+
       goEnv = pkgs.mkShell {
         buildInputs = with pkgs; [
           go
@@ -49,6 +57,9 @@
           protoc-gen-go
           protoc-gen-go-grpc
           fuse3
+          templ
+          tailwindcss
+          air
         ];
 
         shellHook = ''
@@ -63,8 +74,10 @@
           echo "Available commands:"
           echo "  go build ./cmd/citc-server - Build the CitC gRPC repository server"
           echo "  go build ./cmd/citcfs     - Build the citcfs FUSE daemon"
+          echo "  go build ./cmd/critique   - Build the Critique code review web server"
           echo "  go test ./...             - Run tests"
           echo "  go run ./cmd/citcfs       - Run the citcfs FUSE daemon"
+          echo "  make dev                  - Run Critique web server with live reload"
         '';
       };
     in {
@@ -73,6 +86,7 @@
         fuse = fusePkg;
         cli = cliPkg;
         citc = cliPkg;
+        critique = critiquePkg;
         default = cliPkg;
       };
 
