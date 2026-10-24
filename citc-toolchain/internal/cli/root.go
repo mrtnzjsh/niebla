@@ -33,6 +33,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewDiffCmd(flags))
 	rootCmd.AddCommand(NewShelveCmd(flags))
 	rootCmd.AddCommand(NewSubmitCmd(flags))
+	rootCmd.AddCommand(NewSkillsCmd(flags))
 
 	return rootCmd
 }
