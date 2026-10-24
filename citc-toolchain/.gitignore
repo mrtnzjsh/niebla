@@ -8,6 +8,8 @@
 *.dll
 *.so
 *.dylib
+/citc-server
+/citcfs
 
 # Test binary, built with `go test -c`
 *.test

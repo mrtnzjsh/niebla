@@ -22,6 +22,14 @@
         vendorHash = null;
       };
 
+      serverPkg = pkgs.buildGoModule {
+        pname = "citc-server";
+        version = "0.1.0";
+        src = ./.;
+        subPackages = [ "cmd/citc-server" ];
+        vendorHash = null;
+      };
+
       goEnv = pkgs.mkShell {
         buildInputs = with pkgs; [
           go
@@ -40,6 +48,7 @@
           echo "Go version: $(go version)"
           echo ""
           echo "Available commands:"
+          echo "  go build ./cmd/citc-server - Build the CitC gRPC repository server"
           echo "  go build ./cmd/citcfs     - Build the citcfs FUSE daemon"
           echo "  go test ./...             - Run tests"
           echo "  go run ./cmd/citcfs       - Run the citcfs FUSE daemon"
@@ -47,9 +56,9 @@
       };
     in {
       packages = {
+        server = serverPkg;
         fuse = fusePkg;
-        default = fusePkg;
-        # server and cli targets will be added once cmd/citc-server and cmd/citc are populated
+        default = serverPkg;
       };
 
       devShells.default = goEnv;
