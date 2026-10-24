@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/bazil/fuse"
-	"github.com/bazil/fuse/fs"
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
 	"google.golang.org/grpc"
 	pb "citc-toolchain/proto/v1"
 )

@@ -2,8 +2,8 @@ package test
 
 import (
 	"testing"
-	"github.com/bazil/fuse"
-	"github.com/bazil/fuse/fs"
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
 )
 
 func TestWriteOperation(t *testing.T) {

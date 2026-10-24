@@ -1,8 +1,8 @@
 package fs
 
 import (
-	"github.com/bazil/fuse"
-	"github.com/bazil/fuse/fs"
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
 )
 
 type file struct {

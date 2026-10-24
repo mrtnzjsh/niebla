@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bazil/fuse"
-	"github.com/bazil/fuse/fs"
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 	pb "citc-toolchain/proto/v1"

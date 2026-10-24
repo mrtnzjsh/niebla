@@ -36,6 +36,7 @@
           protobuf
           protoc-gen-go
           protoc-gen-go-grpc
+          fuse3
         ];
 
         shellHook = ''
