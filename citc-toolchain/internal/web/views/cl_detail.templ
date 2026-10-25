@@ -63,6 +63,9 @@ templ CLDetail(data CLDetailData) {
 					@CLActionsBar(data)
 				</div>
 
+				<!-- Centered Actions Row: Reply and Submit on their own row beneath the top bar -->
+				@CenterActions(data)
+
 				<!-- Patchset Selector & Unresolved Summary Bar -->
 				<div class="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
 					<!-- Patchset Selector Dropdown -->
@@ -229,13 +232,26 @@ templ CLActionsBar(data CLDetailData) {
 }
 
 templ ApprovalsControl(data CLDetailData) {
-	<div id="approvals-control" class="flex items-center space-x-2">
+	if data.CL.Status != "submitted" {
+		<div id="approvals-control" class="flex items-center space-x-2">
+			@ApprovalButtons(data.CL.CLID, data.Approvals)
+		</div>
+	}
+}
+
+templ CenterActions(data CLDetailData) {
+	<div id="cl-center-actions" class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-center space-x-4">
 		<div id="cl-reply-btn-container">
 			@ReplyButton(data.CL.CLID, data.DraftCommentsCount)
 		</div>
-		if data.CL.Status != "submitted" {
-			@ApprovalButtons(data.CL.CLID, data.Approvals)
-		}
+		<div id="cl-submit-btn-container">
+			@SubmitButton(data)
+		</div>
+	</div>
+}
+
+templ SubmitButtonOOB(data CLDetailData) {
+	<div id="cl-submit-btn-container" hx-swap-oob="true">
 		@SubmitButton(data)
 	</div>
 }

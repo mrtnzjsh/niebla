@@ -525,10 +525,13 @@ func (h *CLHandler) renderActionsBar(w http.ResponseWriter, r *http.Request, clI
 	target := r.Header.Get("HX-Target")
 	if target == "reviewers-control" {
 		_ = views.ReviewersControl(data).Render(r.Context(), w)
+		_ = views.SubmitButtonOOB(data).Render(r.Context(), w)
 	} else if target == "approvals-control" {
 		_ = views.ApprovalsControl(data).Render(r.Context(), w)
+		_ = views.SubmitButtonOOB(data).Render(r.Context(), w)
 	} else {
 		_ = views.CLActionsBar(data).Render(r.Context(), w)
+		_ = views.SubmitButtonOOB(data).Render(r.Context(), w)
 	}
 }
 
