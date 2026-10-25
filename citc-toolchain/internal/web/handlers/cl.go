@@ -466,9 +466,18 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if reqApprovals > 0 && approvalsCount < reqApprovals {
-		http.Error(w, fmt.Sprintf("CL %d requires %d approval(s) before submission (found %d)", clID, reqApprovals, approvalsCount), http.StatusBadRequest)
+	justification := strings.TrimSpace(r.FormValue("justification"))
+	if len(justification) > 400 {
+		http.Error(w, "override justification exceeds 400 characters", http.StatusBadRequest)
 		return
+	}
+
+	if reqApprovals > 0 && approvalsCount < reqApprovals {
+		if justification == "" {
+			http.Error(w, fmt.Sprintf("CL %d requires %d approval(s) before submission (found %d)", clID, reqApprovals, approvalsCount), http.StatusBadRequest)
+			return
+		}
+		log.Printf("CL %d: approval requirement overridden by %q with justification: %q", clID, h.resolveReviewer(r), justification)
 	}
 
 	if h.db != nil {
@@ -488,9 +497,10 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		"critique",
 		strconv.FormatInt(clID, 10),
 		events.CLSubmittedPayload{
-			CLID:   strconv.FormatInt(clID, 10),
-			Author: h.resolveReviewer(r),
-			URL:    h.clURL(r, clID),
+			CLID:          strconv.FormatInt(clID, 10),
+			Author:        h.resolveReviewer(r),
+			URL:           h.clURL(r, clID),
+			Justification: justification,
 		},
 	))
 

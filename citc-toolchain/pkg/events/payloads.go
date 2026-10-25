@@ -38,7 +38,8 @@ type ApprovalUpdatedPayload struct {
 
 // CLSubmittedPayload contains data for citc.cl.submitted events.
 type CLSubmittedPayload struct {
-	CLID   string `json:"cl_id"`
-	Author string `json:"author"`
-	URL    string `json:"url,omitempty"`
+	CLID          string `json:"cl_id"`
+	Author        string `json:"author"`
+	URL           string `json:"url,omitempty"`
+	Justification string `json:"justification,omitempty"`
 }

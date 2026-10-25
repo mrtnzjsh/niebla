@@ -646,6 +646,98 @@ func TestSubmitCLEndpointGuards(t *testing.T) {
 	}
 }
 
+func TestSubmitCLApprovalOverrideAndCheckmarks(t *testing.T) {
+	ResetDemoStoresForTest()
+	handler := NewCLHandler(nil, nil)
+
+	reqApp := 2
+	allowUnres := true
+	cfg := &config.Config{
+		Critique: config.CritiqueConfig{
+			RequiredApprovals:                 &reqApp,
+			AllowSubmitWithUnresolvedComments: &allowUnres,
+		},
+	}
+	handler.SetDependencies(cfg, nil)
+
+	// 1. Submit with 0 approvals and no justification -> fails
+	reqNoJust := httptest.NewRequest("POST", "/cl/1/submit", nil)
+	reqNoJust.SetPathValue("id", "1")
+	recNoJust := httptest.NewRecorder()
+	handler.HandleSubmitCL(recNoJust, reqNoJust)
+	if recNoJust.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d", recNoJust.Code)
+	}
+
+	// 2. Submit with justification > 400 chars -> fails
+	longJust := strings.Repeat("a", 401)
+	formDataLong := url.Values{"justification": {longJust}}
+	reqLong := httptest.NewRequest("POST", "/cl/1/submit", strings.NewReader(formDataLong.Encode()))
+	reqLong.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqLong.SetPathValue("id", "1")
+	recLong := httptest.NewRecorder()
+	handler.HandleSubmitCL(recLong, reqLong)
+	if recLong.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for >400 chars justification, got %d", recLong.Code)
+	}
+	if !strings.Contains(recLong.Body.String(), "exceeds 400 characters") {
+		t.Errorf("expected 400 char error message, got %s", recLong.Body.String())
+	}
+
+	// 3. Submit with valid justification -> succeeds with 303
+	validJust := "Emergency critical fix approved by team lead out-of-band"
+	formDataValid := url.Values{"justification": {validJust}}
+	reqValid := httptest.NewRequest("POST", "/cl/1/submit", strings.NewReader(formDataValid.Encode()))
+	reqValid.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqValid.SetPathValue("id", "1")
+	recValid := httptest.NewRecorder()
+	handler.HandleSubmitCL(recValid, reqValid)
+	if recValid.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 See Other on override submit, got %d: %s", recValid.Code, recValid.Body.String())
+	}
+
+	// 4. Test View markup rendering (Checkmarks & Modal)
+	ResetDemoStoresForTest()
+	reqView := httptest.NewRequest("GET", "/cl/1", nil)
+	recView := httptest.NewRecorder()
+	handler.HandleCLView(recView, reqView)
+
+	if recView.Code != http.StatusOK {
+		t.Fatalf("HandleCLView returned %d", recView.Code)
+	}
+	html := recView.Body.String()
+
+	// Verify modal title
+	if !strings.Contains(html, "Override Approvals and Submit") {
+		t.Errorf("expected 'Override Approvals and Submit' modal title in HTML")
+	}
+
+	// Verify textarea placeholder
+	if !strings.Contains(html, `placeholder="Enter approval override justification..."`) {
+		t.Errorf("expected placeholder 'Enter approval override justification...' in HTML")
+	}
+
+	// Verify character counter
+	if !strings.Contains(html, `0 / 400`) {
+		t.Errorf("expected '0 / 400' character counter in HTML")
+	}
+
+	// Verify modal submit button
+	if !strings.Contains(html, `id="override-submit-btn"`) || !strings.Contains(html, `disabled`) {
+		t.Errorf("expected disabled override-submit-btn in HTML")
+	}
+
+	// Verify Submit button checkmarks
+	if !strings.Contains(html, `stroke="#000000"`) || !strings.Contains(html, `text-black`) {
+		t.Errorf("expected black checkmarks for missing approvals in HTML")
+	}
+
+	// Verify button click triggers override-approvals-modal
+	if !strings.Contains(html, `document.getElementById('override-approvals-modal')`) || !strings.Contains(html, `m.showModal()`) {
+		t.Errorf("expected onclick to open override-approvals-modal in HTML")
+	}
+}
+
 func TestCLViewNoDiffByDefaultAndAccordionMarkup(t *testing.T) {
 	ResetDemoStoresForTest()
 	handler := NewCLHandler(nil, nil)

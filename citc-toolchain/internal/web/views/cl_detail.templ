@@ -246,6 +246,7 @@ templ CLDetail(data CLDetailData) {
 
 			@ReplyModal(data.CL.CLID, data.ActiveReviewer, data.DraftCommentsCount, data.DraftComments)
 			@UnresolvedCommentsModal(data)
+			@OverrideApprovalsModal(data)
 			<script>
 				function toggleFileAccordion(clID, safeID, filePath, currentPS, basePS) {
 					const row = document.getElementById('accordion-row-' + safeID);
@@ -315,6 +316,28 @@ templ SubmitButtonOOB(data CLDetailData) {
 	</div>
 }
 
+templ ApprovalCheckmarks(requiredApprovals int, approvedCount int) {
+	if requiredApprovals > 0 {
+		<span class="inline-flex items-center space-x-0.5">
+			for i := 0; i < requiredApprovals; i++ {
+				if i < approvedCount {
+					<svg class="w-3.5 h-3.5 text-current" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" title="Approval met">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+					</svg>
+				} else {
+					<svg class="w-3.5 h-3.5 text-black" fill="none" stroke="#000000" stroke-width="2.5" viewBox="0 0 24 24" title="Missing approval">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+					</svg>
+				}
+			}
+		</span>
+	} else {
+		<svg class="w-3.5 h-3.5 text-current" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+			<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+		</svg>
+	}
+}
+
 templ SubmitButton(data CLDetailData) {
 	if data.CL.Status == "submitted" {
 		<span class="px-3 py-1.5 bg-slate-800 text-slate-500 border border-slate-700/50 rounded-lg text-xs font-semibold flex items-center space-x-1.5 cursor-not-allowed">
@@ -324,31 +347,35 @@ templ SubmitButton(data CLDetailData) {
 	} else if data.UnresolvedComments > 0 && !data.AllowSubmitWithUnresolved {
 		<button
 			type="button"
+			id="submit-cl-btn"
 			onclick="const m = document.getElementById('unresolved-comments-modal'); if (m) { m.showModal(); }"
 			class="px-3 py-1.5 bg-slate-800 hover:bg-amber-950/60 text-amber-300 border border-amber-700/60 rounded-lg text-xs font-semibold shadow-md transition flex items-center space-x-1.5 cursor-pointer"
 			title="Cannot submit: unresolved comments exist"
 		>
-			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+			@ApprovalCheckmarks(data.RequiredApprovals, data.ApprovedCount)
 			<span>Submit CL</span>
 		</button>
 	} else if data.RequiredApprovals > 0 && data.ApprovedCount < data.RequiredApprovals {
 		<button
 			type="button"
-			disabled
-			class="px-3 py-1.5 bg-slate-800 text-slate-500 border border-slate-700/60 rounded-lg text-xs font-semibold flex items-center space-x-1.5 cursor-not-allowed"
-			title={ fmt.Sprintf("Requires %d approval(s) before submission (current: %d)", data.RequiredApprovals, data.ApprovedCount) }
+			id="submit-cl-btn"
+			onclick="const m = document.getElementById('override-approvals-modal'); if (m) { m.showModal(); }"
+			class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold shadow-md shadow-sky-600/30 transition flex items-center space-x-1.5 cursor-pointer"
+			title={ fmt.Sprintf("Requires %d approval(s) (current: %d). Click to override approvals and submit.", data.RequiredApprovals, data.ApprovedCount) }
 		>
-			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+			@ApprovalCheckmarks(data.RequiredApprovals, data.ApprovedCount)
 			<span>Submit CL</span>
 		</button>
 	} else {
 		<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/cl/%d/submit", data.CL.CLID)) } class="inline">
 			<button
 				type="submit"
+				id="submit-cl-btn"
 				onclick="return confirm('Are you sure you want to submit this CL to trunk?');"
 				class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold shadow-md shadow-sky-600/30 transition flex items-center space-x-1.5 cursor-pointer"
+				title="Submit this CL to trunk"
 			>
-				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+				@ApprovalCheckmarks(data.RequiredApprovals, data.ApprovedCount)
 				<span>Submit CL</span>
 			</button>
 		</form>
@@ -520,6 +547,117 @@ templ UnresolvedCommentsModal(data CLDetailData) {
 			</div>
 		</div>
 	</dialog>
+}
+
+templ OverrideApprovalsModal(data CLDetailData) {
+	<dialog
+		id="override-approvals-modal"
+		class="backdrop:bg-black/75 backdrop:backdrop-blur-sm bg-transparent p-0 m-auto rounded-2xl shadow-2xl border border-slate-700 max-w-lg w-full text-slate-200 overflow-hidden"
+	>
+		<div class="bg-[#0f172a] rounded-2xl border border-slate-700/60 overflow-hidden flex flex-col">
+			<!-- Header -->
+			<div class="px-6 py-4 bg-[#0c1322] border-b border-slate-800 flex items-center justify-between">
+				<div class="flex items-center space-x-3">
+					<div class="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-bold">
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+						</svg>
+					</div>
+					<div>
+						<h3 class="text-sm font-bold text-white font-mono">Override Approvals and Submit</h3>
+						<p class="text-xs text-slate-400">
+							{ fmt.Sprintf("Requires %d approval(s), currently has %d.", data.RequiredApprovals, data.ApprovedCount) }
+						</p>
+					</div>
+				</div>
+				<button
+					type="button"
+					onclick="document.getElementById('override-approvals-modal').close()"
+					class="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800 transition text-sm leading-none"
+					title="Close dialog"
+				>
+					✕
+				</button>
+			</div>
+
+			<!-- Body with form -->
+			<form
+				method="POST"
+				action={ templ.SafeURL(fmt.Sprintf("/cl/%d/submit", data.CL.CLID)) }
+				class="p-6 flex flex-col space-y-4 text-xs"
+			>
+				<p class="text-slate-300 leading-relaxed">
+					This changelist has fewer approvals than required by repository policy. You may override approval requirements by providing a justification below.
+				</p>
+
+				<div class="flex flex-col space-y-1.5">
+					<textarea
+						id="override-justification-input"
+						name="justification"
+						rows="4"
+						maxlength="400"
+						placeholder="Enter approval override justification..."
+						oninput="updateOverrideSubmitState()"
+						onkeyup="updateOverrideSubmitState()"
+						class="w-full bg-[#0a0f1d] border border-slate-700 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/80 focus:ring-1 focus:ring-amber-500/80 resize-none font-sans"
+					></textarea>
+					<div class="flex justify-end">
+						<span id="override-char-counter" class="text-[11px] text-slate-400 font-mono">0 / 400</span>
+					</div>
+				</div>
+
+				<div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+					<button
+						type="button"
+						onclick="document.getElementById('override-approvals-modal').close()"
+						class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						id="override-submit-btn"
+						disabled
+						class="px-4 py-1.5 bg-slate-800 text-slate-500 border border-slate-700/60 rounded-lg text-xs font-semibold cursor-not-allowed transition"
+					>
+						Submit
+					</button>
+				</div>
+			</form>
+		</div>
+	</dialog>
+	<script>
+		function updateOverrideSubmitState() {
+			const input = document.getElementById('override-justification-input');
+			const counter = document.getElementById('override-char-counter');
+			const btn = document.getElementById('override-submit-btn');
+			if (!input || !counter || !btn) return;
+
+			const len = input.value.length;
+			counter.textContent = len + ' / 400';
+
+			if (input.value.trim().length > 0 && len <= 400) {
+				btn.disabled = false;
+				btn.className = 'px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold shadow-md shadow-sky-600/30 cursor-pointer transition';
+			} else {
+				btn.disabled = true;
+				btn.className = 'px-4 py-1.5 bg-slate-800 text-slate-500 border border-slate-700/60 rounded-lg text-xs font-semibold cursor-not-allowed transition';
+			}
+		}
+
+		(function() {
+			const modal = document.getElementById('override-approvals-modal');
+			if (modal) {
+				modal.addEventListener('close', function() {
+					const input = document.getElementById('override-justification-input');
+					if (input) {
+						input.value = '';
+						updateOverrideSubmitState();
+					}
+				});
+			}
+		})();
+	</script>
 }
 
 templ StatusBadge(status string, isApproved bool) {

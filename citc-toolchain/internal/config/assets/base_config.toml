@@ -45,6 +45,12 @@ proxy_port = 7331
 # Dynamically resolves to $USER or current OS user if set to "$USER" or empty
 default_reviewer = "$USER"
 
+# Number of reviewer approvals required before submission (default: 0)
+required_approvals = 0
+
+# Whether submission is permitted with unresolved comment threads (default: false)
+allow_submit_with_unresolved_comments = false
+
 [critique.auth]
 # Authentication and user identity resolution mode
 # Supported: "local" (default: $USER), "headers" (e.g. reverse proxy/IAP), "tailscale"

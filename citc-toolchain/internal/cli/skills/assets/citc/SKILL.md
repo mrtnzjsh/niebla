@@ -169,9 +169,10 @@ Critique includes a dedicated **Reviewers Bar** in the header overview:
    - When `required_approvals == 0`: Displays `Approvals: X (optional)`.
 2. **Submit CL Button in Critique:**
    - Located in the header action bar alongside `Reply` and `LGTM / Approve`.
-   - **Active (Sky Blue):** Ready to submit (`cl.Status == "shelved"` and requirements met). Submitting commits the CL to trunk and updates the status badge to `Submitted`.
-   - **Blocked by Unresolved Comments:** If `allow_submit_with_unresolved_comments = false` and unresolved comments exist, the submit button is styled in amber. Clicking it opens the `<dialog id="unresolved-comments-modal">`, explaining the policy and listing all affected files with quick navigation links.
-   - **Pending Approvals:** If `approvedCount < requiredApprovals`, the submit button is disabled with a descriptive tooltip e.g. `"Requires 2 approval(s) before submission"`.
+   - **Approval Checkmarks:** Displays checkmarks matching `required_approvals`. Approved checks inherit the button's font color (`currentColor`), while missing checks are rendered in black.
+   - **Ready to Submit:** When all requirements are met, clicking submits the CL to trunk.
+   - **Pending Approvals Override:** If `approvedCount < requiredApprovals`, clicking the button opens the `<dialog id="override-approvals-modal">` titled **Override Approvals and Submit**. Users can enter an approval override justification (up to 400 characters with a live character counter); the bottom right Submit button unlocks once any text is entered.
+   - **Blocked by Unresolved Comments:** If `allow_submit_with_unresolved_comments = false` and unresolved comments exist, the submit button is styled in amber and clicking it opens the `<dialog id="unresolved-comments-modal">`.
    - **Already Submitted:** Displays an immutable `CL Submitted` status pill.
 
 ### File Review Tracking & Status
