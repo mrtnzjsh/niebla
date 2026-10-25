@@ -286,5 +286,67 @@ func TestConfigDefaultsAndGetters(t *testing.T) {
 	}
 }
 
+func TestValidateEventsConfig(t *testing.T) {
+	// Disabled by default -> always passes
+	cfg := DefaultConfig()
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected DefaultConfig with disabled events to be valid, got: %v", err)
+	}
+
+	// Enabled with invalid sink
+	cfg.Events.Enabled = true
+	cfg.Events.Sink = "redis"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "unsupported event sink driver") {
+		t.Errorf("expected error for unsupported sink, got: %v", err)
+	}
+
+	// Enabled webhook with empty endpoint
+	cfg.Events.Sink = "webhook"
+	cfg.Events.Webhook.Endpoint = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "webhook endpoint cannot be empty") {
+		t.Errorf("expected error for empty endpoint, got: %v", err)
+	}
+
+	// Enabled webhook with invalid protocol
+	cfg.Events.Webhook.Endpoint = "ftp://example.com/events"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "must use http:// or https:// protocol") {
+		t.Errorf("expected error for invalid protocol, got: %v", err)
+	}
+
+	// Enabled webhook with out of range timeout
+	cfg.Events.Webhook.Endpoint = "https://events.example.com/webhook"
+	cfg.Events.Webhook.TimeoutMS = 50000
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "timeout_ms must be between") {
+		t.Errorf("expected error for timeout > 30000, got: %v", err)
+	}
+
+	// Enabled webhook with out of range retries
+	cfg.Events.Webhook.TimeoutMS = 3000
+	cfg.Events.Webhook.MaxRetries = 20
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "max_retries must be between") {
+		t.Errorf("expected error for retries > 10, got: %v", err)
+	}
+
+	// Valid webhook configuration
+	cfg.Events.Webhook.MaxRetries = 3
+	if err := Validate(cfg); err != nil {
+		t.Errorf("expected valid webhook config to pass validation, got: %v", err)
+	}
+
+	// Exec sink with empty command
+	cfg.Events.Sink = "exec"
+	cfg.Events.Exec.Command = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "command cannot be empty") {
+		t.Errorf("expected error for empty exec command, got: %v", err)
+	}
+
+	// Valid exec sink
+	cfg.Events.Exec.Command = "/usr/local/bin/router.sh"
+	if err := Validate(cfg); err != nil {
+		t.Errorf("expected valid exec config to pass validation, got: %v", err)
+	}
+}
+
+
 
 

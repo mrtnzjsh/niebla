@@ -17,6 +17,7 @@ import (
 
 	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
+	internalevents "citc-toolchain/internal/events"
 	"citc-toolchain/internal/groups"
 	"citc-toolchain/internal/web/auth"
 	"citc-toolchain/internal/web/diff"
@@ -123,9 +124,22 @@ func main() {
 		log.Printf("Connected to PostgreSQL and verified Critique schema migrations.")
 	}
 
-	// 3. Initialize HTTP handlers
+	// 3. Initialize HTTP handlers and event publisher
+	eventEmitter, err := internalevents.NewEmitterFromConfig(&cfg.Events)
+	if err != nil {
+		log.Fatalf("Failed to initialize event publisher: %v", err)
+	}
+	defer eventEmitter.Close()
+
+	if cfg.Events.Enabled {
+		log.Printf("Event Publishing    : enabled (sink: %s)", cfg.Events.Sink)
+	} else {
+		log.Printf("Event Publishing    : disabled (local use)")
+	}
+
 	authResolver := auth.NewUserIdentityResolver(cfg.Critique.Auth)
 	clHandler := handlers.NewCLHandler(database, casStorage, authResolver)
+	clHandler.SetEmitter(eventEmitter)
 	groupResolver := groups.NewResolver(cfg.Critique.Groups)
 	clHandler.SetDependencies(cfg, groupResolver)
 	commentsHandler := handlers.NewCommentsHandler(database, authResolver)
@@ -222,5 +236,6 @@ func main() {
 		log.Println("Closing database connections...")
 		database.Close()
 	}
+	_ = eventEmitter.Close()
 	log.Println("Critique web server stopped gracefully.")
 }

@@ -20,6 +20,7 @@ import (
 	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/views"
 	"citc-toolchain/pkg/cas"
+	"citc-toolchain/pkg/events"
 	"citc-toolchain/pkg/tree"
 )
 
@@ -65,12 +66,22 @@ type CLHandler struct {
 	authResolver auth.UserIdentityResolver
 	config       *config.Config
 	groups       groups.Resolver
+	emitter      events.Emitter
 }
 
 // SetDependencies injects the toolchain config and enterprise user group resolver.
 func (h *CLHandler) SetDependencies(cfg *config.Config, gr groups.Resolver) {
 	h.config = cfg
 	h.groups = gr
+}
+
+// SetEmitter injects an event publisher into the CLHandler.
+func (h *CLHandler) SetEmitter(e events.Emitter) {
+	if e != nil {
+		h.emitter = e
+	} else {
+		h.emitter = events.NewNoopEmitter()
+	}
 }
 
 // NewCLHandler initializes a new CLHandler with optional custom auth resolver.
@@ -85,7 +96,22 @@ func NewCLHandler(database *db.DB, casStorage *cas.Storage, resolvers ...auth.Us
 		db:           database,
 		cas:          casStorage,
 		authResolver: resolver,
+		emitter:      events.NewNoopEmitter(),
 	}
+}
+
+func (h *CLHandler) clURL(r *http.Request, clID int64) string {
+	if r != nil {
+		scheme := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		host := r.Host
+		if host != "" {
+			return fmt.Sprintf("%s://%s/cl/%d", scheme, host, clID)
+		}
+	}
+	return fmt.Sprintf("/cl/%d", clID)
 }
 
 func (h *CLHandler) resolveReviewer(r *http.Request) string {
@@ -238,6 +264,18 @@ func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
 		demoApprovalsMu.Unlock()
 	}
 
+	h.emitter.Emit(r.Context(), events.New(
+		events.TypeApprovalUpdated,
+		"critique",
+		strconv.FormatInt(clID, 10),
+		events.ApprovalUpdatedPayload{
+			CLID:     strconv.FormatInt(clID, 10),
+			Reviewer: reviewer,
+			Status:   verdict,
+			URL:      h.clURL(r, clID),
+		},
+	))
+
 	h.renderActionsBar(w, r, clID)
 }
 
@@ -299,6 +337,18 @@ func (h *CLHandler) HandleAddReviewers(w http.ResponseWriter, r *http.Request) {
 			demoReviewersStore[clID] = current
 			demoReviewersMu.Unlock()
 		}
+
+		h.emitter.Emit(r.Context(), events.New(
+			events.TypeReviewersAssigned,
+			"critique",
+			strconv.FormatInt(clID, 10),
+			events.ReviewersAssignedPayload{
+				CLID:      strconv.FormatInt(clID, 10),
+				Author:    h.resolveReviewer(r),
+				Reviewers: expanded,
+				URL:       h.clURL(r, clID),
+			},
+		))
 	}
 
 	h.renderActionsBar(w, r, clID)
@@ -432,6 +482,17 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		demoCLStatusStore[clID] = "submitted"
 		demoCLStatusMu.Unlock()
 	}
+
+	h.emitter.Emit(r.Context(), events.New(
+		events.TypeCLSubmitted,
+		"critique",
+		strconv.FormatInt(clID, 10),
+		events.CLSubmittedPayload{
+			CLID:   strconv.FormatInt(clID, 10),
+			Author: h.resolveReviewer(r),
+			URL:    h.clURL(r, clID),
+		},
+	))
 
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", fmt.Sprintf("/cl/%d", clID))
@@ -704,6 +765,32 @@ func (h *CLHandler) HandlePublishReview(w http.ResponseWriter, r *http.Request) 
 			demoApprovalsStore[clID] = list
 			demoApprovalsMu.Unlock()
 		}
+	}
+
+	h.emitter.Emit(r.Context(), events.New(
+		events.TypeCommentsPublished,
+		"critique",
+		strconv.FormatInt(clID, 10),
+		events.CommentsPublishedPayload{
+			CLID:         strconv.FormatInt(clID, 10),
+			Author:       author,
+			CommentCount: 1,
+			URL:          h.clURL(r, clID),
+		},
+	))
+
+	if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
+		h.emitter.Emit(r.Context(), events.New(
+			events.TypeApprovalUpdated,
+			"critique",
+			strconv.FormatInt(clID, 10),
+			events.ApprovalUpdatedPayload{
+				CLID:     strconv.FormatInt(clID, 10),
+				Reviewer: author,
+				Status:   verdict,
+				URL:      h.clURL(r, clID),
+			},
+		))
 	}
 
 	http.Redirect(w, r, fmt.Sprintf("/cl/%d", clID), http.StatusSeeOther)

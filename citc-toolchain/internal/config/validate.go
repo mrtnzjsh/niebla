@@ -304,6 +304,81 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// 8. Events and notification subsystem validation
+	if cfg.Events.Enabled {
+		sink := strings.ToLower(strings.TrimSpace(cfg.Events.Sink))
+		validSinks := map[string]bool{
+			"webhook": true,
+			"exec":    true,
+			"log":     true,
+			"noop":    true,
+		}
+		if sink == "" {
+			errs = append(errs, ValidationError{
+				Field:   "events.sink",
+				Value:   cfg.Events.Sink,
+				Message: "sink must be specified when events are enabled",
+				Hint:    "Set 'sink = \"webhook\"', 'sink = \"exec\"', or 'sink = \"log\"'.",
+			})
+		} else if !validSinks[sink] {
+			errs = append(errs, ValidationError{
+				Field:   "events.sink",
+				Value:   cfg.Events.Sink,
+				Message: fmt.Sprintf("unsupported event sink driver %q", cfg.Events.Sink),
+				Hint:    "Supported sink drivers: 'webhook', 'exec', 'log', 'noop'.",
+			})
+		}
+
+		if sink == "webhook" {
+			ep := strings.TrimSpace(cfg.Events.Webhook.Endpoint)
+			if ep == "" {
+				errs = append(errs, ValidationError{
+					Field:   "events.webhook.endpoint",
+					Value:   ep,
+					Message: "webhook endpoint cannot be empty when webhook sink is active",
+					Hint:    "Provide a valid HTTP or HTTPS destination URL (e.g. 'https://events.internal.corp/webhook').",
+				})
+			} else if !strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://") {
+				errs = append(errs, ValidationError{
+					Field:   "events.webhook.endpoint",
+					Value:   ep,
+					Message: "webhook endpoint must use http:// or https:// protocol",
+					Hint:    "Ensure endpoint starts with 'http://' or 'https://'.",
+				})
+			}
+
+			if cfg.Events.Webhook.TimeoutMS < 0 || cfg.Events.Webhook.TimeoutMS > 30000 {
+				errs = append(errs, ValidationError{
+					Field:   "events.webhook.timeout_ms",
+					Value:   fmt.Sprintf("%d", cfg.Events.Webhook.TimeoutMS),
+					Message: "timeout_ms must be between 0 and 30000 milliseconds",
+					Hint:    "Set a reasonable timeout such as 3000ms (3 seconds).",
+				})
+			}
+
+			if cfg.Events.Webhook.MaxRetries < 0 || cfg.Events.Webhook.MaxRetries > 10 {
+				errs = append(errs, ValidationError{
+					Field:   "events.webhook.max_retries",
+					Value:   fmt.Sprintf("%d", cfg.Events.Webhook.MaxRetries),
+					Message: "max_retries must be between 0 and 10",
+					Hint:    "Set retries to 3 or 0 to disable retries.",
+				})
+			}
+		}
+
+		if sink == "exec" {
+			cmd := strings.TrimSpace(cfg.Events.Exec.Command)
+			if cmd == "" {
+				errs = append(errs, ValidationError{
+					Field:   "events.exec.command",
+					Value:   cmd,
+					Message: "command cannot be empty when exec sink is active",
+					Hint:    "Provide the path to an executable script or binary (e.g. '/usr/local/bin/router.sh').",
+				})
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return errs
 	}

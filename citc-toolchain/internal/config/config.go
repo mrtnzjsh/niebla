@@ -9,6 +9,7 @@ type Config struct {
 	Server   ServerConfig   `toml:"server"`
 	FS       FSConfig       `toml:"fs"`
 	Critique CritiqueConfig `toml:"critique"`
+	Events   EventsConfig   `toml:"events"`
 }
 
 // CoreConfig holds settings shared across toolchain components.
@@ -50,6 +51,30 @@ type CritiqueGroupConfig struct {
 type CritiqueGroupAPI struct {
 	URL       string `toml:"url,omitempty"`
 	TokenEnv  string `toml:"token_env,omitempty"`
+	TimeoutMS int    `toml:"timeout_ms,omitempty"`
+}
+
+// EventsConfig governs event emission across the toolchain.
+type EventsConfig struct {
+	Enabled    bool              `toml:"enabled"`
+	Sink       string            `toml:"sink"`                  // "webhook", "exec", "log", "noop"
+	Filter     []string          `toml:"filter,omitempty"`      // event type globs e.g. "citc.cl.*"
+	BufferSize int               `toml:"buffer_size,omitempty"` // channel capacity (defaults to 256)
+	Webhook    WebhookSinkConfig `toml:"webhook,omitempty"`
+	Exec       ExecSinkConfig    `toml:"exec,omitempty"`
+}
+
+// WebhookSinkConfig specifies parameters for HTTP POST webhook event delivery.
+type WebhookSinkConfig struct {
+	Endpoint       string `toml:"endpoint"`
+	SecretTokenEnv string `toml:"secret_token_env,omitempty"`
+	TimeoutMS      int    `toml:"timeout_ms,omitempty"`
+	MaxRetries     int    `toml:"max_retries,omitempty"`
+}
+
+// ExecSinkConfig specifies parameters for executing an external command with event on stdin.
+type ExecSinkConfig struct {
+	Command   string `toml:"command"`
 	TimeoutMS int    `toml:"timeout_ms,omitempty"`
 }
 
@@ -148,6 +173,17 @@ func DefaultConfig() *Config {
 			Theme: ThemeConfig{
 				Preset:      "catppuccin-mocha",
 				SyntaxStyle: "catppuccin-mocha",
+			},
+		},
+		Events: EventsConfig{
+			Enabled: false,
+			Sink:    "noop",
+			Webhook: WebhookSinkConfig{
+				TimeoutMS:  3000,
+				MaxRetries: 3,
+			},
+			Exec: ExecSinkConfig{
+				TimeoutMS: 5000,
 			},
 		},
 	}

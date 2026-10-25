@@ -87,3 +87,29 @@ syntax_style = "catppuccin-mocha"
 # diff_add_border = "#a6e3a1"                   # Left border on added lines
 # diff_del_bg     = "rgba(243, 139, 168, 0.20)" # Subtle red diff tint
 # diff_del_border = "#f38ba8"                   # Left border on deleted lines
+
+# ------------------------------------------------------------------------------
+# Events & Notification Subsystem
+# ------------------------------------------------------------------------------
+[events]
+# Master toggle for publishing events across the toolchain.
+# Disabled by default for local development.
+enabled = false
+
+# Active driver: "webhook", "exec", "log", or "noop"
+sink = "noop"
+
+# Event type filtering (optional; default: all events)
+# filter = ["citc.cl.*"]
+
+[events.webhook]
+# HTTP POST destination endpoint for published events
+endpoint = "https://events.internal.corp/citc"
+# secret_token_env = "CITC_EVENT_SECRET"
+timeout_ms = 3000
+max_retries = 3
+
+[events.exec]
+# command = "/usr/local/bin/citc-event-router.sh"
+timeout_ms = 5000
+

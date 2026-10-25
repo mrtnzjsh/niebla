@@ -20,6 +20,7 @@ import (
 	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/views"
 	"citc-toolchain/pkg/cas"
+	"citc-toolchain/pkg/events"
 )
 
 func TestRawBlobHandler(t *testing.T) {
@@ -853,6 +854,85 @@ func TestDiffHeaderAndLinesChangedConsistency(t *testing.T) {
 	}
 	if !strings.Contains(diffBody, expectedStat) {
 		t.Errorf("Diff header should contain dynamically computed additions %s", expectedStat)
+	}
+}
+
+func TestCLHandlerEventEmission(t *testing.T) {
+	ResetDemoStoresForTest()
+	rec := events.NewRecordingEmitter()
+
+	handler := NewCLHandler(nil, nil)
+	handler.SetEmitter(rec)
+
+	// 1. Add Reviewers -> emits citc.cl.reviewers_assigned
+	addRevReq := httptest.NewRequest("POST", "/cl/1/reviewers?reviewer=charlie", nil)
+	addRevReq.SetPathValue("id", "1")
+	addRevRec := httptest.NewRecorder()
+	handler.HandleAddReviewers(addRevRec, addRevReq)
+
+	evts := rec.Events()
+	if len(evts) != 1 {
+		t.Fatalf("expected 1 event after adding reviewer, got %d", len(evts))
+	}
+	if evts[0].Type != events.TypeReviewersAssigned {
+		t.Errorf("expected event type %s, got %s", events.TypeReviewersAssigned, evts[0].Type)
+	}
+	if evts[0].Subject != "1" {
+		t.Errorf("expected subject '1', got %s", evts[0].Subject)
+	}
+
+	// 2. Submit Approval -> emits citc.cl.approval_updated
+	rec.Clear()
+	appReq := httptest.NewRequest("POST", "/cl/1/approval?verdict=lgtm&reviewer=charlie", nil)
+	appReq.SetPathValue("id", "1")
+	appRec := httptest.NewRecorder()
+	handler.HandleApproval(appRec, appReq)
+
+	evts = rec.Events()
+	if len(evts) != 1 {
+		t.Fatalf("expected 1 event after approval, got %d", len(evts))
+	}
+	if evts[0].Type != events.TypeApprovalUpdated {
+		t.Errorf("expected event type %s, got %s", events.TypeApprovalUpdated, evts[0].Type)
+	}
+
+	// 3. Publish Review -> emits citc.cl.comments_published (and citc.cl.approval_updated if verdict)
+	rec.Clear()
+	form := url.Values{}
+	form.Set("author", "charlie")
+	form.Set("message", "Looks great to me!")
+	pubReq := httptest.NewRequest("POST", "/cl/1/reply", strings.NewReader(form.Encode()))
+	pubReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	pubReq.SetPathValue("id", "1")
+	pubRec := httptest.NewRecorder()
+	handler.HandlePublishReview(pubRec, pubReq)
+
+	evts = rec.Events()
+	if len(evts) == 0 {
+		t.Fatalf("expected comments published event, got none")
+	}
+	if evts[0].Type != events.TypeCommentsPublished {
+		t.Errorf("expected event type %s, got %s", events.TypeCommentsPublished, evts[0].Type)
+	}
+
+	// 4. Submit CL -> emits citc.cl.submitted
+	rec.Clear()
+	trueVal := true
+	cfg := config.DefaultConfig()
+	cfg.Critique.AllowSubmitWithUnresolvedComments = &trueVal
+	handler.SetDependencies(cfg, nil)
+
+	subReq := httptest.NewRequest("POST", "/cl/1/submit", nil)
+	subReq.SetPathValue("id", "1")
+	subRec := httptest.NewRecorder()
+	handler.HandleSubmitCL(subRec, subReq)
+
+	evts = rec.Events()
+	if len(evts) != 1 {
+		t.Fatalf("expected 1 event after submit, got %d", len(evts))
+	}
+	if evts[0].Type != events.TypeCLSubmitted {
+		t.Errorf("expected event type %s, got %s", events.TypeCLSubmitted, evts[0].Type)
 	}
 }
 
