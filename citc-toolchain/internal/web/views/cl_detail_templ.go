@@ -646,7 +646,7 @@ func CenterActions(data CLDetailData) templ.Component {
 			templ_7745c5c3_Var25 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<div id=\"cl-center-actions\" class=\"bg-[#0b101d] border-b border-slate-800/80 px-6 py-2.5 flex items-center justify-center space-x-4 shadow-sm\"><div id=\"cl-reply-btn-container\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<div id=\"cl-center-actions\" class=\"bg-[#0c1322] border-b border-slate-800 px-6 py-2.5 flex items-center justify-center space-x-4\"><div id=\"cl-reply-btn-container\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
