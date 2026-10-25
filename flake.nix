@@ -27,6 +27,7 @@
           tailwindcss
           air
           gnumake
+          chromium
         ];
       in {
         devShells.default = pkgs.mkShell {

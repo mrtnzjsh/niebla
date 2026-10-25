@@ -8,21 +8,11 @@ import (
 )
 
 templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *diff.FileDiffDetail, commentsByLine map[int][]db.Comment) {
-	<div class="flex flex-col flex-1 bg-[#090d16] overflow-hidden border-t border-slate-800">
-		<!-- File Diff Sticky Header -->
-		<div class="sticky top-12 z-40 bg-[#0c1322] border-b border-slate-800 px-6 py-2.5 flex items-center justify-between shadow-sm">
+	<div class="flex flex-col flex-1 bg-[#090d16] overflow-hidden">
+		<!-- File Diff Header -->
+		<div class="bg-[#0c1322] border-b border-slate-800 px-6 py-2 flex items-center justify-between shadow-sm">
 			<div class="flex items-center space-x-3">
 				<div class="flex items-center space-x-2">
-					switch detail.Type {
-						case "M":
-							<span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">M</span>
-						case "A":
-							<span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">A</span>
-						case "D":
-							<span class="px-2 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">D</span>
-						default:
-							<span class="px-2 py-0.5 rounded text-xs font-bold bg-slate-500/20 text-slate-400 border border-slate-500/30">M</span>
-					}
 					<span class="font-mono text-sm font-semibold text-slate-100 tracking-wide">{ detail.Path }</span>
 				</div>
 				<div class="flex items-center space-x-1.5 text-xs font-mono">

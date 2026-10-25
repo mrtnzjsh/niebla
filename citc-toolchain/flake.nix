@@ -60,6 +60,7 @@
           templ
           tailwindcss
           air
+          chromium
         ];
 
         shellHook = ''

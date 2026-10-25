@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -769,6 +770,61 @@ func TestCLFileDiffStandaloneTab(t *testing.T) {
 	// 3. Other files remain hidden
 	if !strings.Contains(body, `id="accordion-row-cmd-critique-main-go" class="border-b border-slate-800 bg-[#090d16] hidden"`) {
 		t.Errorf("non-targeted file accordions should remain hidden")
+	}
+}
+
+func TestDiffHeaderAndLinesChangedConsistency(t *testing.T) {
+	ResetDemoStoresForTest()
+	handler := NewCLHandler(nil, nil)
+
+	// 1. Fetch CL 1 main page
+	reqCL := httptest.NewRequest("GET", "/cl/1", nil)
+	reqCL.SetPathValue("id", "1")
+	recCL := httptest.NewRecorder()
+	handler.HandleCLView(recCL, reqCL)
+
+	if recCL.Code != http.StatusOK {
+		t.Fatalf("HandleCLView failed: %d", recCL.Code)
+	}
+	clBody := recCL.Body.String()
+
+	// 2. Fetch inline diff-content for engine.go
+	reqDiff := httptest.NewRequest("GET", "/cl/1/diff-content?file=internal/web/diff/engine.go&ps=2&base_ps=0", nil)
+	recDiff := httptest.NewRecorder()
+	handler.HandleCLDiffContent(recDiff, reqDiff)
+
+	if recDiff.Code != http.StatusOK {
+		t.Fatalf("HandleCLDiffContent failed: %d", recDiff.Code)
+	}
+	diffBody := recDiff.Body.String()
+
+	// 3. Status badge should NOT be repeated in diff header
+	// Diff header should contain the file path directly without a status badge next to it
+	if strings.Contains(diffBody, `<!-- File Diff Header -->`) && strings.Contains(diffBody, `<span class="px-2 py-0.5 rounded text-xs font-bold`) {
+		t.Errorf("Diff header should not contain a duplicate status badge")
+	}
+
+	// 4. Sticky top-12 and border-t should not exist on diff header, preventing empty vertical gap
+	if strings.Contains(diffBody, "sticky top-12") {
+		t.Errorf("Diff header should not have sticky top-12 which creates empty gap")
+	}
+	if strings.Contains(diffBody, "border-t border-slate-800") {
+		t.Errorf("DiffView outer container should not have border-t")
+	}
+
+	// 5. Lines changed numbers should match between the file bar and diff header
+	// Compute expected detail from shared helper
+	expectedDetail, err := computeDemoFileDiff("internal/web/diff/engine.go", "M")
+	if err != nil || expectedDetail == nil {
+		t.Fatalf("failed to compute expected demo diff: %v", err)
+	}
+	expectedStat := fmt.Sprintf("+%d", expectedDetail.Additions)
+
+	if !strings.Contains(clBody, expectedStat) {
+		t.Errorf("CL files table bar should contain dynamically computed additions %s", expectedStat)
+	}
+	if !strings.Contains(diffBody, expectedStat) {
+		t.Errorf("Diff header should contain dynamically computed additions %s", expectedStat)
 	}
 }
 

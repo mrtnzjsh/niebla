@@ -991,10 +991,17 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 	}
 
 	files := []diff.FileDiffSummary{
-		{Path: "internal/web/diff/engine.go", Type: "M", Additions: 42, Deletions: 12},
-		{Path: "internal/web/views/diff_view.templ", Type: "A", Additions: 135, Deletions: 0},
-		{Path: "cmd/critique/main.go", Type: "M", Additions: 68, Deletions: 4},
-		{Path: "assets/css/input.css", Type: "M", Additions: 15, Deletions: 3},
+		{Path: "internal/web/diff/engine.go", Type: "M"},
+		{Path: "internal/web/views/diff_view.templ", Type: "A"},
+		{Path: "cmd/critique/main.go", Type: "M"},
+		{Path: "assets/css/input.css", Type: "M"},
+	}
+
+	for i := range files {
+		if d, err := computeDemoFileDiff(files[i].Path, files[i].Type); err == nil && d != nil {
+			files[i].Additions = d.Additions
+			files[i].Deletions = d.Deletions
+		}
 	}
 
 	reviewer := h.resolveReviewer(r)
@@ -1012,69 +1019,16 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 	}
 	demoFileReviewsMu.Unlock()
 
-	baseData := []byte(`package diff
-
-import (
-	"context"
-	"fmt"
-)
-
-// DiffTrees performs diff between two trees.
-func DiffTrees(ctx context.Context, baseHash, modHash []byte) ([]FileDiffSummary, error) {
-	fmt.Println("Basic diff traversal")
-	return nil, nil
-}
-`)
-
-	modData := []byte(`package diff
-
-import (
-	"context"
-	"fmt"
-	"sort"
-	"citc-toolchain/pkg/tree"
-	"github.com/sergi/go-diff/diffmatchpatch"
-)
-
-// DiffTrees performs recursive Merkle tree traversal between base and mod revisions.
-func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modHash []byte) ([]FileDiffSummary, error) {
-	var results []FileDiffSummary
-	fmt.Println("Advanced server-authoritative Merkle diff")
-	// Optimized Myers diff with side-by-side row alignment
-	dmp := diffmatchpatch.New()
-	_ = dmp
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Path < results[j].Path
-	})
-	return results, nil
-}
-`)
-
-	// Read actual file from disk if present
-	if diskData, err := os.ReadFile(targetFile); err == nil && len(diskData) > 0 {
-		modData = diskData
-		lines := strings.Split(string(diskData), "\n")
-		if len(lines) > 20 {
-			baseLines := append(lines[:10], lines[len(lines)-10:]...)
-			baseData = []byte(strings.Join(baseLines, "\n"))
-		}
-	}
-
-	changeType := "M"
-	for _, f := range files {
-		if f.Path == targetFile {
-			changeType = f.Type
-			break
-		}
-	}
-
 	var detail *diff.FileDiffDetail
 	if targetFile != "" {
-		detail, _ = diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
-		if detail != nil {
-			detail.BaseBlobHex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-			detail.ModBlobHex = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4"
+		changeType := "M"
+		for _, f := range files {
+			if f.Path == targetFile {
+				changeType = f.Type
+				break
+			}
 		}
+		detail, _ = computeDemoFileDiff(targetFile, changeType)
 	}
 
 	demoCommentsMu.RLock()
@@ -1326,6 +1280,40 @@ func (h *CLHandler) renderDemoCLDiffContent(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	changeType := "M"
+	if targetFile == "internal/web/views/diff_view.templ" {
+		changeType = "A"
+	}
+
+	detail, err := computeDemoFileDiff(targetFile, changeType)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error computing demo diff for %s: %v", targetFile, err), http.StatusInternalServerError)
+		return
+	}
+
+	reviewer := h.resolveReviewer(r)
+	demoCommentsMu.RLock()
+	commentsByLine := make(map[int][]db.Comment)
+	for key, list := range demoCommentsStore {
+		for _, c := range list {
+			if strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
+				if !c.IsDraft || c.Author == reviewer {
+					anchorLine := c.EndLineNumber
+					if anchorLine <= 0 {
+						anchorLine = c.LineNumber
+					}
+					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+				}
+			}
+		}
+	}
+	demoCommentsMu.RUnlock()
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = views.DiffView(clID, currentPS, basePS, detail, commentsByLine).Render(r.Context(), w)
+}
+
+func computeDemoFileDiff(targetFile string, changeType string) (*diff.FileDiffDetail, error) {
 	baseData := []byte(`package diff
 
 import (
@@ -1372,40 +1360,16 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 		}
 	}
 
-	changeType := "M"
-	if targetFile == "internal/web/views/diff_view.templ" {
+	if targetFile == "internal/web/views/diff_view.templ" || changeType == "A" {
 		changeType = "A"
 		baseData = nil
 	}
 
 	detail, err := diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("error computing demo diff for %s: %v", targetFile, err), http.StatusInternalServerError)
-		return
-	}
-	if detail != nil {
+	if err == nil && detail != nil {
 		detail.BaseBlobHex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 		detail.ModBlobHex = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4"
 	}
-
-	reviewer := h.resolveReviewer(r)
-	demoCommentsMu.RLock()
-	commentsByLine := make(map[int][]db.Comment)
-	for key, list := range demoCommentsStore {
-		for _, c := range list {
-			if strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
-				if !c.IsDraft || c.Author == reviewer {
-					anchorLine := c.EndLineNumber
-					if anchorLine <= 0 {
-						anchorLine = c.LineNumber
-					}
-					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
-				}
-			}
-		}
-	}
-	demoCommentsMu.RUnlock()
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = views.DiffView(clID, currentPS, basePS, detail, commentsByLine).Render(r.Context(), w)
+	return detail, err
 }
+
