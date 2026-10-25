@@ -192,7 +192,7 @@ func Validate(cfg *Config) error {
 			Field:   "critique.default_reviewer",
 			Value:   cfg.Critique.DefaultReviewer,
 			Message: "default_reviewer cannot contain whitespace",
-			Hint:    "Specify a valid username like 'matatan' or '$USER'.",
+			Hint:    "Specify a valid username like 'alice' or '$USER'.",
 		})
 	}
 

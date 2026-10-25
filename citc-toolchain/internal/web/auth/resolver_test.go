@@ -8,22 +8,33 @@ import (
 )
 
 func TestLocalResolver(t *testing.T) {
-	cfg := config.CritiqueAuthConfig{
+	// 1. Dynamic $USER resolution
+	t.Setenv("USER", "test_user")
+	cfgEnv := config.CritiqueAuthConfig{
 		Mode:        "local",
-		DefaultUser: "matatan",
+		DefaultUser: "$USER",
 	}
-	resolver := NewUserIdentityResolver(cfg)
-
-	// 1. Default case
+	resolverEnv := NewUserIdentityResolver(cfgEnv)
 	req := httptest.NewRequest("GET", "/cl/1", nil)
-	user := resolver.ResolveUser(req)
-	if user != "matatan" {
-		t.Errorf("expected 'matatan', got %q", user)
+	user := resolverEnv.ResolveUser(req)
+	if user != "test_user" {
+		t.Errorf("expected 'test_user' from $USER, got %q", user)
 	}
 
-	// 2. Query param override
+	// 2. Custom configured user
+	cfgExplicit := config.CritiqueAuthConfig{
+		Mode:        "local",
+		DefaultUser: "reviewer_charlie",
+	}
+	resolverExplicit := NewUserIdentityResolver(cfgExplicit)
+	userExplicit := resolverExplicit.ResolveUser(req)
+	if userExplicit != "reviewer_charlie" {
+		t.Errorf("expected 'reviewer_charlie', got %q", userExplicit)
+	}
+
+	// 3. Query param override
 	reqWithQuery := httptest.NewRequest("GET", "/cl/1?reviewer=alice", nil)
-	overrideUser := resolver.ResolveUser(reqWithQuery)
+	overrideUser := resolverExplicit.ResolveUser(reqWithQuery)
 	if overrideUser != "alice" {
 		t.Errorf("expected 'alice' from query param, got %q", overrideUser)
 	}
@@ -63,7 +74,7 @@ func TestHeaderResolver(t *testing.T) {
 func TestTailscaleResolver(t *testing.T) {
 	cfg := config.CritiqueAuthConfig{
 		Mode:        "tailscale",
-		DefaultUser: "matatan",
+		DefaultUser: "fallback_user",
 	}
 	resolver := NewUserIdentityResolver(cfg)
 
@@ -78,7 +89,7 @@ func TestTailscaleResolver(t *testing.T) {
 	// 2. Fallback
 	reqEmpty := httptest.NewRequest("GET", "/cl/1", nil)
 	fallback := resolver.ResolveUser(reqEmpty)
-	if fallback != "matatan" {
-		t.Errorf("expected 'matatan', got %q", fallback)
+	if fallback != "fallback_user" {
+		t.Errorf("expected 'fallback_user', got %q", fallback)
 	}
 }

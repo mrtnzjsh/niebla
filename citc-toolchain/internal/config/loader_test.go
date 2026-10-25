@@ -139,7 +139,7 @@ port = "not a number"
 }
 
 func TestEnvironmentVariableExpansion(t *testing.T) {
-	t.Setenv("TEST_REVIEWER", "matatan_dev")
+	t.Setenv("TEST_REVIEWER", "test_reviewer")
 	t.Setenv("TEST_BLOB_PATH", "/tmp/test_blobs")
 
 	tomlData := `
@@ -159,7 +159,7 @@ default_reviewer = "$TEST_REVIEWER"
 	if cfg.Server.BlobPath != "/tmp/test_blobs" {
 		t.Errorf("expected expanded blob_path '/tmp/test_blobs', got %q", cfg.Server.BlobPath)
 	}
-	if cfg.Critique.DefaultReviewer != "matatan_dev" {
-		t.Errorf("expected expanded default_reviewer 'matatan_dev', got %q", cfg.Critique.DefaultReviewer)
+	if cfg.Critique.DefaultReviewer != "test_reviewer" {
+		t.Errorf("expected expanded default_reviewer 'test_reviewer', got %q", cfg.Critique.DefaultReviewer)
 	}
 }

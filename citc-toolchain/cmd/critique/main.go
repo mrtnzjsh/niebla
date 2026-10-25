@@ -17,6 +17,7 @@ import (
 
 	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
+	"citc-toolchain/internal/web/auth"
 	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/handlers"
 	"citc-toolchain/internal/web/views"
@@ -122,7 +123,8 @@ func main() {
 	}
 
 	// 3. Initialize HTTP handlers
-	clHandler := handlers.NewCLHandler(database, casStorage)
+	authResolver := auth.NewUserIdentityResolver(cfg.Critique.Auth)
+	clHandler := handlers.NewCLHandler(database, casStorage, authResolver)
 	commentsHandler := handlers.NewCommentsHandler(database)
 	rawHandler := handlers.NewRawHandler(database, casStorage)
 
@@ -146,6 +148,7 @@ func main() {
 	mux.HandleFunc("GET /cl/{id}", clHandler.HandleCLView)
 	mux.HandleFunc("GET /cl/{id}/file/{path...}", clHandler.HandleCLFileDiff)
 	mux.HandleFunc("POST /cl/{id}/approval", clHandler.HandleApproval)
+	mux.HandleFunc("POST /cl/{id}/file-review", clHandler.HandleFileReview)
 
 	// Inline comments HTMX endpoints
 	mux.HandleFunc("GET /cl/{id}/comment-box", commentsHandler.HandleGetCommentBox)

@@ -50,6 +50,7 @@ type SideBySideRow struct {
 type FileDiffSummary struct {
 	Path               string
 	Type               string // "M", "A", "D"
+	Reviewed           bool   // Review status for active reviewer
 	BaseBlobSHA        []byte
 	ModifiedBlobSHA    []byte
 	Additions          int

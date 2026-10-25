@@ -77,7 +77,7 @@ func TestViewsRendering(t *testing.T) {
 			FilePath:       "main.go",
 			LineNumber:     42,
 			Side:           "modified",
-			Author:         "matatan",
+			Author:         "alice",
 			Body:           "Please consider refactoring this function.",
 			Resolved:       false,
 			CreatedAt:      time.Now(),
@@ -174,6 +174,8 @@ func TestViewsRendering(t *testing.T) {
 		CommentsByLine:     commentsMap,
 		Approvals:          []db.Approval{{CLID: 101, Reviewer: "bob", Verdict: "lgtm"}},
 		UnresolvedComments: 1,
+		ActiveReviewer:     "alice",
+		ReviewedFilesCount: 1,
 	}
 
 	var clDetailBuf bytes.Buffer
@@ -194,6 +196,12 @@ func TestViewsRendering(t *testing.T) {
 	}
 	if !strings.Contains(clDetailHTML, "1 Unresolved Comment") {
 		t.Errorf("expected unresolved comment badge in CLDetail")
+	}
+	if !strings.Contains(clDetailHTML, "1 of 1 reviewed by alice") {
+		t.Errorf("expected review progress in CLDetail, got %s", clDetailHTML)
+	}
+	if !strings.Contains(clDetailHTML, "Review") {
+		t.Errorf("expected Review column header in CLDetail")
 	}
 }
 
@@ -217,7 +225,7 @@ func TestCommentHandlersMultiLine(t *testing.T) {
 	}
 
 	// 2. Test POST /cl/101/comments creating a multi-line comment
-	form := strings.NewReader("cl_id=101&patchset_number=1&file_path=service.go&line_number=10&end_line_number=15&side=modified&author=matatan&body=Please+extract+this+block+into+a+helper+function.")
+	form := strings.NewReader("cl_id=101&patchset_number=1&file_path=service.go&line_number=10&end_line_number=15&side=modified&author=alice&body=Please+extract+this+block+into+a+helper+function.")
 	postReq := httptest.NewRequest("POST", "/cl/101/comments", form)
 	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	postRec := httptest.NewRecorder()
@@ -232,6 +240,62 @@ func TestCommentHandlersMultiLine(t *testing.T) {
 	}
 	if !strings.Contains(postBody, "Please extract this block into a helper function.") {
 		t.Errorf("expected comment body in rendered comment box, got: %s", postBody)
+	}
+}
+
+func TestFileReviewEndpoints(t *testing.T) {
+	handler := NewCLHandler(nil, nil)
+
+	// 1. Visit CL page as alice (auto-selects first file and marks it reviewed for alice)
+	reqAlice := httptest.NewRequest("GET", "/cl/1?reviewer=alice", nil)
+	recAlice := httptest.NewRecorder()
+	handler.HandleCLView(recAlice, reqAlice)
+
+	if recAlice.Code != http.StatusOK {
+		t.Fatalf("HandleCLView as alice returned status %d", recAlice.Code)
+	}
+	bodyAlice := recAlice.Body.String()
+	if !strings.Contains(bodyAlice, "1 of 4 reviewed by alice") {
+		t.Errorf("expected '1 of 4 reviewed by alice', got: %s", bodyAlice)
+	}
+
+	// 2. Visit CL page as bob without viewing alice's file -> should be 0 of 4 reviewed by bob
+	reqBob := httptest.NewRequest("GET", "/cl/1?reviewer=bob&file=cmd/critique/main.go", nil)
+	recBob := httptest.NewRecorder()
+	handler.HandleCLView(recBob, reqBob)
+
+	if recBob.Code != http.StatusOK {
+		t.Fatalf("HandleCLView as bob returned status %d", recBob.Code)
+	}
+	bodyBob := recBob.Body.String()
+	if !strings.Contains(bodyBob, "1 of 4 reviewed by bob") {
+		t.Errorf("expected '1 of 4 reviewed by bob', got: %s", bodyBob)
+	}
+
+	// 3. Mark another file as reviewed for bob via POST /cl/1/file-review
+	postBob := httptest.NewRequest("POST", "/cl/1/file-review?file=assets/css/input.css&reviewed=true&reviewer=bob", nil)
+	recPostBob := httptest.NewRecorder()
+	handler.HandleFileReview(recPostBob, postBob)
+
+	if recPostBob.Code != http.StatusOK {
+		t.Fatalf("HandleFileReview returned status %d", recPostBob.Code)
+	}
+	postBadge := recPostBob.Body.String()
+	if !strings.Contains(postBadge, "reviewed") {
+		t.Errorf("expected reviewed badge in response, got: %s", postBadge)
+	}
+
+	// 4. Toggle file back to not reviewed for bob
+	postUnreview := httptest.NewRequest("POST", "/cl/1/file-review?file=assets/css/input.css&reviewed=false&reviewer=bob", nil)
+	recUnreview := httptest.NewRecorder()
+	handler.HandleFileReview(recUnreview, postUnreview)
+
+	if recUnreview.Code != http.StatusOK {
+		t.Fatalf("HandleFileReview unreview returned status %d", recUnreview.Code)
+	}
+	unreviewBadge := recUnreview.Body.String()
+	if !strings.Contains(unreviewBadge, "not reviewed") {
+		t.Errorf("expected not reviewed badge in response, got: %s", unreviewBadge)
 	}
 }
 

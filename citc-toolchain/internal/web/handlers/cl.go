@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"citc-toolchain/internal/db"
+	"citc-toolchain/internal/web/auth"
 	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/views"
 	"citc-toolchain/pkg/cas"
@@ -21,32 +22,55 @@ import (
 )
 
 var (
-	demoApprovalsMu    sync.RWMutex
-	demoApprovalsStore = make(map[int64][]db.Approval)
+	demoApprovalsMu      sync.RWMutex
+	demoApprovalsStore   = make(map[int64][]db.Approval)
+	demoFileReviewsMu    sync.RWMutex
+	demoFileReviewsStore = make(map[string]bool)
 )
 
 // CLHandler handles changelist reviews, patchset switching, diff views, and reviewer verdicts.
 type CLHandler struct {
-	db  *db.DB
-	cas *cas.Storage
+	db           *db.DB
+	cas          *cas.Storage
+	authResolver auth.UserIdentityResolver
 }
 
-// NewCLHandler initializes a new CLHandler.
-func NewCLHandler(database *db.DB, casStorage *cas.Storage) *CLHandler {
-	return &CLHandler{
-		db:  database,
-		cas: casStorage,
+// NewCLHandler initializes a new CLHandler with optional custom auth resolver.
+func NewCLHandler(database *db.DB, casStorage *cas.Storage, resolvers ...auth.UserIdentityResolver) *CLHandler {
+	var resolver auth.UserIdentityResolver
+	if len(resolvers) > 0 && resolvers[0] != nil {
+		resolver = resolvers[0]
+	} else {
+		resolver = &auth.LocalResolver{DefaultUser: auth.CurrentOSUser()}
 	}
+	return &CLHandler{
+		db:           database,
+		cas:          casStorage,
+		authResolver: resolver,
+	}
+}
+
+func (h *CLHandler) resolveReviewer(r *http.Request) string {
+	if h.authResolver != nil {
+		return h.authResolver.ResolveUser(r)
+	}
+	if r != nil {
+		if q := r.URL.Query().Get("reviewer"); q != "" {
+			return strings.TrimSpace(q)
+		}
+	}
+	return auth.CurrentOSUser()
 }
 
 // HandleIndex lists changelists or redirects to latest changelist.
 // GET /
 func (h *CLHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
+		currentUser := auth.CurrentOSUser()
 		demoCLs := []db.Changelist{
 			{
 				CLID:        1,
-				Author:      "matatan@google.com",
+				Author:      fmt.Sprintf("%s@corp", currentUser),
 				Description: "feat(critique): implement fast server-authoritative code review web UI and Myers diff engine",
 				Status:      "shelved",
 				CommittedAt: time.Now().Add(-2 * time.Hour),
@@ -122,10 +146,7 @@ func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reviewer := r.Header.Get("X-CitC-Reviewer")
-	if reviewer == "" {
-		reviewer = "matatan"
-	}
+	reviewer := h.resolveReviewer(r)
 
 	var approvals []db.Approval
 	if h.db != nil {
@@ -167,6 +188,61 @@ func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	component := views.ApprovalButtons(clID, approvals)
+	_ = component.Render(r.Context(), w)
+}
+
+// HandleFileReview marks a file as reviewed or not reviewed for the active reviewer.
+// POST /cl/{id}/file-review
+func (h *CLHandler) HandleFileReview(w http.ResponseWriter, r *http.Request) {
+	clID, err := parseCLID(r)
+	if err != nil {
+		http.Error(w, "invalid changelist id", http.StatusBadRequest)
+		return
+	}
+
+	filePath := r.URL.Query().Get("file")
+	if filePath == "" {
+		filePath = r.FormValue("file")
+	}
+	if filePath == "" {
+		http.Error(w, "missing file parameter", http.StatusBadRequest)
+		return
+	}
+
+	reviewedStr := r.URL.Query().Get("reviewed")
+	if reviewedStr == "" {
+		reviewedStr = r.FormValue("reviewed")
+	}
+	reviewed := true
+	if reviewedStr == "false" || reviewedStr == "0" {
+		reviewed = false
+	}
+
+	psStr := r.URL.Query().Get("ps")
+	ps, _ := strconv.Atoi(psStr)
+	if ps <= 0 {
+		ps = 1
+	}
+	basePSStr := r.URL.Query().Get("base_ps")
+	basePS, _ := strconv.Atoi(basePSStr)
+
+	reviewer := h.resolveReviewer(r)
+
+	if h.db != nil {
+		if err := h.db.MarkFileReviewed(r.Context(), clID, filePath, reviewer, reviewed); err != nil {
+			log.Printf("failed to mark file reviewed: %v", err)
+			http.Error(w, "failed to update review status", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		demoFileReviewsMu.Lock()
+		key := fmt.Sprintf("%d:%s:%s", clID, reviewer, filePath)
+		demoFileReviewsStore[key] = reviewed
+		demoFileReviewsMu.Unlock()
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	component := views.FileReviewBadge(clID, filePath, reviewed, ps, basePS)
 	_ = component.Render(r.Context(), w)
 }
 
@@ -263,9 +339,29 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		}
 	}
 
-	// 5. Populate file additions & deletions
+	// 5. Select active file diff
+	if targetFile == "" && len(files) > 0 {
+		targetFile = files[0].Path
+	}
+
+	reviewer := h.resolveReviewer(r)
+	if targetFile != "" {
+		_ = h.db.MarkFileReviewed(ctx, clID, targetFile, reviewer, true)
+	}
+
+	reviewedMap, _ := h.db.ListReviewedFiles(ctx, clID, reviewer)
+	if reviewedMap == nil {
+		reviewedMap = make(map[string]bool)
+	}
+
+	reviewedCount := 0
+	// 6. Populate file additions, deletions & reviewed status
 	for i := range files {
 		files[i].UnresolvedComments = commentsPerFile[files[i].Path]
+		files[i].Reviewed = reviewedMap[files[i].Path]
+		if files[i].Reviewed {
+			reviewedCount++
+		}
 		baseData, _ := h.readBlobBytes(files[i].BaseBlobSHA)
 		modData, _ := h.readBlobBytes(files[i].ModifiedBlobSHA)
 		d, err := diff.ComputeSideBySideDiff(files[i].Path, baseData, modData, files[i].Type)
@@ -273,11 +369,6 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 			files[i].Additions = d.Additions
 			files[i].Deletions = d.Deletions
 		}
-	}
-
-	// 6. Select active file diff
-	if targetFile == "" && len(files) > 0 {
-		targetFile = files[0].Path
 	}
 
 	var selectedDetail *diff.FileDiffDetail
@@ -354,6 +445,8 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		CommentsByLine:     commentsByLine,
 		Approvals:          approvals,
 		UnresolvedComments: unresolvedTotal,
+		ActiveReviewer:     reviewer,
+		ReviewedFilesCount: reviewedCount,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -385,9 +478,10 @@ func parseCLID(r *http.Request) (int64, error) {
 }
 
 func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
+	currentUser := auth.CurrentOSUser()
 	demoCL := &db.Changelist{
 		CLID:        clID,
-		Author:      "matatan@google.com",
+		Author:      fmt.Sprintf("%s@corp", currentUser),
 		Description: "Critique: fast server-authoritative code review web UI and diff visualizer\n\n- Pure Go + a-h/templ + HTMX + Tailwind CSS\n- Myers diff visualizer with Chroma syntax highlighting\n- Inline comment threads and reviewer verdicts\n- Live reload via air and templ proxy",
 		Status:      "shelved",
 		CommittedAt: time.Now().Add(-2 * time.Hour),
@@ -422,6 +516,21 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 	if targetFile == "" {
 		targetFile = "internal/web/diff/engine.go"
 	}
+
+	reviewer := h.resolveReviewer(r)
+	demoFileReviewsMu.Lock()
+	if targetFile != "" {
+		demoFileReviewsStore[fmt.Sprintf("%d:%s:%s", clID, reviewer, targetFile)] = true
+	}
+	reviewedCount := 0
+	for i := range files {
+		key := fmt.Sprintf("%d:%s:%s", clID, reviewer, files[i].Path)
+		files[i].Reviewed = demoFileReviewsStore[key]
+		if files[i].Reviewed {
+			reviewedCount++
+		}
+	}
+	demoFileReviewsMu.Unlock()
 
 	baseData := []byte(`package diff
 
@@ -514,7 +623,7 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 			LineNumber:     13,
 			EndLineNumber:  16,
 			Side:           "modified",
-			Author:         "matatan",
+			Author:         currentUser,
 			Body:           "LGTM! The Myers diff traversal and Chroma tokenization align cleanly with Google Critique.",
 			Resolved:       false,
 			CreatedAt:      time.Now().Add(-30 * time.Minute),
@@ -542,6 +651,8 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 		CommentsByLine:     commentsByLine,
 		Approvals:          approvals,
 		UnresolvedComments: unresolvedCount,
+		ActiveReviewer:     reviewer,
+		ReviewedFilesCount: reviewedCount,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -2,10 +2,23 @@ package auth
 
 import (
 	"net/http"
+	"os"
+	"os/user"
 	"strings"
 
 	"citc-toolchain/internal/config"
 )
+
+// CurrentOSUser returns the active OS username ($USER), falling back to user.Current() or "reviewer".
+func CurrentOSUser() string {
+	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
+		return u
+	}
+	if cur, err := user.Current(); err == nil && cur.Username != "" {
+		return cur.Username
+	}
+	return "reviewer"
+}
 
 // UserIdentityResolver resolves the authenticated user identity for an incoming HTTP request.
 type UserIdentityResolver interface {
@@ -46,10 +59,10 @@ func (l *LocalResolver) ResolveUser(r *http.Request) string {
 			return strings.TrimSpace(q)
 		}
 	}
-	if l.DefaultUser != "" {
+	if l.DefaultUser != "" && l.DefaultUser != "$USER" {
 		return l.DefaultUser
 	}
-	return "reviewer"
+	return CurrentOSUser()
 }
 
 // HeaderResolver resolves identity from a trusted ingress reverse-proxy header
@@ -73,10 +86,10 @@ func (h *HeaderResolver) ResolveUser(r *http.Request) string {
 			return strings.TrimSpace(q)
 		}
 	}
-	if h.DefaultUser != "" {
+	if h.DefaultUser != "" && h.DefaultUser != "$USER" {
 		return h.DefaultUser
 	}
-	return "reviewer"
+	return CurrentOSUser()
 }
 
 // TailscaleResolver resolves identity via Tailscale Whois or falls back to default user.
@@ -93,8 +106,9 @@ func (t *TailscaleResolver) ResolveUser(r *http.Request) string {
 			return strings.TrimSpace(tsUser)
 		}
 	}
-	if t.DefaultUser != "" {
+	if t.DefaultUser != "" && t.DefaultUser != "$USER" {
 		return t.DefaultUser
 	}
-	return "reviewer"
+	return CurrentOSUser()
 }
+

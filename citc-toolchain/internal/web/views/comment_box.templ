@@ -124,7 +124,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 							<input
 								type="text"
 								name="author"
-								value="matatan"
+								value={ ActiveUser() }
 								class="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-slate-300 w-24 font-mono focus:outline-none focus:border-sky-500"
 								title="Comment Author"
 							/>

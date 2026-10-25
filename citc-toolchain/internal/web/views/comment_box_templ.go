@@ -385,7 +385,20 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\"><div><textarea name=\"body\" rows=\"3\" required placeholder=\"Write an inline comment or code suggestion...\" class=\"w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 font-sans transition resize-y\"></textarea></div><div class=\"flex items-center justify-between\"><div class=\"flex items-center space-x-3 text-xs\"><label class=\"flex items-center space-x-1.5 text-slate-400 text-xs cursor-pointer select-none\"><input type=\"text\" name=\"author\" value=\"matatan\" class=\"px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-slate-300 w-24 font-mono focus:outline-none focus:border-sky-500\" title=\"Comment Author\"> <span class=\"text-[11px] text-slate-500\">(author)</span></label> <label class=\"flex items-center space-x-1.5 text-slate-300 text-xs cursor-pointer select-none\"><input type=\"checkbox\" name=\"resolved\" value=\"true\" class=\"rounded bg-slate-900 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0\"> <span>Resolve thread</span></label></div><div class=\"flex items-center space-x-2\"><button type=\"submit\" class=\"px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold shadow-md shadow-sky-600/30 transition flex items-center space-x-1.5\"><svg class=\"w-3.5 h-3.5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 19l9 2-9-18-9 18 9-2zm0 0v-8\"></path></svg> <span>Comment</span></button></div></div></form></div></td>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\"><div><textarea name=\"body\" rows=\"3\" required placeholder=\"Write an inline comment or code suggestion...\" class=\"w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 font-sans transition resize-y\"></textarea></div><div class=\"flex items-center justify-between\"><div class=\"flex items-center space-x-3 text-xs\"><label class=\"flex items-center space-x-1.5 text-slate-400 text-xs cursor-pointer select-none\"><input type=\"text\" name=\"author\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var24 string
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(ActiveUser())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 127, Col: 28}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" class=\"px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-slate-300 w-24 font-mono focus:outline-none focus:border-sky-500\" title=\"Comment Author\"> <span class=\"text-[11px] text-slate-500\">(author)</span></label> <label class=\"flex items-center space-x-1.5 text-slate-300 text-xs cursor-pointer select-none\"><input type=\"checkbox\" name=\"resolved\" value=\"true\" class=\"rounded bg-slate-900 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0\"> <span>Resolve thread</span></label></div><div class=\"flex items-center space-x-2\"><button type=\"submit\" class=\"px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold shadow-md shadow-sky-600/30 transition flex items-center space-x-1.5\"><svg class=\"w-3.5 h-3.5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 19l9 2-9-18-9 18 9-2zm0 0v-8\"></path></svg> <span>Comment</span></button></div></div></form></div></td>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
