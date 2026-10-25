@@ -23,13 +23,16 @@ type BlobRecord struct {
 
 // Changelist represents an entry in the changelists table.
 type Changelist struct {
-	CLID         int64
-	Author       string
-	Description  string
-	RootTreeHash []byte
-	ParentCL     *int64
-	Status       string
-	CommittedAt  time.Time
+	CLID                  int64
+	Author                string
+	Description           string
+	RootTreeHash          []byte
+	ParentCL              *int64
+	Status                string
+	CommittedAt           time.Time
+	NeedsRebase           bool
+	RebaseConflictDetails *string
+	BasePatchsetNumber    int
 }
 
 // Workspace represents an entry in the workspaces table.
@@ -192,7 +195,8 @@ func (d *DB) InsertTreeNodes(ctx context.Context, treeHash []byte, entries []tre
 // GetHeadCL retrieves the latest committed (status = 'submitted') changelist.
 func (d *DB) GetHeadCL(ctx context.Context) (*Changelist, error) {
 	query := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		WHERE status = 'submitted'
 		ORDER BY cl_id DESC
@@ -207,6 +211,9 @@ func (d *DB) GetHeadCL(ctx context.Context) (*Changelist, error) {
 		&cl.ParentCL,
 		&cl.Status,
 		&cl.CommittedAt,
+		&cl.NeedsRebase,
+		&cl.RebaseConflictDetails,
+		&cl.BasePatchsetNumber,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -220,7 +227,8 @@ func (d *DB) GetHeadCL(ctx context.Context) (*Changelist, error) {
 // GetCL retrieves a changelist by ID.
 func (d *DB) GetCL(ctx context.Context, clID int64) (*Changelist, error) {
 	query := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		WHERE cl_id = $1;
 	`
@@ -233,6 +241,9 @@ func (d *DB) GetCL(ctx context.Context, clID int64) (*Changelist, error) {
 		&cl.ParentCL,
 		&cl.Status,
 		&cl.CommittedAt,
+		&cl.NeedsRebase,
+		&cl.RebaseConflictDetails,
+		&cl.BasePatchsetNumber,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -273,7 +284,8 @@ func (d *DB) SubmitCL(ctx context.Context, clID int64) (*Changelist, error) {
 
 	// Lock the row for update
 	selectQuery := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		WHERE cl_id = $1
 		FOR UPDATE;
@@ -287,6 +299,9 @@ func (d *DB) SubmitCL(ctx context.Context, clID int64) (*Changelist, error) {
 		&cl.ParentCL,
 		&cl.Status,
 		&cl.CommittedAt,
+		&cl.NeedsRebase,
+		&cl.RebaseConflictDetails,
+		&cl.BasePatchsetNumber,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -382,3 +397,100 @@ func (d *DB) GetWorkspace(ctx context.Context, id string) (*Workspace, error) {
 	}
 	return &ws, nil
 }
+
+// GetShelvedChildren retrieves all changelists in 'shelved' status that declare parentCL as their parent.
+func (d *DB) GetShelvedChildren(ctx context.Context, parentCL int64) ([]Changelist, error) {
+	query := `
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		       needs_rebase, rebase_conflict_details, base_patchset_number
+		FROM changelists
+		WHERE parent_cl = $1 AND status = 'shelved'
+		ORDER BY cl_id ASC;
+	`
+	rows, err := d.pool.Query(ctx, query, parentCL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query shelved children for CL %d: %w", parentCL, err)
+	}
+	defer rows.Close()
+
+	var children []Changelist
+	for rows.Next() {
+		var cl Changelist
+		if err := rows.Scan(
+			&cl.CLID,
+			&cl.Author,
+			&cl.Description,
+			&cl.RootTreeHash,
+			&cl.ParentCL,
+			&cl.Status,
+			&cl.CommittedAt,
+			&cl.NeedsRebase,
+			&cl.RebaseConflictDetails,
+			&cl.BasePatchsetNumber,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan child changelist: %w", err)
+		}
+		children = append(children, cl)
+	}
+	return children, rows.Err()
+}
+
+// UpdateCLRootTreeHash updates the Merkle root tree hash of a changelist.
+func (d *DB) UpdateCLRootTreeHash(ctx context.Context, clID int64, newRootTreeHash []byte) error {
+	query := `
+		UPDATE changelists
+		SET root_tree_hash = $2
+		WHERE cl_id = $1;
+	`
+	_, err := d.pool.Exec(ctx, query, clID, newRootTreeHash)
+	if err != nil {
+		return fmt.Errorf("failed to update root tree hash for CL %d: %w", clID, err)
+	}
+	return nil
+}
+
+// MarkCLRebaseConflict flags a changelist as requiring rebase resolution due to a merge conflict.
+func (d *DB) MarkCLRebaseConflict(ctx context.Context, clID int64, conflictDetails string) error {
+	query := `
+		UPDATE changelists
+		SET needs_rebase = true, rebase_conflict_details = $2
+		WHERE cl_id = $1;
+	`
+	_, err := d.pool.Exec(ctx, query, clID, conflictDetails)
+	if err != nil {
+		return fmt.Errorf("failed to mark rebase conflict for CL %d: %w", clID, err)
+	}
+	return nil
+}
+
+// ClearCLRebaseConflict clears the rebase conflict state of a changelist.
+func (d *DB) ClearCLRebaseConflict(ctx context.Context, clID int64) error {
+	query := `
+		UPDATE changelists
+		SET needs_rebase = false, rebase_conflict_details = NULL
+		WHERE cl_id = $1;
+	`
+	_, err := d.pool.Exec(ctx, query, clID)
+	if err != nil {
+		return fmt.Errorf("failed to clear rebase conflict for CL %d: %w", clID, err)
+	}
+	return nil
+}
+
+// RecordRebaseEvent inserts an audit entry into cl_rebase_events.
+func (d *DB) RecordRebaseEvent(ctx context.Context, clID, parentCL int64, triggerPS, resultingPS int, status, summary string) error {
+	var resultPS *int
+	if resultingPS > 0 {
+		resultPS = &resultingPS
+	}
+	query := `
+		INSERT INTO cl_rebase_events (cl_id, parent_cl, trigger_patchset_number, resulting_patchset_number, status, conflict_summary)
+		VALUES ($1, $2, $3, $4, $5, $6);
+	`
+	_, err := d.pool.Exec(ctx, query, clID, parentCL, triggerPS, resultPS, status, summary)
+	if err != nil {
+		return fmt.Errorf("failed to record rebase event for CL %d: %w", clID, err)
+	}
+	return nil
+}
+

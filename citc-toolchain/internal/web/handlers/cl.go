@@ -418,6 +418,7 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 	var clStatus string
 	var approvalsCount int
 	var unresolvedCount int
+	var needsRebase bool
 
 	if h.db != nil {
 		ctx := r.Context()
@@ -427,6 +428,7 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		clStatus = cl.Status
+		needsRebase = cl.NeedsRebase
 		approvalsCount, _ = h.db.CountApprovals(ctx, clID)
 		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
 	} else {
@@ -458,6 +460,11 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 
 	if clStatus != "shelved" {
 		http.Error(w, fmt.Sprintf("CL %d cannot be submitted because its status is %q (expected 'shelved')", clID, clStatus), http.StatusBadRequest)
+		return
+	}
+
+	if needsRebase {
+		http.Error(w, fmt.Sprintf("CL %d cannot be submitted because it has pending rebase conflicts with parent CL; run 'citc sync' in your workspace to resolve", clID), http.StatusBadRequest)
 		return
 	}
 

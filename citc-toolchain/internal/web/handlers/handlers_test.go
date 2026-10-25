@@ -1028,6 +1028,62 @@ func TestCLHandlerEventEmission(t *testing.T) {
 	}
 }
 
+func TestCLRebaseConflictAndStackBreadcrumbs(t *testing.T) {
+	parentCL := int64(10002)
+	conflictDetails := "pkg/auth/token.go (2 conflict hunks)"
+	data := views.CLDetailData{
+		CL: &db.Changelist{
+			CLID:                  10003,
+			Author:                "alice",
+			Description:           "Implement token verification",
+			RootTreeHash:          []byte{0x1, 0x2, 0x3},
+			ParentCL:              &parentCL,
+			Status:                "shelved",
+			CommittedAt:           time.Now(),
+			NeedsRebase:           true,
+			RebaseConflictDetails: &conflictDetails,
+		},
+		CurrentPatchset:   1,
+		Patchsets:         []db.Patchset{{PatchsetNumber: 1}},
+		RequiredApprovals: 1,
+		ApprovedCount:     1,
+	}
+
+	var buf bytes.Buffer
+	err := views.CLDetail(data).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("failed to render CLDetail: %v", err)
+	}
+	html := buf.String()
+
+	// Verify Stack breadcrumbs
+	if !strings.Contains(html, "Stack:") {
+		t.Errorf("expected Stack: breadcrumbs in HTML")
+	}
+	if !strings.Contains(html, "#10002") {
+		t.Errorf("expected Parent CL #10002 link in HTML")
+	}
+	if !strings.Contains(html, "CL #10003 (Active)") {
+		t.Errorf("expected active CL #10003 badge in HTML")
+	}
+
+	// Verify Rebase Conflict alert banner
+	if !strings.Contains(html, "Rebase Required: Parent CL #10002 updated with conflicts") {
+		t.Errorf("expected rebase required banner in HTML")
+	}
+	if !strings.Contains(html, "citc sync") {
+		t.Errorf("expected citc sync instruction in HTML")
+	}
+	if !strings.Contains(html, conflictDetails) {
+		t.Errorf("expected conflict details %q in HTML", conflictDetails)
+	}
+
+	// Verify Rebase Conflict button in place of normal Submit
+	if !strings.Contains(html, "Rebase Conflict") {
+		t.Errorf("expected 'Rebase Conflict' disabled button text in HTML")
+	}
+}
+
 func init() {
 	// Ensure working directory is repo root if running from submodule
 	if _, err := os.Stat("internal/web/views"); os.IsNotExist(err) {

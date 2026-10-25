@@ -35,6 +35,45 @@ templ CLDetail(data CLDetailData) {
 		<div class="flex-1 flex flex-col bg-[#090d16]">
 			<!-- CL Header Overview -->
 			<div class="border-b border-slate-800 bg-[#0c1322] px-6 py-3.5 shadow-sm">
+				if data.CL.ParentCL != nil && *data.CL.ParentCL > 0 {
+					<div class="flex items-center space-x-2 text-[11px] font-mono text-slate-400 mb-2">
+						<span class="text-slate-500 uppercase tracking-wider text-[10px]">Stack:</span>
+						<a href={ templ.SafeURL(fmt.Sprintf("/cl/%d", *data.CL.ParentCL)) } class="text-sky-400 hover:text-sky-300 hover:underline flex items-center space-x-1">
+							<span>Parent CL</span>
+							<span class="font-bold">{ fmt.Sprintf("#%d", *data.CL.ParentCL) }</span>
+						</a>
+						<span class="text-slate-600">──►</span>
+						<span class="text-slate-200 font-bold bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/60">
+							{ fmt.Sprintf("CL #%d (Active)", data.CL.CLID) }
+						</span>
+					</div>
+				}
+
+				if data.CL.NeedsRebase {
+					<div class="mb-3 px-4 py-3 bg-amber-950/70 border border-amber-600/70 rounded-xl flex items-center justify-between text-amber-200 text-xs shadow-lg">
+						<div class="flex items-center space-x-3">
+							<span class="text-lg">⚠️</span>
+							<div>
+								<div class="font-bold font-mono text-amber-300">
+									if data.CL.ParentCL != nil {
+										{ fmt.Sprintf("Rebase Required: Parent CL #%d updated with conflicts", *data.CL.ParentCL) }
+									} else {
+										Rebase Required: Conflicts detected with parent CL
+									}
+								</div>
+								<div class="text-[11px] text-amber-200/80 mt-0.5">
+									Run <code class="bg-black/50 px-1.5 py-0.5 rounded font-mono text-amber-300 border border-amber-800/50">citc sync</code> in your workspace to pull conflict markers and resolve.
+								</div>
+								if data.CL.RebaseConflictDetails != nil && *data.CL.RebaseConflictDetails != "" {
+									<div class="text-[11px] text-amber-400/90 font-mono mt-1">
+										Conflicts: { *data.CL.RebaseConflictDetails }
+									</div>
+								}
+							</div>
+						</div>
+					</div>
+				}
+
 				<!-- Centered Actions Row: Reply and Submit -->
 				@CenterActions(data)
 
@@ -344,6 +383,17 @@ templ SubmitButton(data CLDetailData) {
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
 			<span>CL Submitted</span>
 		</span>
+	} else if data.CL.NeedsRebase {
+		<button
+			type="button"
+			id="submit-cl-btn"
+			disabled
+			class="px-3 py-1.5 bg-slate-800 text-amber-400 border border-amber-700/60 rounded-lg text-xs font-semibold flex items-center space-x-1.5 cursor-not-allowed opacity-90 shadow-md"
+			title="Cannot submit: CL has pending rebase conflicts with parent CL. Run 'citc sync' in your workspace to resolve."
+		>
+			<svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+			<span>Rebase Conflict</span>
+		</button>
 	} else if data.UnresolvedComments > 0 && !data.AllowSubmitWithUnresolved {
 		<button
 			type="button"

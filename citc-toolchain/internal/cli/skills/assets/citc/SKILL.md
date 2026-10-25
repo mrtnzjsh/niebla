@@ -69,20 +69,31 @@ CitC is a server-authoritative, cloud-native monorepo VCS inspired by Google Pip
 
 * **Shelve pending changes:**
   ```bash
-  citc shelve -m "<description>" [--reviewers "alice,bob,@backend"] [--on-cl <parent_cl>] [--workspace <name>]
+  citc shelve -m "<description>" [--reviewers "alice,bob,@backend"] [--on-cl <parent_cl>] [--cl <id>] [--new-cl] [--workspace <name>]
   ```
   1. Uploads dirty files to server CAS via `UploadBlob(stream)`.
   2. Constructs the updated Merkle tree hierarchy and recomputes hashes up to the root.
-  3. Calls `ShelveCL` on `citc-server` to create a shelved changelist.
+  3. Calls `ShelveCL` on `citc-server` to create or update a shelved changelist:
+     - If `--cl <id>` or workspace active CL is set, creates patchset $N+1$ on the existing changelist.
+     - **Automated Cascading Rebase:** Re-shelving an upstream parent CL ($B_2$) automatically triggers recursive 3-way Merkle tree re-parenting across all downstream shelved children ($C \rightarrow D$).
   4. Expands enterprise groups (e.g. `@backend` -> `alice, bob`) and registers reviewers in `cl_reviewers`.
-  5. Records the newly assigned `cl_id` as active in the workspace configuration.
+  5. Records the active `cl_id` and updated Merkle tree in the workspace configuration.
+
+* **Synchronize workspace with upstream changes:**
+  ```bash
+  citc sync [--workspace <name>] [--dry-run]
+  ```
+  Reconciles the local workspace's base tree with the server's latest rebased tree or trunk:
+  * **Clean Sync:** If server auto-rebase succeeded without conflict, fast-forwards `root_tree_hash` and re-anchors `citcfs` FUSE mount with zero file copy.
+  * **Conflict Handling:** If server detected overlapping edits between parent and child, outputs conflict diagnostics and injects standard conflict markers (`<<<<<<< PARENT`, `=======`, `>>>>>>> CHILD`) into the workspace scratch files for manual resolution.
+  * After editing and resolving markers, run `citc shelve` to commit the rebased patchset.
 
 * **Submit changelist to trunk:**
   ```bash
   citc submit [--cl <id>] [--workspace <name>] [--force]
   ```
   Atomically commits the changelist to trunk head:
-  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`) and that no unresolved comments remain when `allow_submit_with_unresolved_comments = false`.
+  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, and no pending rebase conflicts exist (`needs_rebase = false`).
   * **Bypass Guard:** Use `--force` to bypass unresolved comments or missing approvals when urgent trunk submission is required.
 
 ---

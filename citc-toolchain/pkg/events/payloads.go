@@ -43,3 +43,19 @@ type CLSubmittedPayload struct {
 	URL           string `json:"url,omitempty"`
 	Justification string `json:"justification,omitempty"`
 }
+
+// CLRebasedPayload contains data for citc.cl.rebased events.
+type CLRebasedPayload struct {
+	CLID            string `json:"cl_id"`
+	ParentCLID      string `json:"parent_cl_id"`
+	NewRootTreeHash string `json:"new_root_tree_hash"`
+	PatchsetNumber  int    `json:"patchset_number"`
+}
+
+// CLRebaseConflictPayload contains data for citc.cl.rebase_conflict events.
+type CLRebaseConflictPayload struct {
+	CLID            string   `json:"cl_id"`
+	ParentCLID      string   `json:"parent_cl_id"`
+	ConflictedFiles []string `json:"conflicted_files"`
+	Summary         string   `json:"summary,omitempty"`
+}

@@ -17,6 +17,7 @@ type Patchset struct {
 	PatchsetNumber int
 	RootTreeHash   []byte
 	CreatedAt      time.Time
+	IsAutoRebase   bool
 }
 
 // Comment represents an inline or file-level code review comment thread entry.
@@ -64,7 +65,7 @@ type Approval struct {
 // using the CL's root_tree_hash.
 func (d *DB) ListPatchsets(ctx context.Context, clID int64) ([]Patchset, error) {
 	query := `
-		SELECT patchset_id, cl_id, patchset_number, root_tree_hash, created_at
+		SELECT patchset_id, cl_id, patchset_number, root_tree_hash, created_at, is_auto_rebase
 		FROM cl_patchsets
 		WHERE cl_id = $1
 		ORDER BY patchset_number ASC;
@@ -78,7 +79,7 @@ func (d *DB) ListPatchsets(ctx context.Context, clID int64) ([]Patchset, error) 
 	var patchsets []Patchset
 	for rows.Next() {
 		var p Patchset
-		if err := rows.Scan(&p.PatchsetID, &p.CLID, &p.PatchsetNumber, &p.RootTreeHash, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.PatchsetID, &p.CLID, &p.PatchsetNumber, &p.RootTreeHash, &p.CreatedAt, &p.IsAutoRebase); err != nil {
 			return nil, fmt.Errorf("failed to scan patchset: %w", err)
 		}
 		patchsets = append(patchsets, p)
@@ -92,8 +93,8 @@ func (d *DB) ListPatchsets(ctx context.Context, clID int64) ([]Patchset, error) 
 		cl, err := d.GetCL(ctx, clID)
 		if err == nil && len(cl.RootTreeHash) > 0 {
 			insertQuery := `
-				INSERT INTO cl_patchsets (cl_id, patchset_number, root_tree_hash)
-				VALUES ($1, 1, $2)
+				INSERT INTO cl_patchsets (cl_id, patchset_number, root_tree_hash, is_auto_rebase)
+				VALUES ($1, 1, $2, false)
 				ON CONFLICT (cl_id, patchset_number) DO NOTHING
 				RETURNING patchset_id, created_at;
 			`
@@ -101,6 +102,7 @@ func (d *DB) ListPatchsets(ctx context.Context, clID int64) ([]Patchset, error) 
 			p.CLID = clID
 			p.PatchsetNumber = 1
 			p.RootTreeHash = cl.RootTreeHash
+			p.IsAutoRebase = false
 			scanErr := d.pool.QueryRow(ctx, insertQuery, clID, cl.RootTreeHash).Scan(&p.PatchsetID, &p.CreatedAt)
 			if scanErr == nil {
 				return []Patchset{p}, nil
@@ -114,7 +116,7 @@ func (d *DB) ListPatchsets(ctx context.Context, clID int64) ([]Patchset, error) 
 // GetPatchset retrieves a specific patchset by number for a changelist.
 func (d *DB) GetPatchset(ctx context.Context, clID int64, patchsetNumber int) (*Patchset, error) {
 	query := `
-		SELECT patchset_id, cl_id, patchset_number, root_tree_hash, created_at
+		SELECT patchset_id, cl_id, patchset_number, root_tree_hash, created_at, is_auto_rebase
 		FROM cl_patchsets
 		WHERE cl_id = $1 AND patchset_number = $2;
 	`
@@ -125,6 +127,7 @@ func (d *DB) GetPatchset(ctx context.Context, clID int64, patchsetNumber int) (*
 		&p.PatchsetNumber,
 		&p.RootTreeHash,
 		&p.CreatedAt,
+		&p.IsAutoRebase,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -138,6 +141,7 @@ func (d *DB) GetPatchset(ctx context.Context, clID int64, patchsetNumber int) (*
 						PatchsetNumber: 1,
 						RootTreeHash:   cl.RootTreeHash,
 						CreatedAt:      cl.CommittedAt,
+						IsAutoRebase:   false,
 					}, nil
 				}
 			}
@@ -148,17 +152,47 @@ func (d *DB) GetPatchset(ctx context.Context, clID int64, patchsetNumber int) (*
 	return &p, nil
 }
 
+// GetNextPatchsetNumber determines the next sequential patchset number for a changelist.
+func (d *DB) GetNextPatchsetNumber(ctx context.Context, clID int64) (int, error) {
+	query := `
+		SELECT COALESCE(MAX(patchset_number), 0) + 1
+		FROM cl_patchsets
+		WHERE cl_id = $1;
+	`
+	var nextNum int
+	err := d.pool.QueryRow(ctx, query, clID).Scan(&nextNum)
+	if err != nil {
+		return 1, fmt.Errorf("failed to get next patchset number for CL %d: %w", clID, err)
+	}
+	return nextNum, nil
+}
+
 // CreatePatchset registers a new patchset under a changelist.
 func (d *DB) CreatePatchset(ctx context.Context, clID int64, patchsetNumber int, rootTreeHash []byte) error {
 	query := `
-		INSERT INTO cl_patchsets (cl_id, patchset_number, root_tree_hash)
-		VALUES ($1, $2, $3)
+		INSERT INTO cl_patchsets (cl_id, patchset_number, root_tree_hash, is_auto_rebase)
+		VALUES ($1, $2, $3, false)
 		ON CONFLICT (cl_id, patchset_number) DO UPDATE
 		SET root_tree_hash = EXCLUDED.root_tree_hash;
 	`
 	_, err := d.pool.Exec(ctx, query, clID, patchsetNumber, rootTreeHash)
 	if err != nil {
 		return fmt.Errorf("failed to insert patchset: %w", err)
+	}
+	return nil
+}
+
+// CreateAutoRebasePatchset registers an auto-generated rebase patchset under a changelist.
+func (d *DB) CreateAutoRebasePatchset(ctx context.Context, clID int64, patchsetNumber int, rootTreeHash []byte) error {
+	query := `
+		INSERT INTO cl_patchsets (cl_id, patchset_number, root_tree_hash, is_auto_rebase)
+		VALUES ($1, $2, $3, true)
+		ON CONFLICT (cl_id, patchset_number) DO UPDATE
+		SET root_tree_hash = EXCLUDED.root_tree_hash, is_auto_rebase = true;
+	`
+	_, err := d.pool.Exec(ctx, query, clID, patchsetNumber, rootTreeHash)
+	if err != nil {
+		return fmt.Errorf("failed to insert auto-rebase patchset: %w", err)
 	}
 	return nil
 }
@@ -506,7 +540,8 @@ func (d *DB) ListCLs(ctx context.Context, limit int) ([]Changelist, error) {
 		limit = 50
 	}
 	query := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		ORDER BY cl_id DESC
 		LIMIT $1;
@@ -528,6 +563,9 @@ func (d *DB) ListCLs(ctx context.Context, limit int) ([]Changelist, error) {
 			&cl.ParentCL,
 			&cl.Status,
 			&cl.CommittedAt,
+			&cl.NeedsRebase,
+			&cl.RebaseConflictDetails,
+			&cl.BasePatchsetNumber,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan changelist: %w", err)
 		}

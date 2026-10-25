@@ -31,6 +31,8 @@ type uploadedBlob struct {
 func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 	var description string
 	var parentCL int64
+	var targetCL int64
+	var newCL bool
 	var reviewers string
 
 	cmd := &cobra.Command{
@@ -122,7 +124,13 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 				}
 			}
 
-			// 3. Call ShelveCL on citc-server
+			// 3. Determine if shelving to an existing CL or creating new
+			effectiveCLID := targetCL
+			if !newCL && effectiveCLID <= 0 && ws.ActiveCL > 0 {
+				effectiveCLID = ws.ActiveCL
+			}
+
+			// 4. Call ShelveCL on citc-server
 			author := getCurrentUsername()
 			shelveResp, err := client.ShelveCL(ctx, &citcv1.ShelveCLRequest{
 				WorkspaceId:  ws.WorkspaceID,
@@ -131,12 +139,13 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 				RootTreeHash: newRootTreeHash,
 				ParentCl:     effectiveParentCL,
 				Reviewers:    resolvedReviewers,
+				ClId:         effectiveCLID,
 			})
 			if err != nil {
 				return fmt.Errorf("server failed to shelve changelist: %w", err)
 			}
 
-			// 4. Update workspace metadata with active CL and updated tree hash
+			// 5. Update workspace metadata with active CL and updated tree hash
 			ws.ActiveCL = shelveResp.ClId
 			ws.RootTreeHash = hex.EncodeToString(newRootTreeHash)
 			if err := mgr.Save(ws); err != nil {
@@ -150,6 +159,8 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 
 	cmd.Flags().StringVarP(&description, "message", "m", "", "Changelist description (required)")
 	cmd.Flags().Int64Var(&parentCL, "on-cl", 0, "Parent changelist ID (defaults to workspace base CL)")
+	cmd.Flags().Int64Var(&targetCL, "cl", 0, "Target existing changelist ID (defaults to active CL in workspace)")
+	cmd.Flags().BoolVar(&newCL, "new-cl", false, "Force creating a new CL even if an active CL is set in workspace")
 	cmd.Flags().StringVar(&reviewers, "reviewers", "", "Comma-separated list of reviewer usernames or @group names")
 
 	return cmd

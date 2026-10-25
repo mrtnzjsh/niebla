@@ -17,6 +17,8 @@ const (
 	TypeCommentResolved   = "citc.cl.comment_resolved"
 	TypeApprovalUpdated   = "citc.cl.approval_updated"
 	TypeCLSubmitted       = "citc.cl.submitted"
+	TypeCLRebased         = "citc.cl.rebased"
+	TypeCLRebaseConflict  = "citc.cl.rebase_conflict"
 )
 
 // Event represents a standardized CloudEvents 1.0 envelope.

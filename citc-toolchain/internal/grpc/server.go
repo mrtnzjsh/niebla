@@ -225,7 +225,7 @@ func (s *Server) CreateWorkspace(ctx context.Context, req *citcv1.CreateWorkspac
 	}, nil
 }
 
-// ShelveCL creates a new changelist in 'shelved' status.
+// ShelveCL creates a new changelist or adds an updated patchset to an existing changelist.
 func (s *Server) ShelveCL(ctx context.Context, req *citcv1.ShelveCLRequest) (*citcv1.ShelveCLResponse, error) {
 	if req.Author == "" {
 		return nil, status.Error(codes.InvalidArgument, "author cannot be empty")
@@ -234,15 +234,50 @@ func (s *Server) ShelveCL(ctx context.Context, req *citcv1.ShelveCLRequest) (*ci
 		return nil, status.Error(codes.InvalidArgument, "root_tree_hash cannot be empty")
 	}
 
-	clID, err := s.db.CreateShelvedCL(ctx, req.Author, req.Description, req.RootTreeHash, req.ParentCl)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to shelve CL: %v", err)
+	var clID int64
+	var oldRootTree []byte
+
+	if req.ClId > 0 {
+		existingCL, err := s.db.GetCL(ctx, req.ClId)
+		if err != nil {
+			return nil, status.Errorf(codes.NotFound, "changelist %d not found: %v", req.ClId, err)
+		}
+		clID = req.ClId
+		oldRootTree = existingCL.RootTreeHash
+
+		nextPS, err := s.db.GetNextPatchsetNumber(ctx, clID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to get next patchset number: %v", err)
+		}
+
+		if err := s.db.CreatePatchset(ctx, clID, nextPS, req.RootTreeHash); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create patchset %d: %v", nextPS, err)
+		}
+
+		if err := s.db.UpdateCLRootTreeHash(ctx, clID, req.RootTreeHash); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to update root tree hash: %v", err)
+		}
+
+		_ = s.db.ClearCLRebaseConflict(ctx, clID)
+	} else {
+		var err error
+		clID, err = s.db.CreateShelvedCL(ctx, req.Author, req.Description, req.RootTreeHash, req.ParentCl)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to shelve CL: %v", err)
+		}
+
+		_ = s.db.CreatePatchset(ctx, clID, 1, req.RootTreeHash)
 	}
 
 	if len(req.Reviewers) > 0 {
 		if err := s.db.AddReviewers(ctx, clID, req.Reviewers); err != nil {
 			log.Printf("warning: failed to assign reviewers to CL %d: %v", clID, err)
 		}
+	}
+
+	// Trigger cascading rebase for any downstream shelved changelists
+	if len(oldRootTree) > 0 && !bytes.Equal(oldRootTree, req.RootTreeHash) {
+		_, _ = s.CascadeStackRebase(ctx, clID, oldRootTree, req.RootTreeHash)
 	}
 
 	return &citcv1.ShelveCLResponse{ClId: clID}, nil
@@ -255,6 +290,16 @@ func (s *Server) SubmitCL(ctx context.Context, req *citcv1.SubmitCLRequest) (*ci
 	}
 
 	if !req.Force {
+		clInfo, err := s.db.GetCL(ctx, req.ClId)
+		if err != nil {
+			return nil, status.Errorf(codes.NotFound, "changelist %d not found: %v", req.ClId, err)
+		}
+		if clInfo.NeedsRebase {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"cannot submit CL %d: changelist has unresolved rebase conflicts with parent CL. Run 'citc sync' in workspace to resolve",
+				req.ClId)
+		}
+
 		// 1. Guard: Check unresolved comments if policy forbids submitting with them
 		unresolved, err := s.db.CountUnresolvedComments(ctx, req.ClId)
 		if err != nil {
@@ -315,5 +360,95 @@ func (s *Server) GetHeadCL(ctx context.Context, req *citcv1.GetHeadCLRequest) (*
 	return &citcv1.GetHeadCLResponse{
 		ClId:         cl.CLID,
 		RootTreeHash: cl.RootTreeHash,
+	}, nil
+}
+
+// GetCL retrieves metadata and rebase status for a changelist by ID.
+func (s *Server) GetCL(ctx context.Context, req *citcv1.GetCLRequest) (*citcv1.GetCLResponse, error) {
+	cl, err := s.db.GetCL(ctx, req.ClId)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "changelist %d not found", req.ClId)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to query CL %d: %v", req.ClId, err)
+	}
+
+	parentCL := int64(0)
+	if cl.ParentCL != nil {
+		parentCL = *cl.ParentCL
+	}
+	conflictDetails := ""
+	if cl.RebaseConflictDetails != nil {
+		conflictDetails = *cl.RebaseConflictDetails
+	}
+
+	psNum, _ := s.db.GetNextPatchsetNumber(ctx, cl.CLID)
+	currentPS := int32(psNum - 1)
+	if currentPS < 1 {
+		currentPS = 1
+	}
+
+	return &citcv1.GetCLResponse{
+		ClId:                  cl.CLID,
+		Author:                cl.Author,
+		Description:           cl.Description,
+		RootTreeHash:          cl.RootTreeHash,
+		ParentCl:              parentCL,
+		Status:                cl.Status,
+		NeedsRebase:           cl.NeedsRebase,
+		RebaseConflictDetails: conflictDetails,
+		CurrentPatchset:       currentPS,
+	}, nil
+}
+
+// SyncWorkspace queries changelist and parent Merkle tree status to support client-side sync.
+func (s *Server) SyncWorkspace(ctx context.Context, req *citcv1.SyncWorkspaceRequest) (*citcv1.SyncWorkspaceResponse, error) {
+	var targetCLID int64 = req.ClId
+	if targetCLID <= 0 && req.WorkspaceId != "" {
+		ws, err := s.db.GetWorkspace(ctx, req.WorkspaceId)
+		if err == nil && ws != nil && ws.BaseCL != nil {
+			targetCLID = *ws.BaseCL
+		}
+	}
+
+	if targetCLID <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "a valid cl_id or workspace_id is required for sync")
+	}
+
+	cl, err := s.db.GetCL(ctx, targetCLID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "changelist %d not found: %v", targetCLID, err)
+	}
+
+	var parentCL int64
+	var parentRootTree []byte
+	if cl.ParentCL != nil && *cl.ParentCL > 0 {
+		parentCL = *cl.ParentCL
+		parent, err := s.db.GetCL(ctx, parentCL)
+		if err == nil && parent != nil {
+			parentRootTree = parent.RootTreeHash
+		}
+	}
+
+	conflictDetails := ""
+	if cl.RebaseConflictDetails != nil {
+		conflictDetails = *cl.RebaseConflictDetails
+	}
+
+	psNum, _ := s.db.GetNextPatchsetNumber(ctx, cl.CLID)
+	currentPS := int32(psNum - 1)
+	if currentPS < 1 {
+		currentPS = 1
+	}
+
+	return &citcv1.SyncWorkspaceResponse{
+		WorkspaceId:           req.WorkspaceId,
+		ClId:                  cl.CLID,
+		ParentCl:              parentCL,
+		RootTreeHash:          cl.RootTreeHash,
+		ParentRootTreeHash:    parentRootTree,
+		NeedsRebase:           cl.NeedsRebase,
+		RebaseConflictDetails: conflictDetails,
+		PatchsetNumber:        currentPS,
 	}, nil
 }

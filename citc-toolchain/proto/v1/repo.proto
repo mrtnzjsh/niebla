@@ -18,6 +18,8 @@ service RepositoryService {
   rpc ShelveCL (ShelveCLRequest) returns (ShelveCLResponse);
   rpc SubmitCL (SubmitCLRequest) returns (SubmitCLResponse);
   rpc GetHeadCL (GetHeadCLRequest) returns (GetHeadCLResponse);
+  rpc GetCL (GetCLRequest) returns (GetCLResponse);
+  rpc SyncWorkspace (SyncWorkspaceRequest) returns (SyncWorkspaceResponse);
 }
 
 message NodeEntry {
@@ -79,6 +81,7 @@ message ShelveCLRequest {
   bytes root_tree_hash = 4;
   int64 parent_cl = 5;
   repeated string reviewers = 6;
+  int64 cl_id = 7; // Optional: specify target CL ID if re-shelving to existing CL
 }
 
 message ShelveCLResponse {
@@ -93,6 +96,7 @@ message SubmitCLRequest {
 message SubmitCLResponse {
   int64 cl_id = 1;
   int64 committed_at_unix = 2;
+  repeated int64 rebased_children = 3;
 }
 
 message GetHeadCLRequest {}
@@ -100,4 +104,36 @@ message GetHeadCLRequest {}
 message GetHeadCLResponse {
   int64 cl_id = 1;
   bytes root_tree_hash = 2;
+}
+
+message GetCLRequest {
+  int64 cl_id = 1;
+}
+
+message GetCLResponse {
+  int64 cl_id = 1;
+  string author = 2;
+  string description = 3;
+  bytes root_tree_hash = 4;
+  int64 parent_cl = 5;
+  string status = 6;
+  bool needs_rebase = 7;
+  string rebase_conflict_details = 8;
+  int32 current_patchset = 9;
+}
+
+message SyncWorkspaceRequest {
+  string workspace_id = 1;
+  int64 cl_id = 2;
+}
+
+message SyncWorkspaceResponse {
+  string workspace_id = 1;
+  int64 cl_id = 2;
+  int64 parent_cl = 3;
+  bytes root_tree_hash = 4;
+  bytes parent_root_tree_hash = 5;
+  bool needs_rebase = 6;
+  string rebase_conflict_details = 7;
+  int32 patchset_number = 8;
 }
