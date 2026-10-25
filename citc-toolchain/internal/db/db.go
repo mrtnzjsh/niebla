@@ -15,6 +15,9 @@ var initSQL string
 //go:embed migrations/0002_critique.sql
 var critiqueSQL string
 
+//go:embed migrations/0003_file_reviews.sql
+var fileReviewsSQL string
+
 // DB wraps the pgxpool connection pool and provides access to database queries.
 type DB struct {
 	pool *pgxpool.Pool
@@ -91,6 +94,9 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 	}
 	if _, err := d.pool.Exec(ctx, critiqueSQL); err != nil {
 		return fmt.Errorf("failed to execute critique schema migration: %w", err)
+	}
+	if _, err := d.pool.Exec(ctx, fileReviewsSQL); err != nil {
+		return fmt.Errorf("failed to execute file reviews schema migration: %w", err)
 	}
 	return nil
 }

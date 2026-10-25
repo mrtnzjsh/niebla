@@ -248,4 +248,58 @@ func TestDatabaseOperationsWithTestcontainer(t *testing.T) {
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound for missing workspace, got %v", err)
 	}
+
+	// 6. Validate Per-Reviewer File Review Operations
+	// Alice reviews main.go
+	aliceReviewed, err := database.ListReviewedFiles(ctx, 1, "alice")
+	if err != nil {
+		t.Fatalf("ListReviewedFiles failed: %v", err)
+	}
+	if len(aliceReviewed) != 0 {
+		t.Errorf("expected 0 reviewed files for alice initially, got %d", len(aliceReviewed))
+	}
+
+	err = database.MarkFileReviewed(ctx, 1, "main.go", "alice", true)
+	if err != nil {
+		t.Fatalf("MarkFileReviewed failed: %v", err)
+	}
+
+	aliceReviewed, err = database.ListReviewedFiles(ctx, 1, "alice")
+	if err != nil || !aliceReviewed["main.go"] {
+		t.Errorf("expected main.go to be reviewed for alice, got %v", aliceReviewed)
+	}
+
+	// Bob should still have 0 reviewed files (per-reviewer isolation)
+	bobReviewed, err := database.ListReviewedFiles(ctx, 1, "bob")
+	if err != nil {
+		t.Fatalf("ListReviewedFiles for bob failed: %v", err)
+	}
+	if bobReviewed["main.go"] {
+		t.Errorf("expected main.go NOT to be reviewed for bob")
+	}
+
+	// Bob reviews main.go
+	err = database.MarkFileReviewed(ctx, 1, "main.go", "bob", true)
+	if err != nil {
+		t.Fatalf("MarkFileReviewed for bob failed: %v", err)
+	}
+	bobReviewed, err = database.ListReviewedFiles(ctx, 1, "bob")
+	if err != nil || !bobReviewed["main.go"] {
+		t.Errorf("expected main.go to be reviewed for bob, got %v", bobReviewed)
+	}
+
+	// Alice unmarks main.go
+	err = database.MarkFileReviewed(ctx, 1, "main.go", "alice", false)
+	if err != nil {
+		t.Fatalf("unmarking file reviewed failed: %v", err)
+	}
+	aliceReviewed, _ = database.ListReviewedFiles(ctx, 1, "alice")
+	if aliceReviewed["main.go"] {
+		t.Errorf("expected main.go to no longer be reviewed for alice")
+	}
+	// Bob should still have main.go reviewed
+	bobReviewed, _ = database.ListReviewedFiles(ctx, 1, "bob")
+	if !bobReviewed["main.go"] {
+		t.Errorf("expected main.go to remain reviewed for bob")
+	}
 }

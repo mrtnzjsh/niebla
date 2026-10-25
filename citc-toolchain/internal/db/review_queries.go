@@ -458,3 +458,52 @@ func (d *DB) UpdateCLStatus(ctx context.Context, clID int64, status string) erro
 	}
 	return nil
 }
+
+// FileReview captures a reviewer's reviewed status on a specific file in a changelist.
+type FileReview struct {
+	CLID      int64
+	FilePath  string
+	Reviewer  string
+	Reviewed  bool
+	UpdatedAt time.Time
+}
+
+// MarkFileReviewed sets or updates a reviewer's reviewed state on a specific file.
+func (d *DB) MarkFileReviewed(ctx context.Context, clID int64, filePath, reviewer string, reviewed bool) error {
+	query := `
+		INSERT INTO cl_file_reviews (cl_id, file_path, reviewer, reviewed, updated_at)
+		VALUES ($1, $2, $3, $4, now())
+		ON CONFLICT (cl_id, file_path, reviewer) DO UPDATE
+		SET reviewed = EXCLUDED.reviewed, updated_at = now();
+	`
+	_, err := d.pool.Exec(ctx, query, clID, filePath, reviewer, reviewed)
+	if err != nil {
+		return fmt.Errorf("failed to mark file %s reviewed: %w", filePath, err)
+	}
+	return nil
+}
+
+// ListReviewedFiles returns a set of file paths marked as reviewed by a specific reviewer for a changelist.
+func (d *DB) ListReviewedFiles(ctx context.Context, clID int64, reviewer string) (map[string]bool, error) {
+	query := `
+		SELECT file_path
+		FROM cl_file_reviews
+		WHERE cl_id = $1 AND reviewer = $2 AND reviewed = true;
+	`
+	rows, err := d.pool.Query(ctx, query, clID, reviewer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list reviewed files for cl %d, reviewer %s: %w", clID, reviewer, err)
+	}
+	defer rows.Close()
+
+	reviewed := make(map[string]bool)
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("failed to scan reviewed file path: %w", err)
+		}
+		reviewed[path] = true
+	}
+	return reviewed, rows.Err()
+}
+
