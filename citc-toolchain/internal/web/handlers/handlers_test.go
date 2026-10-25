@@ -360,11 +360,22 @@ func TestDraftCommentsAndReplyWorkflow(t *testing.T) {
 	recAliceAfter := httptest.NewRecorder()
 	clHandler.HandleCLView(recAliceAfter, reqAliceAfter)
 	aliceViewAfter := recAliceAfter.Body.String()
-	if !strings.Contains(aliceViewAfter, "First draft note") {
-		t.Errorf("expected published comment to be visible on CL view after reply")
+	if !strings.Contains(aliceViewAfter, "3 Unresolved Comments") {
+		t.Errorf("expected '3 Unresolved Comments' in overview bar, got: %s", aliceViewAfter)
 	}
 	if !strings.Contains(aliceViewAfter, "LGTM / Approve") {
 		t.Errorf("expected approval buttons on CL view")
+	}
+
+	// 6. Alice opens the accordion diff for engine.go via diff-content endpoint -> published comment is in the diff!
+	reqDiff := httptest.NewRequest("GET", "/cl/1/diff-content?file=internal/web/diff/engine.go&reviewer=alice", nil)
+	recDiff := httptest.NewRecorder()
+	clHandler.HandleCLDiffContent(recDiff, reqDiff)
+	if recDiff.Code != http.StatusOK {
+		t.Fatalf("HandleCLDiffContent returned status %d", recDiff.Code)
+	}
+	if !strings.Contains(recDiff.Body.String(), "First draft note") {
+		t.Errorf("expected published comment 'First draft note' in fresh diff-content")
 	}
 }
 
@@ -372,7 +383,7 @@ func TestFileReviewEndpoints(t *testing.T) {
 	ResetDemoStoresForTest()
 	handler := NewCLHandler(nil, nil)
 
-	// 1. Visit CL page as alice (auto-selects first file and marks it reviewed for alice)
+	// 1. Visit CL page as alice without file selection -> 0 of 4 reviewed by default
 	reqAlice := httptest.NewRequest("GET", "/cl/1?reviewer=alice", nil)
 	recAlice := httptest.NewRecorder()
 	handler.HandleCLView(recAlice, reqAlice)
@@ -381,24 +392,36 @@ func TestFileReviewEndpoints(t *testing.T) {
 		t.Fatalf("HandleCLView as alice returned status %d", recAlice.Code)
 	}
 	bodyAlice := recAlice.Body.String()
-	if !strings.Contains(bodyAlice, "1 of 4 reviewed by alice") {
-		t.Errorf("expected '1 of 4 reviewed by alice', got: %s", bodyAlice)
+	if !strings.Contains(bodyAlice, "0 of 4 reviewed by alice") {
+		t.Errorf("expected '0 of 4 reviewed by alice', got: %s", bodyAlice)
 	}
 
-	// 2. Visit CL page as bob without viewing alice's file -> should be 0 of 4 reviewed by bob
-	reqBob := httptest.NewRequest("GET", "/cl/1?reviewer=bob&file=cmd/critique/main.go", nil)
+	// 2. Alice visits a file diff directly -> 1 of 4 reviewed by alice
+	reqAliceFile := httptest.NewRequest("GET", "/cl/1/file/internal/web/diff/engine.go?reviewer=alice", nil)
+	recAliceFile := httptest.NewRecorder()
+	handler.HandleCLFileDiff(recAliceFile, reqAliceFile)
+	if recAliceFile.Code != http.StatusOK {
+		t.Fatalf("HandleCLFileDiff as alice returned status %d", recAliceFile.Code)
+	}
+	bodyAliceFile := recAliceFile.Body.String()
+	if !strings.Contains(bodyAliceFile, "1 of 4 reviewed by alice") {
+		t.Errorf("expected '1 of 4 reviewed by alice', got: %s", bodyAliceFile)
+	}
+
+	// 3. Bob visits a different file in standalone tab -> 1 of 4 reviewed by bob
+	reqBob := httptest.NewRequest("GET", "/cl/1/file/cmd/critique/main.go?reviewer=bob", nil)
 	recBob := httptest.NewRecorder()
-	handler.HandleCLView(recBob, reqBob)
+	handler.HandleCLFileDiff(recBob, reqBob)
 
 	if recBob.Code != http.StatusOK {
-		t.Fatalf("HandleCLView as bob returned status %d", recBob.Code)
+		t.Fatalf("HandleCLFileDiff as bob returned status %d", recBob.Code)
 	}
 	bodyBob := recBob.Body.String()
 	if !strings.Contains(bodyBob, "1 of 4 reviewed by bob") {
 		t.Errorf("expected '1 of 4 reviewed by bob', got: %s", bodyBob)
 	}
 
-	// 3. Mark another file as reviewed for bob via POST /cl/1/file-review
+	// 4. Mark another file as reviewed for bob via POST /cl/1/file-review
 	postBob := httptest.NewRequest("POST", "/cl/1/file-review?file=assets/css/input.css&reviewed=true&reviewer=bob", nil)
 	recPostBob := httptest.NewRecorder()
 	handler.HandleFileReview(recPostBob, postBob)
@@ -411,7 +434,7 @@ func TestFileReviewEndpoints(t *testing.T) {
 		t.Errorf("expected reviewed badge in response, got: %s", postBadge)
 	}
 
-	// 4. Toggle file back to not reviewed for bob
+	// 5. Toggle file back to not reviewed for bob
 	postUnreview := httptest.NewRequest("POST", "/cl/1/file-review?file=assets/css/input.css&reviewed=false&reviewer=bob", nil)
 	recUnreview := httptest.NewRecorder()
 	handler.HandleFileReview(recUnreview, postUnreview)
@@ -602,6 +625,150 @@ func TestSubmitCLEndpointGuards(t *testing.T) {
 	}
 	if !strings.Contains(recSub5.Body.String(), "cannot be submitted because its status is \"submitted\"") {
 		t.Errorf("expected already submitted error message, got: %s", recSub5.Body.String())
+	}
+}
+
+func TestCLViewNoDiffByDefaultAndAccordionMarkup(t *testing.T) {
+	ResetDemoStoresForTest()
+	handler := NewCLHandler(nil, nil)
+
+	req := httptest.NewRequest("GET", "/cl/1", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleCLView(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HandleCLView returned status %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+
+	// 1. No diff is rendered on the page by default
+	if strings.Contains(body, "Expand All Lines") {
+		t.Errorf("expected no diff view to be open by default on /cl/1")
+	}
+
+	// 2. All accordion rows should have class="hidden"
+	if !strings.Contains(body, `id="accordion-row-internal-web-diff-engine-go" class="border-b border-slate-800 bg-[#090d16] hidden"`) {
+		t.Errorf("expected accordion-row-internal-web-diff-engine-go to be hidden by default")
+	}
+
+	// 3. Chevrons and toggleFileAccordion should be present
+	if !strings.Contains(body, `id="chevron-internal-web-diff-engine-go"`) {
+		t.Errorf("expected chevron icon for internal/web/diff/engine.go")
+	}
+	if !strings.Contains(body, `toggleFileAccordion('1', 'internal-web-diff-engine-go', 'internal/web/diff/engine.go'`) {
+		t.Errorf("expected toggleFileAccordion call on file row")
+	}
+
+	// 4. Filename links should open in new tab with target="_blank" and handleFilenameClick
+	if !strings.Contains(body, `target="_blank"`) {
+		t.Errorf("expected target=\"_blank\" on file links")
+	}
+	if !strings.Contains(body, `handleFilenameClick(event, 'internal-web-diff-engine-go')`) {
+		t.Errorf("expected handleFilenameClick on file link")
+	}
+
+	// 5. Review badge cell should have stopPropagation
+	if !strings.Contains(body, `onclick="event.stopPropagation()"`) {
+		t.Errorf("expected stopPropagation on file review cell")
+	}
+}
+
+func TestCLDiffContentEndpoint(t *testing.T) {
+	ResetDemoStoresForTest()
+	handler := NewCLHandler(nil, nil)
+
+	// 1. Missing file parameter returns 400
+	reqMissing := httptest.NewRequest("GET", "/cl/1/diff-content", nil)
+	recMissing := httptest.NewRecorder()
+	handler.HandleCLDiffContent(recMissing, reqMissing)
+	if recMissing.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing file parameter, got: %d", recMissing.Code)
+	}
+
+	// 2. Valid request returns 200 with fresh DiffView component
+	req := httptest.NewRequest("GET", "/cl/1/diff-content?file=internal/web/diff/engine.go&ps=2&base_ps=0", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleCLDiffContent(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HandleCLDiffContent returned status %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "internal/web/diff/engine.go") {
+		t.Errorf("expected file path in diff content")
+	}
+	if !strings.Contains(body, "Expand All Lines") {
+		t.Errorf("expected Expand All Lines button in diff content")
+	}
+	// Check that comment rows are scoped by file path
+	if !strings.Contains(body, "comment-row-internal-web-diff-engine-go-") {
+		t.Errorf("expected file-scoped comment row IDs in diff content")
+	}
+}
+
+func TestCLDiffContentFreshCommentSync(t *testing.T) {
+	ResetDemoStoresForTest()
+	clHandler := NewCLHandler(nil, nil)
+	commentsHandler := NewCommentsHandler(nil)
+
+	// 1. Add draft comment on cmd/critique/main.go
+	form := strings.NewReader("cl_id=1&patchset_number=2&file_path=cmd/critique/main.go&line_number=10&side=modified&author=alice&body=Fresh+comment+sync+check")
+	reqComment := httptest.NewRequest("POST", "/cl/1/comments", form)
+	reqComment.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recComment := httptest.NewRecorder()
+	commentsHandler.HandleCreateComment(recComment, reqComment)
+	if recComment.Code != http.StatusOK {
+		t.Fatalf("HandleCreateComment failed: %d", recComment.Code)
+	}
+
+	// 2. Fetch fresh diff-content for cmd/critique/main.go as alice
+	reqDiff := httptest.NewRequest("GET", "/cl/1/diff-content?file=cmd/critique/main.go&ps=2&base_ps=0&reviewer=alice", nil)
+	recDiff := httptest.NewRecorder()
+	clHandler.HandleCLDiffContent(recDiff, reqDiff)
+
+	if recDiff.Code != http.StatusOK {
+		t.Fatalf("HandleCLDiffContent returned status %d", recDiff.Code)
+	}
+
+	body := recDiff.Body.String()
+	if !strings.Contains(body, "Fresh comment sync check") {
+		t.Errorf("expected newly saved draft comment to be present in fresh diff-content pull")
+	}
+}
+
+func TestCLFileDiffStandaloneTab(t *testing.T) {
+	ResetDemoStoresForTest()
+	handler := NewCLHandler(nil, nil)
+
+	// Open /cl/1/file/internal/web/diff/engine.go
+	req := httptest.NewRequest("GET", "/cl/1/file/internal/web/diff/engine.go?ps=2&base_ps=0", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleCLFileDiff(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HandleCLFileDiff returned status %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+
+	// 1. The targeted file's accordion is expanded (not hidden)
+	if strings.Contains(body, `id="accordion-row-internal-web-diff-engine-go" class="border-b border-slate-800 bg-[#090d16] hidden"`) {
+		t.Errorf("targeted file accordion row should NOT be hidden in standalone tab")
+	}
+	if !strings.Contains(body, `id="chevron-internal-web-diff-engine-go" class="text-slate-500 group-hover:text-slate-300 transition-transform duration-200 rotate-90"`) {
+		t.Errorf("targeted file chevron should be rotated 90 degrees")
+	}
+
+	// 2. The diff for this file is rendered
+	if !strings.Contains(body, "Expand All Lines") {
+		t.Errorf("expected diff to be rendered in standalone file tab")
+	}
+
+	// 3. Other files remain hidden
+	if !strings.Contains(body, `id="accordion-row-cmd-critique-main-go" class="border-b border-slate-800 bg-[#090d16] hidden"`) {
+		t.Errorf("non-targeted file accordions should remain hidden")
 	}
 }
 

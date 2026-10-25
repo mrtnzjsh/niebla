@@ -144,7 +144,7 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 								<td
 									if row.ModLine.LineNum > 0 {
 										hx-get={ fmt.Sprintf("/cl/%d/comment-box?file=%s&line=%d&end_line=%d&side=modified", clID, detail.Path, row.ModLine.LineNum, row.ModLine.LineNum) }
-										hx-target={ fmt.Sprintf("#comment-row-%d", row.ModLine.LineNum) }
+										hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(detail.Path), row.ModLine.LineNum) }
 										hx-swap="innerHTML"
 										data-line={ strconv.Itoa(row.ModLine.LineNum) }
 										data-cl={ strconv.FormatInt(clID, 10) }
@@ -174,7 +174,7 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 
 							<!-- Comment Thread Row (directly under the line) -->
 							if row.ModLine.LineNum > 0 {
-								<tr id={ fmt.Sprintf("comment-row-%d", row.ModLine.LineNum) } class="comment-thread-row">
+								<tr id={ fmt.Sprintf("comment-row-%s-%d", sanitizeHTMLID(detail.Path), row.ModLine.LineNum) } class="comment-thread-row">
 									if comments, exists := commentsByLine[row.ModLine.LineNum]; exists && len(comments) > 0 {
 										@CommentBox(clID, patchsetNumber, detail.Path, comments[0].LineNumber, row.ModLine.LineNum, "modified", comments)
 									}
@@ -226,14 +226,15 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 			function openCommentBoxForRange(start, end, filePath, clID, psNum) {
 				const minL = Math.min(start, end);
 				const maxL = Math.max(start, end);
-				const targetId = '#comment-row-' + maxL;
+				const safePath = filePath.replace(/[/.]/g, '-');
+				const targetId = '#comment-row-' + safePath + '-' + maxL;
 				const targetRow = document.querySelector(targetId);
 				if (!targetRow) return;
 
 				const url = `/cl/${clID}/comment-box?file=${encodeURIComponent(filePath)}&line=${minL}&end_line=${maxL}&side=modified&ps=${psNum}`;
 				htmx.ajax('GET', url, { target: targetId, swap: 'innerHTML' });
 				setTimeout(() => {
-					const container = document.getElementById('comment-container-' + maxL);
+					const container = document.getElementById('comment-container-' + safePath + '-' + maxL);
 					if (container) {
 						container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 						const ta = container.querySelector('textarea');

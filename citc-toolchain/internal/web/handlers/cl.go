@@ -166,6 +166,24 @@ func (h *CLHandler) HandleCLFileDiff(w http.ResponseWriter, r *http.Request) {
 	h.renderCLPage(w, r, clID, selectedFile)
 }
 
+// HandleCLDiffContent renders the fresh inline side-by-side diff for an accordion.
+// GET /cl/{id}/diff-content?file={path}&ps={ps}&base_ps={base_ps}
+func (h *CLHandler) HandleCLDiffContent(w http.ResponseWriter, r *http.Request) {
+	clID, err := parseCLID(r)
+	if err != nil {
+		http.Error(w, "invalid changelist id", http.StatusBadRequest)
+		return
+	}
+
+	targetFile := r.URL.Query().Get("file")
+	if targetFile == "" {
+		http.Error(w, "missing file parameter", http.StatusBadRequest)
+		return
+	}
+
+	h.renderCLDiffContent(w, r, clID, targetFile)
+}
+
 // HandleApproval records a reviewer's approval verdict on a changelist.
 // POST /cl/{id}/approval
 func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
@@ -783,11 +801,7 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		}
 	}
 
-	// 5. Select active file diff
-	if targetFile == "" && len(files) > 0 {
-		targetFile = files[0].Path
-	}
-
+	// 5. Select active file diff (only when explicitly requested)
 	if targetFile != "" {
 		_ = h.db.MarkFileReviewed(ctx, clID, targetFile, reviewer, true)
 	}
@@ -983,10 +997,6 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 		{Path: "assets/css/input.css", Type: "M", Additions: 15, Deletions: 3},
 	}
 
-	if targetFile == "" {
-		targetFile = "internal/web/diff/engine.go"
-	}
-
 	reviewer := h.resolveReviewer(r)
 	demoFileReviewsMu.Lock()
 	if targetFile != "" {
@@ -1058,10 +1068,13 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 		}
 	}
 
-	detail, _ := diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
-	if detail != nil {
-		detail.BaseBlobHex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-		detail.ModBlobHex = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4"
+	var detail *diff.FileDiffDetail
+	if targetFile != "" {
+		detail, _ = diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
+		if detail != nil {
+			detail.BaseBlobHex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			detail.ModBlobHex = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4"
+		}
 	}
 
 	demoCommentsMu.RLock()
@@ -1182,4 +1195,217 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = views.CLDetail(data).Render(r.Context(), w)
+}
+
+func (h *CLHandler) renderCLDiffContent(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
+	if h.db == nil {
+		h.renderDemoCLDiffContent(w, r, clID, targetFile)
+		return
+	}
+
+	ctx := r.Context()
+	cl, err := h.db.GetCL(ctx, clID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("changelist %d not found: %v", clID, err), http.StatusNotFound)
+		return
+	}
+
+	patchsets, _ := h.db.ListPatchsets(ctx, clID)
+	currentPS := 1
+	if len(patchsets) > 0 {
+		currentPS = patchsets[len(patchsets)-1].PatchsetNumber
+	}
+	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
+		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
+			currentPS = parsed
+		}
+	}
+
+	basePS := 0
+	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
+		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
+			basePS = parsed
+		}
+	}
+
+	var modTreeHash []byte
+	psObj, psErr := h.db.GetPatchset(ctx, clID, currentPS)
+	if psErr == nil && len(psObj.RootTreeHash) > 0 {
+		modTreeHash = psObj.RootTreeHash
+	} else {
+		modTreeHash = cl.RootTreeHash
+	}
+
+	var baseTreeHash []byte
+	if basePS == 0 {
+		if cl.ParentCL != nil && *cl.ParentCL > 0 {
+			parentCL, parentErr := h.db.GetCL(ctx, *cl.ParentCL)
+			if parentErr == nil && len(parentCL.RootTreeHash) > 0 {
+				baseTreeHash = parentCL.RootTreeHash
+			}
+		}
+		if len(baseTreeHash) == 0 {
+			baseTreeHash = tree.EmptyTreeHash
+		}
+	} else {
+		basePSObj, basePSErr := h.db.GetPatchset(ctx, clID, basePS)
+		if basePSErr == nil && len(basePSObj.RootTreeHash) > 0 {
+			baseTreeHash = basePSObj.RootTreeHash
+		} else {
+			baseTreeHash = tree.EmptyTreeHash
+		}
+	}
+
+	fetchTree := func(hash []byte) ([]tree.Entry, error) {
+		return h.db.GetTreeEntries(ctx, hash)
+	}
+
+	var baseBlobSHA, modBlobSHA []byte
+	changeType := "M"
+
+	baseEntry, _ := tree.ResolvePath(baseTreeHash, targetFile, fetchTree)
+	if baseEntry != nil {
+		baseBlobSHA = baseEntry.BlobSHA256
+	}
+	modEntry, _ := tree.ResolvePath(modTreeHash, targetFile, fetchTree)
+	if modEntry != nil {
+		modBlobSHA = modEntry.BlobSHA256
+	}
+
+	if baseBlobSHA == nil && modBlobSHA != nil {
+		changeType = "A"
+	} else if baseBlobSHA != nil && modBlobSHA == nil {
+		changeType = "D"
+	}
+
+	baseBytes, _ := h.readBlobBytes(baseBlobSHA)
+	modBytes, _ := h.readBlobBytes(modBlobSHA)
+
+	detail, err := diff.ComputeSideBySideDiff(targetFile, baseBytes, modBytes, changeType)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error computing diff for %s: %v", targetFile, err), http.StatusInternalServerError)
+		return
+	}
+	if detail != nil {
+		if len(baseBlobSHA) > 0 {
+			detail.BaseBlobHex = hex.EncodeToString(baseBlobSHA)
+		}
+		if len(modBlobSHA) > 0 {
+			detail.ModBlobHex = hex.EncodeToString(modBlobSHA)
+		}
+	}
+
+	reviewer := h.resolveReviewer(r)
+	fileComments, _ := h.db.ListComments(ctx, clID, targetFile)
+	commentsByLine := make(map[int][]db.Comment)
+	for _, c := range fileComments {
+		if !c.IsDraft || c.Author == reviewer {
+			anchorLine := c.EndLineNumber
+			if anchorLine <= 0 {
+				anchorLine = c.LineNumber
+			}
+			commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = views.DiffView(clID, currentPS, basePS, detail, commentsByLine).Render(r.Context(), w)
+}
+
+func (h *CLHandler) renderDemoCLDiffContent(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
+	currentPS := 2
+	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
+		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
+			currentPS = parsed
+		}
+	}
+	basePS := 0
+	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
+		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
+			basePS = parsed
+		}
+	}
+
+	baseData := []byte(`package diff
+
+import (
+	"context"
+	"fmt"
+)
+
+// DiffTrees performs diff between two trees.
+func DiffTrees(ctx context.Context, baseHash, modHash []byte) ([]FileDiffSummary, error) {
+	fmt.Println("Basic diff traversal")
+	return nil, nil
+}
+`)
+
+	modData := []byte(`package diff
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"citc-toolchain/pkg/tree"
+	"github.com/sergi/go-diff/diffmatchpatch"
+)
+
+// DiffTrees performs recursive Merkle tree traversal between base and mod revisions.
+func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modHash []byte) ([]FileDiffSummary, error) {
+	var results []FileDiffSummary
+	fmt.Println("Advanced server-authoritative Merkle diff")
+	dmp := diffmatchpatch.New()
+	_ = dmp
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Path < results[j].Path
+	})
+	return results, nil
+}
+`)
+
+	if diskData, err := os.ReadFile(targetFile); err == nil && len(diskData) > 0 {
+		modData = diskData
+		lines := strings.Split(string(diskData), "\n")
+		if len(lines) > 20 {
+			baseLines := append(lines[:10], lines[len(lines)-10:]...)
+			baseData = []byte(strings.Join(baseLines, "\n"))
+		}
+	}
+
+	changeType := "M"
+	if targetFile == "internal/web/views/diff_view.templ" {
+		changeType = "A"
+		baseData = nil
+	}
+
+	detail, err := diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error computing demo diff for %s: %v", targetFile, err), http.StatusInternalServerError)
+		return
+	}
+	if detail != nil {
+		detail.BaseBlobHex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+		detail.ModBlobHex = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4"
+	}
+
+	reviewer := h.resolveReviewer(r)
+	demoCommentsMu.RLock()
+	commentsByLine := make(map[int][]db.Comment)
+	for key, list := range demoCommentsStore {
+		for _, c := range list {
+			if strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
+				if !c.IsDraft || c.Author == reviewer {
+					anchorLine := c.EndLineNumber
+					if anchorLine <= 0 {
+						anchorLine = c.LineNumber
+					}
+					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+				}
+			}
+		}
+	}
+	demoCommentsMu.RUnlock()
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = views.DiffView(clID, currentPS, basePS, detail, commentsByLine).Render(r.Context(), w)
 }

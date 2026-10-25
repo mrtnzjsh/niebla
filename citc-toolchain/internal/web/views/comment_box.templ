@@ -20,7 +20,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 		}
 	}
 	<td colspan="4" class="p-0 border-y-2 border-sky-800/60 bg-[#0a0f1d] shadow-inner">
-		<div id={ fmt.Sprintf("comment-container-%d", endLine) } class="px-6 py-4 max-w-4xl mx-auto my-2 rounded-xl border border-slate-700/60 bg-[#0f172a] shadow-2xl">
+		<div id={ fmt.Sprintf("comment-container-%s-%d", sanitizeHTMLID(filePath), endLine) } class="px-6 py-4 max-w-4xl mx-auto my-2 rounded-xl border border-slate-700/60 bg-[#0f172a] shadow-2xl">
 			<!-- Thread Header -->
 			<div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
 				<div class="flex items-center space-x-2 text-xs">
@@ -54,7 +54,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 					if len(comments) == 0 {
 						<button
 							type="button"
-							onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('comment-row-%d').innerHTML = '';", endLine)} }
+							onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('comment-row-%s-%d').innerHTML = '';", sanitizeHTMLID(filePath), endLine)} }
 							class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition"
 						>
 							Cancel
@@ -89,7 +89,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 										<button
 											type="button"
 											hx-post={ fmt.Sprintf("/cl/%d/comments/%d/discard?author=%s", clID, c.ID, url.QueryEscape(c.Author)) }
-											hx-target={ fmt.Sprintf("#comment-row-%d", endLine) }
+											hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), endLine) }
 											hx-swap="innerHTML"
 											class="text-[11px] px-2 py-0.5 rounded font-medium bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-800/40 transition flex items-center space-x-1"
 											title="Discard this draft comment"
@@ -101,7 +101,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 										<button
 											type="button"
 											hx-post={ fmt.Sprintf("/cl/%d/comments/%d/resolve?resolved=%t", clID, c.ID, !c.Resolved) }
-											hx-target={ fmt.Sprintf("#comment-row-%d", endLine) }
+											hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), endLine) }
 											hx-swap="innerHTML"
 											class={ "text-[11px] px-2 py-0.5 rounded font-medium transition flex items-center space-x-1", templ.KV("bg-emerald-900/40 text-emerald-300 hover:bg-emerald-800/50", !c.Resolved), templ.KV("bg-slate-800 text-slate-400 hover:bg-slate-700", c.Resolved) }
 										>
@@ -125,7 +125,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 			<!-- Reply / New Comment Form -->
 			<form
 				hx-post={ fmt.Sprintf("/cl/%d/comments", clID) }
-				hx-target={ fmt.Sprintf("#comment-row-%d", endLine) }
+				hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), endLine) }
 				hx-swap="innerHTML"
 				class="space-y-3 pt-2"
 			>

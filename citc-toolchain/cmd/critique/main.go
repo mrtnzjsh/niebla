@@ -149,6 +149,7 @@ func main() {
 
 	// CL detail & diff views
 	mux.HandleFunc("GET /cl/{id}", clHandler.HandleCLView)
+	mux.HandleFunc("GET /cl/{id}/diff-content", clHandler.HandleCLDiffContent)
 	mux.HandleFunc("GET /cl/{id}/file/{path...}", clHandler.HandleCLFileDiff)
 	mux.HandleFunc("POST /cl/{id}/approval", clHandler.HandleApproval)
 	mux.HandleFunc("POST /cl/{id}/file-review", clHandler.HandleFileReview)
