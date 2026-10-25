@@ -19,18 +19,34 @@ type Patchset struct {
 }
 
 // Comment represents an inline or file-level code review comment thread entry.
+// For single-line comments, EndLineNumber equals LineNumber.
+// For multi-line code block comments, LineNumber is start line and EndLineNumber is end line.
 type Comment struct {
 	ID              int64
 	CLID            int64
 	PatchsetNumber  int
 	FilePath        string
 	LineNumber      int
+	EndLineNumber   int
 	Side            string // 'base' or 'modified'
 	Author          string
 	Body            string
 	Resolved        bool
 	ParentCommentID *int64
 	CreatedAt       time.Time
+}
+
+// LineRangeStr returns a human-friendly range representation (e.g. "Line 42" or "Lines 42–48").
+func (c Comment) LineRangeStr() string {
+	if c.EndLineNumber > c.LineNumber {
+		return fmt.Sprintf("Lines %d–%d", c.LineNumber, c.EndLineNumber)
+	}
+	return fmt.Sprintf("Line %d", c.LineNumber)
+}
+
+// IsMultiLine returns true if this comment spans multiple lines.
+func (c Comment) IsMultiLine() bool {
+	return c.EndLineNumber > c.LineNumber
 }
 
 // Approval represents a reviewer's verdict on a changelist.
@@ -148,10 +164,10 @@ func (d *DB) CreatePatchset(ctx context.Context, clID int64, patchsetNumber int,
 // ListComments retrieves all comments for a specific file in a changelist.
 func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
 		FROM cl_comments
 		WHERE cl_id = $1 AND file_path = $2
-		ORDER BY line_number ASC, created_at ASC;
+		ORDER BY line_number ASC, end_line_number ASC, created_at ASC;
 	`
 	rows, err := d.pool.Query(ctx, query, clID, filePath)
 	if err != nil {
@@ -168,6 +184,7 @@ func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]C
 			&c.PatchsetNumber,
 			&c.FilePath,
 			&c.LineNumber,
+			&c.EndLineNumber,
 			&c.Side,
 			&c.Author,
 			&c.Body,
@@ -177,6 +194,9 @@ func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]C
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
 		}
+		if c.EndLineNumber <= 0 {
+			c.EndLineNumber = c.LineNumber
+		}
 		comments = append(comments, c)
 	}
 	return comments, rows.Err()
@@ -185,9 +205,9 @@ func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]C
 // ListCommentsForLine retrieves comments for a specific file, line, and side.
 func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath string, line int, side string) ([]Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
 		FROM cl_comments
-		WHERE cl_id = $1 AND file_path = $2 AND line_number = $3 AND side = $4
+		WHERE cl_id = $1 AND file_path = $2 AND (end_line_number = $3 OR (end_line_number <= 0 AND line_number = $3)) AND side = $4
 		ORDER BY created_at ASC;
 	`
 	rows, err := d.pool.Query(ctx, query, clID, filePath, line, side)
@@ -205,6 +225,7 @@ func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath strin
 			&c.PatchsetNumber,
 			&c.FilePath,
 			&c.LineNumber,
+			&c.EndLineNumber,
 			&c.Side,
 			&c.Author,
 			&c.Body,
@@ -214,6 +235,9 @@ func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath strin
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
 		}
+		if c.EndLineNumber <= 0 {
+			c.EndLineNumber = c.LineNumber
+		}
 		comments = append(comments, c)
 	}
 	return comments, rows.Err()
@@ -222,10 +246,10 @@ func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath strin
 // ListAllComments retrieves all comments for a changelist across all files.
 func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
 		FROM cl_comments
 		WHERE cl_id = $1
-		ORDER BY file_path ASC, line_number ASC, created_at ASC;
+		ORDER BY file_path ASC, line_number ASC, end_line_number ASC, created_at ASC;
 	`
 	rows, err := d.pool.Query(ctx, query, clID)
 	if err != nil {
@@ -242,6 +266,7 @@ func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error)
 			&c.PatchsetNumber,
 			&c.FilePath,
 			&c.LineNumber,
+			&c.EndLineNumber,
 			&c.Side,
 			&c.Author,
 			&c.Body,
@@ -251,25 +276,32 @@ func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error)
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
 		}
+		if c.EndLineNumber <= 0 {
+			c.EndLineNumber = c.LineNumber
+		}
 		comments = append(comments, c)
 	}
 	return comments, rows.Err()
 }
 
-// CreateComment inserts a new comment into cl_comments.
-func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, filePath string, line int, side, author, body string, parentID *int64) (*Comment, error) {
+// CreateComment inserts a new comment into cl_comments with range support.
+func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, filePath string, line, endLine int, side, author, body string, parentID *int64) (*Comment, error) {
+	if endLine < line {
+		endLine = line
+	}
 	query := `
-		INSERT INTO cl_comments (cl_id, patchset_number, file_path, line_number, side, author, body, parent_comment_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, cl_id, patchset_number, file_path, line_number, side, author, body, resolved, parent_comment_id, created_at;
+		INSERT INTO cl_comments (cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, parent_comment_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at;
 	`
 	var c Comment
-	err := d.pool.QueryRow(ctx, query, clID, patchsetNumber, filePath, line, side, author, body, parentID).Scan(
+	err := d.pool.QueryRow(ctx, query, clID, patchsetNumber, filePath, line, endLine, side, author, body, parentID).Scan(
 		&c.ID,
 		&c.CLID,
 		&c.PatchsetNumber,
 		&c.FilePath,
 		&c.LineNumber,
+		&c.EndLineNumber,
 		&c.Side,
 		&c.Author,
 		&c.Body,
@@ -303,7 +335,7 @@ func (d *DB) ResolveComment(ctx context.Context, commentID int64, resolved bool)
 // GetComment retrieves a single comment by ID.
 func (d *DB) GetComment(ctx context.Context, commentID int64) (*Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
 		FROM cl_comments
 		WHERE id = $1;
 	`
@@ -314,6 +346,7 @@ func (d *DB) GetComment(ctx context.Context, commentID int64) (*Comment, error) 
 		&c.PatchsetNumber,
 		&c.FilePath,
 		&c.LineNumber,
+		&c.EndLineNumber,
 		&c.Side,
 		&c.Author,
 		&c.Body,
@@ -326,6 +359,9 @@ func (d *DB) GetComment(ctx context.Context, commentID int64) (*Comment, error) 
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to query comment %d: %w", commentID, err)
+	}
+	if c.EndLineNumber <= 0 {
+		c.EndLineNumber = c.LineNumber
 	}
 	return &c, nil
 }

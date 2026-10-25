@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS cl_comments (
     patchset_number INT NOT NULL DEFAULT 1,
     file_path TEXT NOT NULL,
     line_number INT NOT NULL,
+    end_line_number INT NOT NULL DEFAULT 0,
     side TEXT NOT NULL CHECK (side IN ('base', 'modified')),
     author TEXT NOT NULL,
     body TEXT NOT NULL,
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS cl_comments (
     parent_comment_id BIGINT REFERENCES cl_comments(id),
     created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE cl_comments ADD COLUMN IF NOT EXISTS end_line_number INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_comments_cl_file ON cl_comments(cl_id, file_path);
 
 CREATE TABLE IF NOT EXISTS cl_approvals (
