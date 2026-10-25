@@ -33,6 +33,9 @@ type CLDetailData struct {
 templ CLDetail(data CLDetailData) {
 	@Layout(fmt.Sprintf("CL %d: %s", data.CL.CLID, data.CL.Description)) {
 		<div class="flex-1 flex flex-col bg-[#090d16]">
+			<!-- Centered Actions Row: Reply and Submit above CL status/info bar and below top header -->
+			@CenterActions(data)
+
 			<!-- CL Header Overview -->
 			<div class="border-b border-slate-800 bg-[#0c1322] px-6 py-4 shadow-sm">
 				<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -62,9 +65,6 @@ templ CLDetail(data CLDetailData) {
 					<!-- Reviewer Approvals, Reviewers List & Actions Bar -->
 					@CLActionsBar(data)
 				</div>
-
-				<!-- Centered Actions Row: Reply and Submit on their own row beneath the top bar -->
-				@CenterActions(data)
 
 				<!-- Patchset Selector & Unresolved Summary Bar -->
 				<div class="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -240,7 +240,7 @@ templ ApprovalsControl(data CLDetailData) {
 }
 
 templ CenterActions(data CLDetailData) {
-	<div id="cl-center-actions" class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-center space-x-4">
+	<div id="cl-center-actions" class="bg-[#0b101d] border-b border-slate-800/80 px-6 py-2.5 flex items-center justify-center space-x-4 shadow-sm">
 		<div id="cl-reply-btn-container">
 			@ReplyButton(data.CL.CLID, data.DraftCommentsCount)
 		</div>
