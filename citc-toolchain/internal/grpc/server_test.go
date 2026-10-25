@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
 	"citc-toolchain/pkg/cas"
 	"citc-toolchain/pkg/tree"
@@ -25,7 +26,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func setupTestEnvironment(t *testing.T) (citcv1.RepositoryServiceClient, *db.DB, *cas.Storage, func()) {
+func setupTestEnvironment(t *testing.T) (citcv1.RepositoryServiceClient, *db.DB, *cas.Storage, *Server, func()) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -120,7 +121,7 @@ func setupTestEnvironment(t *testing.T) (citcv1.RepositoryServiceClient, *db.DB,
 		_ = pgContainer.Terminate(context.Background())
 	}
 
-	return client, database, casStorage, cleanup
+	return client, database, casStorage, serverInstance, cleanup
 }
 
 func TestRepositoryServiceEndToEnd(t *testing.T) {
@@ -129,7 +130,7 @@ func TestRepositoryServiceEndToEnd(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	client, database, casStorage, cleanup := setupTestEnvironment(t)
+	client, database, casStorage, serverInstance, cleanup := setupTestEnvironment(t)
 	defer cleanup()
 
 	// 1. Test GetHeadCL on initial repository
@@ -368,8 +369,76 @@ func TestRepositoryServiceEndToEnd(t *testing.T) {
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("expected NotFound for missing node, got %v", err)
 	}
+
+	// 8. Test ShelveCL with Reviewers and SubmitCL guards
+	t.Log("Testing ShelveCL with Reviewers and SubmitCL guards")
+
+	// Set strict policy: allow_submit_with_unresolved_comments = false, required_approvals = 1
+	strictCfg := config.DefaultConfig()
+	strictCfg.Critique.Auth.Mode = "headers"
+	allowUnresolved := false
+	strictCfg.Critique.AllowSubmitWithUnresolvedComments = &allowUnresolved
+	reqApprovals := 1
+	strictCfg.Critique.RequiredApprovals = &reqApprovals
+	serverInstance.SetToolchainConfig(strictCfg)
+
+	// Shelve a new CL with reviewers: alice and bob
+	shelveResp2, err := client.ShelveCL(ctx, &citcv1.ShelveCLRequest{
+		WorkspaceId:  wsResp.WorkspaceId,
+		Author:       "eng-user",
+		Description:  "CL with reviewers and guards",
+		RootTreeHash: rootTreeHash,
+		ParentCl:     shelveResp.ClId,
+		Reviewers:    []string{"alice", "bob"},
+	})
+	if err != nil {
+		t.Fatalf("ShelveCL with reviewers failed: %v", err)
+	}
+
+	// Verify reviewers are recorded in database
+	assignedReviewers, err := database.ListReviewers(ctx, shelveResp2.ClId)
+	if err != nil {
+		t.Fatalf("ListReviewers failed: %v", err)
+	}
+	if len(assignedReviewers) != 2 {
+		t.Errorf("expected 2 assigned reviewers, got %d", len(assignedReviewers))
+	}
+
+	// Add an unresolved comment
+	createdComment, err := database.CreateComment(ctx, shelveResp2.ClId, 1, "server.go", 10, 10, "modified", "alice", "Needs refactoring", nil, false)
+	if err != nil {
+		t.Fatalf("CreateComment failed: %v", err)
+	}
+
+	// Attempt submit without force -> must fail due to unresolved comment
+	_, err = client.SubmitCL(ctx, &citcv1.SubmitCLRequest{ClId: shelveResp2.ClId, Force: false})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition for unresolved comments, got code %v: %v", status.Code(err), err)
+	}
+
+	// Resolve the comment
+	err = database.ResolveComment(ctx, createdComment.ID, true)
+	if err != nil {
+		t.Fatalf("ResolveComment failed: %v", err)
+	}
+
+	// Attempt submit without force -> must fail due to missing required approvals (0 of 1)
+	_, err = client.SubmitCL(ctx, &citcv1.SubmitCLRequest{ClId: shelveResp2.ClId, Force: false})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition for missing approvals, got code %v: %v", status.Code(err), err)
+	}
+
+	// Submit with force = true -> bypasses guards and succeeds
+	forcedResp, err := client.SubmitCL(ctx, &citcv1.SubmitCLRequest{ClId: shelveResp2.ClId, Force: true})
+	if err != nil {
+		t.Fatalf("SubmitCL with force failed: %v", err)
+	}
+	if forcedResp.ClId != shelveResp2.ClId {
+		t.Errorf("forced submit CL mismatch")
+	}
 }
 
 func errorsIsEOF(err error) bool {
 	return err == io.EOF
 }
+

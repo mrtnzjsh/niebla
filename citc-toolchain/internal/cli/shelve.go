@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"citc-toolchain/internal/cli/config"
+	toolchainconfig "citc-toolchain/internal/config"
+	"citc-toolchain/internal/groups"
 	"citc-toolchain/pkg/cas"
 	"citc-toolchain/pkg/tree"
 	citcv1 "citc-toolchain/proto/v1"
@@ -29,6 +31,7 @@ type uploadedBlob struct {
 func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 	var description string
 	var parentCL int64
+	var reviewers string
 
 	cmd := &cobra.Command{
 		Use:   "shelve",
@@ -105,6 +108,20 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 				effectiveParentCL = ws.BaseCL
 			}
 
+			// Resolve reviewers if specified (expanding user groups if present)
+			var resolvedReviewers []string
+			if strings.TrimSpace(reviewers) != "" {
+				toolchainCfg, err := toolchainconfig.Load()
+				if err != nil {
+					toolchainCfg = toolchainconfig.DefaultConfig()
+				}
+				resolver := groups.NewResolver(toolchainCfg.Critique.Groups)
+				resolvedReviewers, err = groups.ExpandReviewers(ctx, resolver, []string{reviewers})
+				if err != nil {
+					return fmt.Errorf("failed to expand reviewers %q: %w", reviewers, err)
+				}
+			}
+
 			// 3. Call ShelveCL on citc-server
 			author := getCurrentUsername()
 			shelveResp, err := client.ShelveCL(ctx, &citcv1.ShelveCLRequest{
@@ -113,6 +130,7 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 				Description:  description,
 				RootTreeHash: newRootTreeHash,
 				ParentCl:     effectiveParentCL,
+				Reviewers:    resolvedReviewers,
 			})
 			if err != nil {
 				return fmt.Errorf("server failed to shelve changelist: %w", err)
@@ -132,6 +150,7 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 
 	cmd.Flags().StringVarP(&description, "message", "m", "", "Changelist description (required)")
 	cmd.Flags().Int64Var(&parentCL, "on-cl", 0, "Parent changelist ID (defaults to workspace base CL)")
+	cmd.Flags().StringVar(&reviewers, "reviewers", "", "Comma-separated list of reviewer usernames or @group names")
 
 	return cmd
 }

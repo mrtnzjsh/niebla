@@ -78,6 +78,7 @@ message ShelveCLRequest {
   string description = 3;
   bytes root_tree_hash = 4;
   int64 parent_cl = 5;
+  repeated string reviewers = 6;
 }
 
 message ShelveCLResponse {
@@ -86,6 +87,7 @@ message ShelveCLResponse {
 
 message SubmitCLRequest {
   int64 cl_id = 1;
+  bool force = 2;
 }
 
 message SubmitCLResponse {

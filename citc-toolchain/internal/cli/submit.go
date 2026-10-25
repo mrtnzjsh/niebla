@@ -15,6 +15,7 @@ import (
 // NewSubmitCmd constructs the 'submit' command.
 func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 	var targetCL int64
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "submit",
@@ -59,7 +60,8 @@ func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 			defer conn.Close()
 
 			resp, err := client.SubmitCL(ctx, &citcv1.SubmitCLRequest{
-				ClId: clIDToSubmit,
+				ClId:  clIDToSubmit,
+				Force: force,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to submit CL %d: %w", clIDToSubmit, err)
@@ -80,6 +82,7 @@ func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 	}
 
 	cmd.Flags().Int64Var(&targetCL, "cl", 0, "Changelist ID to submit (defaults to active shelved CL in current workspace)")
+	cmd.Flags().BoolVar(&force, "force", false, "Force submission, bypassing unresolved comments and approval requirements")
 
 	return cmd
 }

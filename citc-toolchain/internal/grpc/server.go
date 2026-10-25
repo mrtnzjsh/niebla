@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 
+	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
 	"citc-toolchain/pkg/cas"
 	"citc-toolchain/pkg/tree"
@@ -28,13 +30,14 @@ const (
 type Server struct {
 	citcv1.UnimplementedRepositoryServiceServer
 
-	db         *db.DB
-	casStorage *cas.Storage
-	treeCache  *lru.Cache[string, []*citcv1.NodeEntry]
+	db              *db.DB
+	casStorage      *cas.Storage
+	treeCache       *lru.Cache[string, []*citcv1.NodeEntry]
+	toolchainConfig *config.Config
 }
 
 // NewServer creates a new instance of the RepositoryService gRPC server.
-func NewServer(database *db.DB, casStorage *cas.Storage, cacheSize int) (*Server, error) {
+func NewServer(database *db.DB, casStorage *cas.Storage, cacheSize int, configs ...*config.Config) (*Server, error) {
 	if cacheSize <= 0 {
 		cacheSize = DefaultTreeCacheSize
 	}
@@ -44,16 +47,29 @@ func NewServer(database *db.DB, casStorage *cas.Storage, cacheSize int) (*Server
 		return nil, fmt.Errorf("failed to initialize tree LRU cache: %w", err)
 	}
 
+	var toolchainCfg *config.Config
+	if len(configs) > 0 && configs[0] != nil {
+		toolchainCfg = configs[0]
+	} else if loaded, err := config.Load(); err == nil {
+		toolchainCfg = loaded
+	}
+
 	return &Server{
-		db:         database,
-		casStorage: casStorage,
-		treeCache:  cache,
+		db:              database,
+		casStorage:      casStorage,
+		treeCache:       cache,
+		toolchainConfig: toolchainCfg,
 	}, nil
 }
 
 // Register registers the server with a gRPC server instance.
 func (s *Server) Register(grpcServer *grpc.Server) {
 	citcv1.RegisterRepositoryServiceServer(grpcServer, s)
+}
+
+// SetToolchainConfig updates the active toolchain configuration for review and submit guards.
+func (s *Server) SetToolchainConfig(cfg *config.Config) {
+	s.toolchainConfig = cfg
 }
 
 // GetTree returns all directory entries for a given tree hash, utilizing an LRU cache.
@@ -223,6 +239,12 @@ func (s *Server) ShelveCL(ctx context.Context, req *citcv1.ShelveCLRequest) (*ci
 		return nil, status.Errorf(codes.Internal, "failed to shelve CL: %v", err)
 	}
 
+	if len(req.Reviewers) > 0 {
+		if err := s.db.AddReviewers(ctx, clID, req.Reviewers); err != nil {
+			log.Printf("warning: failed to assign reviewers to CL %d: %v", clID, err)
+		}
+	}
+
 	return &citcv1.ShelveCLResponse{ClId: clID}, nil
 }
 
@@ -230,6 +252,40 @@ func (s *Server) ShelveCL(ctx context.Context, req *citcv1.ShelveCLRequest) (*ci
 func (s *Server) SubmitCL(ctx context.Context, req *citcv1.SubmitCLRequest) (*citcv1.SubmitCLResponse, error) {
 	if req.ClId <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "valid cl_id is required")
+	}
+
+	if !req.Force {
+		// 1. Guard: Check unresolved comments if policy forbids submitting with them
+		unresolved, err := s.db.CountUnresolvedComments(ctx, req.ClId)
+		if err != nil {
+			log.Printf("warning: failed to count unresolved comments for CL %d: %v", req.ClId, err)
+		} else if unresolved > 0 {
+			allowUnresolved := false
+			if s.toolchainConfig != nil {
+				allowUnresolved = s.toolchainConfig.Critique.GetAllowSubmitWithUnresolvedComments()
+			}
+			if !allowUnresolved {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"cannot submit CL %d: %d unresolved comment thread(s) pending. Resolve all comments before submitting to trunk",
+					req.ClId, unresolved)
+			}
+		}
+
+		// 2. Guard: Check required approvals
+		requiredApprovals := 0
+		if s.toolchainConfig != nil {
+			requiredApprovals = s.toolchainConfig.Critique.GetRequiredApprovals()
+		}
+		if requiredApprovals > 0 {
+			approvals, err := s.db.CountApprovals(ctx, req.ClId)
+			if err != nil {
+				log.Printf("warning: failed to count approvals for CL %d: %v", req.ClId, err)
+			} else if approvals < requiredApprovals {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"cannot submit CL %d: requires %d approval(s), but only %d recorded",
+					req.ClId, requiredApprovals, approvals)
+			}
+		}
 	}
 
 	cl, err := s.db.SubmitCL(ctx, req.ClId)
