@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 // Config represents the unified toolchain configuration stored in ~/.config/citc-toolchain/config.toml.
 type Config struct {
 	Version  int            `toml:"version"`
@@ -37,14 +39,53 @@ type CritiqueAuthConfig struct {
 	HeaderName  string `toml:"header_name"`  // defaults to "X-Forwarded-User"
 }
 
+// CritiqueGroupConfig governs enterprise user group resolution.
+type CritiqueGroupConfig struct {
+	Mode   string              `toml:"mode"`             // "static", "api", "disabled"
+	Static map[string][]string `toml:"static,omitempty"` // map of group names to member usernames
+	API    CritiqueGroupAPI    `toml:"api,omitempty"`
+}
+
+// CritiqueGroupAPI specifies settings for an external directory/IdP HTTP API.
+type CritiqueGroupAPI struct {
+	URL       string `toml:"url,omitempty"`
+	TokenEnv  string `toml:"token_env,omitempty"`
+	TimeoutMS int    `toml:"timeout_ms,omitempty"`
+}
+
 // CritiqueConfig holds review web service options.
 type CritiqueConfig struct {
-	Host            string             `toml:"host"`
-	Port            int                `toml:"port"`
-	ProxyPort       int                `toml:"proxy_port"`
-	DefaultReviewer string             `toml:"default_reviewer"`
-	Auth            CritiqueAuthConfig `toml:"auth"`
-	Theme           ThemeConfig        `toml:"theme"`
+	Host                              string              `toml:"host"`
+	Port                              int                 `toml:"port"`
+	ProxyPort                         int                 `toml:"proxy_port"`
+	DefaultReviewer                   string              `toml:"default_reviewer"`
+	RequiredApprovals                 *int                `toml:"required_approvals,omitempty"`
+	AllowSubmitWithUnresolvedComments *bool               `toml:"allow_submit_with_unresolved_comments,omitempty"`
+	Auth                              CritiqueAuthConfig `toml:"auth"`
+	Groups                            CritiqueGroupConfig `toml:"groups"`
+	Theme                             ThemeConfig         `toml:"theme"`
+}
+
+// GetRequiredApprovals returns the configured required approvals count,
+// or intelligently defaults to 0 in local/tailscale mode and 1 in multi-user/remote modes.
+func (c *CritiqueConfig) GetRequiredApprovals() int {
+	if c.RequiredApprovals != nil {
+		return *c.RequiredApprovals
+	}
+	mode := strings.ToLower(strings.TrimSpace(c.Auth.Mode))
+	if mode == "local" || mode == "tailscale" || mode == "" {
+		return 0
+	}
+	return 1
+}
+
+// GetAllowSubmitWithUnresolvedComments returns whether CLs can be submitted with unresolved comments.
+// Defaults strictly to false.
+func (c *CritiqueConfig) GetAllowSubmitWithUnresolvedComments() bool {
+	if c.AllowSubmitWithUnresolvedComments != nil {
+		return *c.AllowSubmitWithUnresolvedComments
+	}
+	return false
 }
 
 // ThemeConfig governs the UI visual appearance and Chroma syntax highlighting.
@@ -99,6 +140,10 @@ func DefaultConfig() *Config {
 				Mode:        "local",
 				DefaultUser: "$USER",
 				HeaderName:  "X-Forwarded-User",
+			},
+			Groups: CritiqueGroupConfig{
+				Mode:   "static",
+				Static: make(map[string][]string),
 			},
 			Theme: ThemeConfig{
 				Preset:      "catppuccin-mocha",

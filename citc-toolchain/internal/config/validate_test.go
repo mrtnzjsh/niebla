@@ -195,4 +195,96 @@ func TestValidateAuthMode(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredApprovals(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// Negative value should fail validation
+	neg := -1
+	cfg.Critique.RequiredApprovals = &neg
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "required_approvals cannot be negative") {
+		t.Errorf("expected negative required_approvals error, got: %v", err)
+	}
+
+	// Zero and positive values should pass
+	zero := 0
+	cfg.Critique.RequiredApprovals = &zero
+	if err := Validate(cfg); err != nil {
+		t.Errorf("expected 0 required_approvals to be valid, got: %v", err)
+	}
+
+	two := 2
+	cfg.Critique.RequiredApprovals = &two
+	if err := Validate(cfg); err != nil {
+		t.Errorf("expected 2 required_approvals to be valid, got: %v", err)
+	}
+}
+
+func TestValidateGroupsConfig(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// Invalid mode
+	cfg.Critique.Groups.Mode = "ldap_custom"
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "unknown groups mode") {
+		t.Errorf("expected unknown groups mode error, got: %v", err)
+	}
+
+	// API mode with empty URL
+	cfg.Critique.Groups.Mode = "api"
+	cfg.Critique.Groups.API.URL = ""
+	err = Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "groups API URL cannot be empty") {
+		t.Errorf("expected empty API URL error, got: %v", err)
+	}
+
+	// Valid API mode
+	cfg.Critique.Groups.API.URL = "https://idp.example.com/groups"
+	if err := Validate(cfg); err != nil {
+		t.Errorf("expected valid API mode, got: %v", err)
+	}
+}
+
+func TestConfigDefaultsAndGetters(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// In local mode, default required approvals should be 0
+	cfg.Critique.Auth.Mode = "local"
+	cfg.Critique.RequiredApprovals = nil
+	if val := cfg.Critique.GetRequiredApprovals(); val != 0 {
+		t.Errorf("expected local mode to default to 0 required approvals, got %d", val)
+	}
+
+	// In tailscale mode, default required approvals should be 0
+	cfg.Critique.Auth.Mode = "tailscale"
+	if val := cfg.Critique.GetRequiredApprovals(); val != 0 {
+		t.Errorf("expected tailscale mode to default to 0 required approvals, got %d", val)
+	}
+
+	// In headers mode, default required approvals should be 1
+	cfg.Critique.Auth.Mode = "headers"
+	if val := cfg.Critique.GetRequiredApprovals(); val != 1 {
+		t.Errorf("expected headers mode to default to 1 required approvals, got %d", val)
+	}
+
+	// Explicit override takes precedence
+	three := 3
+	cfg.Critique.RequiredApprovals = &three
+	if val := cfg.Critique.GetRequiredApprovals(); val != 3 {
+		t.Errorf("expected explicit required approvals 3, got %d", val)
+	}
+
+	// AllowSubmitWithUnresolvedComments defaults to false
+	if val := cfg.Critique.GetAllowSubmitWithUnresolvedComments(); val != false {
+		t.Errorf("expected default allow submit with unresolved comments to be false, got %t", val)
+	}
+
+	allow := true
+	cfg.Critique.AllowSubmitWithUnresolvedComments = &allow
+	if val := cfg.Critique.GetAllowSubmitWithUnresolvedComments(); val != true {
+		t.Errorf("expected allow submit with unresolved comments to be true, got %t", val)
+	}
+}
+
+
 

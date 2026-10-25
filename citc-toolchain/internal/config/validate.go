@@ -209,6 +209,37 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// Required approvals validation
+	if cfg.Critique.RequiredApprovals != nil && *cfg.Critique.RequiredApprovals < 0 {
+		errs = append(errs, ValidationError{
+			Field:   "critique.required_approvals",
+			Value:   fmt.Sprintf("%d", *cfg.Critique.RequiredApprovals),
+			Message: "required_approvals cannot be negative",
+			Hint:    "Set 'required_approvals = 0' for solo workflows or a positive integer (e.g. 1 or 2).",
+		})
+	}
+
+	// Groups mode validation
+	if cfg.Critique.Groups.Mode != "" {
+		gMode := strings.ToLower(strings.TrimSpace(cfg.Critique.Groups.Mode))
+		if gMode != "static" && gMode != "api" && gMode != "disabled" {
+			errs = append(errs, ValidationError{
+				Field:   "critique.groups.mode",
+				Value:   cfg.Critique.Groups.Mode,
+				Message: fmt.Sprintf("unknown groups mode %q", cfg.Critique.Groups.Mode),
+				Hint:    "Supported groups modes: 'static' (config-defined), 'api' (remote directory endpoint), or 'disabled'.",
+			})
+		}
+		if gMode == "api" && strings.TrimSpace(cfg.Critique.Groups.API.URL) == "" {
+			errs = append(errs, ValidationError{
+				Field:   "critique.groups.api.url",
+				Value:   "",
+				Message: "groups API URL cannot be empty when mode is 'api'",
+				Hint:    "Provide a valid directory lookup URL (e.g. 'https://identity.corp.internal/api/groups').",
+			})
+		}
+	}
+
 	// 3. Critique Theme validation
 	theme := cfg.Critique.Theme
 	if theme.Preset != "" {
