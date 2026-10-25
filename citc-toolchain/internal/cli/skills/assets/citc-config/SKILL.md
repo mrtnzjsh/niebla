@@ -78,6 +78,26 @@ port = 8080
 proxy_port = 7331
 # Default author identity for reviews (resolves to $USER if omitted)
 default_reviewer = "$USER"
+# Number of approvals/LGTM required before submission (default: 0 for local/tailscale, 1 for remote/enterprise)
+required_approvals = 0
+# Policy controlling whether CLs can be submitted with unresolved comments (default: false)
+allow_submit_with_unresolved_comments = false
+
+[critique.groups]
+# Group resolution mode: "static" (in-config map), "api" (external HTTP REST endpoint), or "disabled"
+mode = "static"
+
+[critique.groups.static]
+# Group name mappings (expanded without '@' prefix)
+backend = ["alice", "bob"]
+frontend = ["carol", "dave"]
+infra = ["eve"]
+
+[critique.groups.api]
+# External HTTP API URL for dynamic enterprise group membership
+url = "https://iam.internal.net/api/v1/groups"
+token_env = "CRITIQUE_GROUP_API_TOKEN"
+timeout_ms = 5000
 
 [critique.auth]
 # Authentication mode: "local" (default: $USER), "headers" (reverse-proxy/IAP), "tailscale"

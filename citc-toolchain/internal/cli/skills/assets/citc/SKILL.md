@@ -69,18 +69,21 @@ CitC is a server-authoritative, cloud-native monorepo VCS inspired by Google Pip
 
 * **Shelve pending changes:**
   ```bash
-  citc shelve -m "<description>" [--on-cl <parent_cl>] [--workspace <name>]
+  citc shelve -m "<description>" [--reviewers "alice,bob,@backend"] [--on-cl <parent_cl>] [--workspace <name>]
   ```
   1. Uploads dirty files to server CAS via `UploadBlob(stream)`.
   2. Constructs the updated Merkle tree hierarchy and recomputes hashes up to the root.
   3. Calls `ShelveCL` on `citc-server` to create a shelved changelist.
-  4. Records the newly assigned `cl_id` as active in the workspace configuration.
+  4. Expands enterprise groups (e.g. `@backend` -> `alice, bob`) and registers reviewers in `cl_reviewers`.
+  5. Records the newly assigned `cl_id` as active in the workspace configuration.
 
 * **Submit changelist to trunk:**
   ```bash
-  citc submit [--cl <id>] [--workspace <name>]
+  citc submit [--cl <id>] [--workspace <name>] [--force]
   ```
-  Atomically commits the changelist to trunk head. If `--cl` is omitted, submits the active shelved CL in the current workspace.
+  Atomically commits the changelist to trunk head:
+  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`) and that no unresolved comments remain when `allow_submit_with_unresolved_comments = false`.
+  * **Bypass Guard:** Use `--force` to bypass unresolved comments or missing approvals when urgent trunk submission is required.
 
 ---
 
@@ -146,6 +149,31 @@ Critique supports both single-line comments and multi-line code block comments:
    - **Resolving:** Toggle comment status between `Unresolved` and `Resolved` once comments are published.
    - **Approvals:** Submit `LGTM` (Approve) or `Request Changes` directly from the action bar or within the Reply modal dialog.
 
+### Reviewer Management & Enterprise Groups
+
+Critique includes a dedicated **Reviewers Bar** in the header overview:
+1. **Assigning Reviewers:**
+   - On shelve: `citc shelve -m "..." --reviewers "alice,bob,@backend"`.
+   - In Critique UI: Type comma-separated users or `@group` in the `+ reviewer or @group...` input field.
+2. **Enterprise User Group Resolution:**
+   - Group names prefixed with `@` (e.g. `@backend`) are automatically expanded into their individual group members via the configured group resolver (`static` or `api`).
+3. **Verdict Badges:**
+   - Each reviewer chip reflects their current status: `⏳ pending` (slate), `✓ lgtm` (emerald), or `! changes_requested` (rose).
+4. **Removing Reviewers:**
+   - Click the `✕` icon next to an assigned reviewer chip (`POST /cl/{id}/reviewers/{user}/remove`).
+
+### Approval Requirements & Submission Guards
+
+1. **Approval Counter:**
+   - When `required_approvals > 0`: Displays a live badge e.g. `Approvals: 1 of 2 required` (amber when pending, emerald checkmark when satisfied).
+   - When `required_approvals == 0`: Displays `Approvals: X (optional)`.
+2. **Submit CL Button in Critique:**
+   - Located in the header action bar alongside `Reply` and `LGTM / Approve`.
+   - **Active (Sky Blue):** Ready to submit (`cl.Status == "shelved"` and requirements met). Submitting commits the CL to trunk and updates the status badge to `Submitted`.
+   - **Blocked by Unresolved Comments:** If `allow_submit_with_unresolved_comments = false` and unresolved comments exist, the submit button is styled in amber. Clicking it opens the `<dialog id="unresolved-comments-modal">`, explaining the policy and listing all affected files with quick navigation links.
+   - **Pending Approvals:** If `approvedCount < requiredApprovals`, the submit button is disabled with a descriptive tooltip e.g. `"Requires 2 approval(s) before submission"`.
+   - **Already Submitted:** Displays an immutable `CL Submitted` status pill.
+
 ### File Review Tracking & Status
 
 Critique tracks the review status of each file in a changelist on a **per-reviewer basis**:
@@ -178,7 +206,10 @@ Agents interacting with Critique via HTTP can utilize the following endpoints:
 | `POST` | `/cl/{id}/comments/{id}/discard` | `author={user}` | Discards a single unposted draft comment. |
 | `POST` | `/cl/{id}/reply` | `author={user}&message={msg}&verdict=lgtm\|changes_requested\|none` | Publishes all pending draft comments for reviewer, posts summary message, and records verdict. |
 | `POST` | `/cl/{id}/comments/{id}/resolve` | `resolved=true\|false` | Toggles resolution status of a published comment. |
-| `POST` | `/cl/{id}/approve` | `verdict=lgtm\|needs_work&reviewer={user}` | Records review verdict. |
+| `POST` | `/cl/{id}/approval` | `verdict=lgtm\|changes_requested&reviewer={user}` | Records review verdict. |
+| `POST` | `/cl/{id}/reviewers` | `reviewer={name\|@group}` | Assigns one or more reviewers with group expansion. |
+| `POST` | `/cl/{id}/reviewers/{user}/remove` | *(none)* | Unassigns a reviewer from the CL. |
+| `POST` | `/cl/{id}/submit` | *(none)* | Commits CL to trunk if approvals and unresolved comments policy guards pass. |
 | `POST` | `/cl/{id}/file-review` | `file={path}&reviewed=true\|false&reviewer={user}&ps={ps}&base_ps={base}` | Toggles per-reviewer file review status and returns updated badge HTML. |
 
 
