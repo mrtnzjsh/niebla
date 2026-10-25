@@ -194,17 +194,36 @@ func DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *di
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span></th></tr></thead> <tbody class=\"divide-y divide-slate-800/20\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span></th></tr></thead>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			commentedLines := make(map[int]bool)
+			for _, comments := range commentsByLine {
+				for _, c := range comments {
+					start := c.LineNumber
+					end := c.EndLineNumber
+					if end <= 0 {
+						end = start
+					}
+					if end > start {
+						for l := start; l <= end; l++ {
+							commentedLines[l] = true
+						}
+					}
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<style>\n\t\t.diff-line-selected {\n\t\t\tbackground-color: rgba(56, 189, 248, 0.15) !important;\n\t\t}\n\t\t.diff-line-num.diff-line-selected {\n\t\t\tbackground-color: rgba(56, 189, 248, 0.35) !important;\n\t\t\tcolor: #38bdf8 !important;\n\t\t}\n\t\t.diff-row-comment-range {\n\t\t\tborder-left: 2px solid #38bdf8 !important;\n\t\t}\n\t</style><tbody class=\"divide-y divide-slate-800/20\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, row := range detail.Rows {
-				var templ_7745c5c3_Var9 = []any{"diff-row group transition-colors", getRowClass(row.RowType)}
+				var templ_7745c5c3_Var9 = []any{"diff-row group transition-colors", getRowClass(row.RowType), templ.KV("diff-row-comment-range", commentedLines[row.ModLine.LineNum])}
 				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var9...)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<tr class=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<tr class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -217,7 +236,7 @@ func DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *di
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\"><!-- Left (Base) Line Number --><td class=\"w-12 px-2 py-0.5 text-right text-slate-500 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\"><!-- Left (Base) Line Number --><td class=\"w-12 px-2 py-0.5 text-right text-slate-500 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -225,14 +244,14 @@ func DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *di
 					var templ_7745c5c3_Var11 string
 					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(row.BaseLine.LineNum))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 101, Col: 46}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 130, Col: 46}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</td><!-- Left (Base) Code Content -->")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</td><!-- Left (Base) Code Content -->")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -241,7 +260,7 @@ func DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *di
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<td class=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<td class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -254,7 +273,7 @@ func DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *di
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -267,100 +286,152 @@ func DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *di
 					var templ_7745c5c3_Var14 string
 					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 110, Col: 15}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 139, Col: 15}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</td><!-- Right (Modified) Line Number (Interactive Comment Trigger) --><td")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</td><!-- Right (Modified) Line Number (Interactive Comment Trigger) --><td")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if row.ModLine.LineNum > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " hx-get=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, " hx-get=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var15 string
-					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/cl/%d/comment-box?file=%s&line=%d&side=modified", clID, detail.Path, row.ModLine.LineNum))
+					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/cl/%d/comment-box?file=%s&line=%d&end_line=%d&side=modified", clID, detail.Path, row.ModLine.LineNum, row.ModLine.LineNum))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 117, Col: 122}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 146, Col: 155}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" hx-target=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-target=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var16 string
 					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("#comment-row-%d", row.ModLine.LineNum))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 118, Col: 73}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 147, Col: 73}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-swap=\"innerHTML\" title=\"Click to comment on line\" class=\"diff-line-num w-12 px-2 py-0.5 text-right text-slate-400 hover:text-sky-300 hover:bg-sky-950/60 cursor-pointer border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px] relative transition\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, " class=\"w-12 px-2 py-0.5 text-right text-slate-600 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, ">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if row.ModLine.LineNum > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<span class=\"comment-hint opacity-0 group-hover:opacity-100 absolute left-1 text-sky-400 text-[10px] font-bold select-none\">+</span> <span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" hx-swap=\"innerHTML\" data-line=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(row.ModLine.LineNum))
+					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(row.ModLine.LineNum))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 128, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 149, Col: 55}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</span>")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" data-cl=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var18 string
+					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.FormatInt(clID, 10))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 150, Col: 47}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" data-file=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var19 string
+					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(detail.Path)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 151, Col: 33}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" data-patchset=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var20 string
+					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(patchsetNumber))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 152, Col: 54}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" title=\"Click line to comment, or Shift-click / drag to comment on code block\" class=\"diff-line-num w-12 px-2 py-0.5 text-right text-slate-400 hover:text-sky-300 hover:bg-sky-950/60 cursor-pointer border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px] relative transition\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " class=\"w-12 px-2 py-0.5 text-right text-slate-600 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</td><!-- Right (Modified) Code Content -->")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, ">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var18 = []any{"px-3 py-0.5 whitespace-pre overflow-x-auto", getCellHighlightClass(row.ModLine.Type)}
-				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var18...)
+				if row.ModLine.LineNum > 0 {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"comment-hint opacity-0 group-hover:opacity-100 absolute left-1 text-sky-400 text-[10px] font-bold select-none\">+</span> <span>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var21 string
+					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(row.ModLine.LineNum))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 161, Col: 51}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</span>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</td><!-- Right (Modified) Code Content -->")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<td class=\"")
+				var templ_7745c5c3_Var22 = []any{"px-3 py-0.5 whitespace-pre overflow-x-auto", getCellHighlightClass(row.ModLine.Type)}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var22...)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var19 string
-				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var18).String())
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<td class=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var23 string
+				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var22).String())
 				if templ_7745c5c3_Err != nil {
 					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 1, Col: 0}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -370,56 +441,56 @@ func DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *di
 						return templ_7745c5c3_Err
 					}
 				} else {
-					var templ_7745c5c3_Var20 string
-					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
+					var templ_7745c5c3_Var24 string
+					templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 137, Col: 15}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 170, Col: 15}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</td></tr><!-- Comment Thread Row (directly under the line) --> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</td></tr><!-- Comment Thread Row (directly under the line) --> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if row.ModLine.LineNum > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<tr id=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<tr id=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var21 string
-					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("comment-row-%d", row.ModLine.LineNum))
+					var templ_7745c5c3_Var25 string
+					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("comment-row-%d", row.ModLine.LineNum))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 144, Col: 67}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/diff_view.templ`, Line: 177, Col: 67}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" class=\"comment-thread-row\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" class=\"comment-thread-row\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					if comments, exists := commentsByLine[row.ModLine.LineNum]; exists && len(comments) > 0 {
-						templ_7745c5c3_Err = CommentBox(clID, patchsetNumber, detail.Path, row.ModLine.LineNum, "modified", comments).Render(ctx, templ_7745c5c3_Buffer)
+						templ_7745c5c3_Err = CommentBox(clID, patchsetNumber, detail.Path, comments[0].LineNumber, row.ModLine.LineNum, "modified", comments).Render(ctx, templ_7745c5c3_Buffer)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</tr>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</tr>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</tbody></table></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</tbody></table></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</div><script>\n\t\tfunction toggleAllUnchangedLines() {\n\t\t\tconst label = document.getElementById('expand-toggle-label');\n\t\t\tconst equalRows = document.querySelectorAll('.diff-row-equal');\n\t\t\t// Simple toggle state\n\t\t\tif (window._linesCollapsed) {\n\t\t\t\tequalRows.forEach(r => r.style.display = '');\n\t\t\t\tlabel.textContent = \"Collapse Unchanged\";\n\t\t\t\twindow._linesCollapsed = false;\n\t\t\t} else {\n\t\t\t\t// Hide rows if there are more than 10 consecutive equal rows\n\t\t\t\twindow._linesCollapsed = true;\n\t\t\t\tlabel.textContent = \"Expand All Lines\";\n\t\t\t}\n\t\t}\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div><script>\n\t\tfunction toggleAllUnchangedLines() {\n\t\t\tconst label = document.getElementById('expand-toggle-label');\n\t\t\tconst equalRows = document.querySelectorAll('.diff-row-equal');\n\t\t\tif (window._linesCollapsed) {\n\t\t\t\tequalRows.forEach(r => r.style.display = '');\n\t\t\t\tlabel.textContent = \"Collapse Unchanged\";\n\t\t\t\twindow._linesCollapsed = false;\n\t\t\t} else {\n\t\t\t\twindow._linesCollapsed = true;\n\t\t\t\tlabel.textContent = \"Expand All Lines\";\n\t\t\t}\n\t\t}\n\n\t\t(function initMultiLineSelection() {\n\t\t\tlet selectStart = null;\n\t\t\tlet isMouseDown = false;\n\n\t\t\tfunction clearRangeSelection() {\n\t\t\t\tdocument.querySelectorAll('.diff-line-selected').forEach(el => el.classList.remove('diff-line-selected'));\n\t\t\t}\n\n\t\t\tfunction highlightRange(start, end) {\n\t\t\t\tclearRangeSelection();\n\t\t\t\tconst minL = Math.min(start, end);\n\t\t\t\tconst maxL = Math.max(start, end);\n\t\t\t\tdocument.querySelectorAll('.diff-line-num[data-line]').forEach(el => {\n\t\t\t\t\tconst l = parseInt(el.getAttribute('data-line'), 10);\n\t\t\t\t\tif (l >= minL && l <= maxL) {\n\t\t\t\t\t\tel.classList.add('diff-line-selected');\n\t\t\t\t\t\tconst row = el.closest('tr');\n\t\t\t\t\t\tif (row) row.classList.add('diff-line-selected');\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction openCommentBoxForRange(start, end, filePath, clID, psNum) {\n\t\t\t\tconst minL = Math.min(start, end);\n\t\t\t\tconst maxL = Math.max(start, end);\n\t\t\t\tconst targetId = '#comment-row-' + maxL;\n\t\t\t\tconst targetRow = document.querySelector(targetId);\n\t\t\t\tif (!targetRow) return;\n\n\t\t\t\tconst url = `/cl/${clID}/comment-box?file=${encodeURIComponent(filePath)}&line=${minL}&end_line=${maxL}&side=modified&ps=${psNum}`;\n\t\t\t\thtmx.ajax('GET', url, { target: targetId, swap: 'innerHTML' });\n\t\t\t\tsetTimeout(() => {\n\t\t\t\t\tconst container = document.getElementById('comment-container-' + maxL);\n\t\t\t\t\tif (container) {\n\t\t\t\t\t\tcontainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });\n\t\t\t\t\t\tconst ta = container.querySelector('textarea');\n\t\t\t\t\t\tif (ta) ta.focus();\n\t\t\t\t\t}\n\t\t\t\t}, 150);\n\t\t\t}\n\n\t\t\tdocument.querySelectorAll('.diff-line-num[data-line]').forEach(el => {\n\t\t\t\tel.addEventListener('mousedown', function(e) {\n\t\t\t\t\tif (e.button !== 0) return;\n\t\t\t\t\tconst line = parseInt(this.getAttribute('data-line'), 10);\n\t\t\t\t\tif (!line) return;\n\n\t\t\t\t\tif (e.shiftKey && window._lastClickedLine) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tconst start = window._lastClickedLine;\n\t\t\t\t\t\tconst end = line;\n\t\t\t\t\t\thighlightRange(start, end);\n\t\t\t\t\t\tconst cl = this.getAttribute('data-cl');\n\t\t\t\t\t\tconst file = this.getAttribute('data-file');\n\t\t\t\t\t\tconst ps = this.getAttribute('data-patchset');\n\t\t\t\t\t\topenCommentBoxForRange(start, end, file, cl, ps);\n\t\t\t\t\t\twindow._lastClickedLine = end;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\n\t\t\t\t\tisMouseDown = true;\n\t\t\t\t\tselectStart = line;\n\t\t\t\t\twindow._lastClickedLine = line;\n\t\t\t\t\tclearRangeSelection();\n\t\t\t\t\tthis.classList.add('diff-line-selected');\n\t\t\t\t});\n\n\t\t\t\tel.addEventListener('mouseenter', function() {\n\t\t\t\t\tif (!isMouseDown || !selectStart) return;\n\t\t\t\t\tconst currentLine = parseInt(this.getAttribute('data-line'), 10);\n\t\t\t\t\tif (!currentLine) return;\n\t\t\t\t\thighlightRange(selectStart, currentLine);\n\t\t\t\t});\n\n\t\t\t\tel.addEventListener('mouseup', function(e) {\n\t\t\t\t\tif (!isMouseDown) return;\n\t\t\t\t\tisMouseDown = false;\n\t\t\t\t\tconst endLine = parseInt(this.getAttribute('data-line'), 10);\n\t\t\t\t\tif (!selectStart || !endLine) return;\n\n\t\t\t\t\tif (selectStart !== endLine) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\te.stopPropagation();\n\t\t\t\t\t\tconst cl = this.getAttribute('data-cl');\n\t\t\t\t\t\tconst file = this.getAttribute('data-file');\n\t\t\t\t\t\tconst ps = this.getAttribute('data-patchset');\n\t\t\t\t\t\topenCommentBoxForRange(selectStart, endLine, file, cl, ps);\n\t\t\t\t\t}\n\t\t\t\t\tselectStart = null;\n\t\t\t\t});\n\t\t\t});\n\n\t\t\tdocument.addEventListener('mouseup', function() {\n\t\t\t\tif (isMouseDown) {\n\t\t\t\t\tisMouseDown = false;\n\t\t\t\t\tselectStart = null;\n\t\t\t\t}\n\t\t\t});\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

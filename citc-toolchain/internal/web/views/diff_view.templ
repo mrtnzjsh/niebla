@@ -92,9 +92,38 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 							</th>
 						</tr>
 					</thead>
+	{{
+		commentedLines := make(map[int]bool)
+		for _, comments := range commentsByLine {
+			for _, c := range comments {
+				start := c.LineNumber
+				end := c.EndLineNumber
+				if end <= 0 {
+					end = start
+				}
+				if end > start {
+					for l := start; l <= end; l++ {
+						commentedLines[l] = true
+					}
+				}
+			}
+		}
+	}}
+	<style>
+		.diff-line-selected {
+			background-color: rgba(56, 189, 248, 0.15) !important;
+		}
+		.diff-line-num.diff-line-selected {
+			background-color: rgba(56, 189, 248, 0.35) !important;
+			color: #38bdf8 !important;
+		}
+		.diff-row-comment-range {
+			border-left: 2px solid #38bdf8 !important;
+		}
+	</style>
 					<tbody class="divide-y divide-slate-800/20">
 						for _, row := range detail.Rows {
-							<tr class={ "diff-row group transition-colors", getRowClass(row.RowType) }>
+							<tr class={ "diff-row group transition-colors", getRowClass(row.RowType), templ.KV("diff-row-comment-range", commentedLines[row.ModLine.LineNum]) }>
 								<!-- Left (Base) Line Number -->
 								<td class="w-12 px-2 py-0.5 text-right text-slate-500 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]">
 									if row.BaseLine.LineNum > 0 {
@@ -114,10 +143,14 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 								<!-- Right (Modified) Line Number (Interactive Comment Trigger) -->
 								<td
 									if row.ModLine.LineNum > 0 {
-										hx-get={ fmt.Sprintf("/cl/%d/comment-box?file=%s&line=%d&side=modified", clID, detail.Path, row.ModLine.LineNum) }
+										hx-get={ fmt.Sprintf("/cl/%d/comment-box?file=%s&line=%d&end_line=%d&side=modified", clID, detail.Path, row.ModLine.LineNum, row.ModLine.LineNum) }
 										hx-target={ fmt.Sprintf("#comment-row-%d", row.ModLine.LineNum) }
 										hx-swap="innerHTML"
-										title="Click to comment on line"
+										data-line={ strconv.Itoa(row.ModLine.LineNum) }
+										data-cl={ strconv.FormatInt(clID, 10) }
+										data-file={ detail.Path }
+										data-patchset={ strconv.Itoa(patchsetNumber) }
+										title="Click line to comment, or Shift-click / drag to comment on code block"
 										class="diff-line-num w-12 px-2 py-0.5 text-right text-slate-400 hover:text-sky-300 hover:bg-sky-950/60 cursor-pointer border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px] relative transition"
 									} else {
 										class="w-12 px-2 py-0.5 text-right text-slate-600 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]"
@@ -143,7 +176,7 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 							if row.ModLine.LineNum > 0 {
 								<tr id={ fmt.Sprintf("comment-row-%d", row.ModLine.LineNum) } class="comment-thread-row">
 									if comments, exists := commentsByLine[row.ModLine.LineNum]; exists && len(comments) > 0 {
-										@CommentBox(clID, patchsetNumber, detail.Path, row.ModLine.LineNum, "modified", comments)
+										@CommentBox(clID, patchsetNumber, detail.Path, comments[0].LineNumber, row.ModLine.LineNum, "modified", comments)
 									}
 								</tr>
 							}
@@ -158,17 +191,115 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 		function toggleAllUnchangedLines() {
 			const label = document.getElementById('expand-toggle-label');
 			const equalRows = document.querySelectorAll('.diff-row-equal');
-			// Simple toggle state
 			if (window._linesCollapsed) {
 				equalRows.forEach(r => r.style.display = '');
 				label.textContent = "Collapse Unchanged";
 				window._linesCollapsed = false;
 			} else {
-				// Hide rows if there are more than 10 consecutive equal rows
 				window._linesCollapsed = true;
 				label.textContent = "Expand All Lines";
 			}
 		}
+
+		(function initMultiLineSelection() {
+			let selectStart = null;
+			let isMouseDown = false;
+
+			function clearRangeSelection() {
+				document.querySelectorAll('.diff-line-selected').forEach(el => el.classList.remove('diff-line-selected'));
+			}
+
+			function highlightRange(start, end) {
+				clearRangeSelection();
+				const minL = Math.min(start, end);
+				const maxL = Math.max(start, end);
+				document.querySelectorAll('.diff-line-num[data-line]').forEach(el => {
+					const l = parseInt(el.getAttribute('data-line'), 10);
+					if (l >= minL && l <= maxL) {
+						el.classList.add('diff-line-selected');
+						const row = el.closest('tr');
+						if (row) row.classList.add('diff-line-selected');
+					}
+				});
+			}
+
+			function openCommentBoxForRange(start, end, filePath, clID, psNum) {
+				const minL = Math.min(start, end);
+				const maxL = Math.max(start, end);
+				const targetId = '#comment-row-' + maxL;
+				const targetRow = document.querySelector(targetId);
+				if (!targetRow) return;
+
+				const url = `/cl/${clID}/comment-box?file=${encodeURIComponent(filePath)}&line=${minL}&end_line=${maxL}&side=modified&ps=${psNum}`;
+				htmx.ajax('GET', url, { target: targetId, swap: 'innerHTML' });
+				setTimeout(() => {
+					const container = document.getElementById('comment-container-' + maxL);
+					if (container) {
+						container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+						const ta = container.querySelector('textarea');
+						if (ta) ta.focus();
+					}
+				}, 150);
+			}
+
+			document.querySelectorAll('.diff-line-num[data-line]').forEach(el => {
+				el.addEventListener('mousedown', function(e) {
+					if (e.button !== 0) return;
+					const line = parseInt(this.getAttribute('data-line'), 10);
+					if (!line) return;
+
+					if (e.shiftKey && window._lastClickedLine) {
+						e.preventDefault();
+						const start = window._lastClickedLine;
+						const end = line;
+						highlightRange(start, end);
+						const cl = this.getAttribute('data-cl');
+						const file = this.getAttribute('data-file');
+						const ps = this.getAttribute('data-patchset');
+						openCommentBoxForRange(start, end, file, cl, ps);
+						window._lastClickedLine = end;
+						return;
+					}
+
+					isMouseDown = true;
+					selectStart = line;
+					window._lastClickedLine = line;
+					clearRangeSelection();
+					this.classList.add('diff-line-selected');
+				});
+
+				el.addEventListener('mouseenter', function() {
+					if (!isMouseDown || !selectStart) return;
+					const currentLine = parseInt(this.getAttribute('data-line'), 10);
+					if (!currentLine) return;
+					highlightRange(selectStart, currentLine);
+				});
+
+				el.addEventListener('mouseup', function(e) {
+					if (!isMouseDown) return;
+					isMouseDown = false;
+					const endLine = parseInt(this.getAttribute('data-line'), 10);
+					if (!selectStart || !endLine) return;
+
+					if (selectStart !== endLine) {
+						e.preventDefault();
+						e.stopPropagation();
+						const cl = this.getAttribute('data-cl');
+						const file = this.getAttribute('data-file');
+						const ps = this.getAttribute('data-patchset');
+						openCommentBoxForRange(selectStart, endLine, file, cl, ps);
+					}
+					selectStart = null;
+				});
+			});
+
+			document.addEventListener('mouseup', function() {
+				if (isMouseDown) {
+					isMouseDown = false;
+					selectStart = null;
+				}
+			});
+		})();
 	</script>
 }
 

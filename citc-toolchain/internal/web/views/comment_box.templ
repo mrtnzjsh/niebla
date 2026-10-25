@@ -6,14 +6,29 @@ import (
 	"citc-toolchain/internal/db"
 )
 
-templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, side string, comments []db.Comment) {
+templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLine int, side string, comments []db.Comment) {
+	if endLine < line {
+		{{ endLine = line }}
+	}
+	if len(comments) > 0 {
+		if comments[0].LineNumber > 0 {
+			{{ line = comments[0].LineNumber }}
+		}
+		if comments[0].EndLineNumber >= line {
+			{{ endLine = comments[0].EndLineNumber }}
+		}
+	}
 	<td colspan="4" class="p-0 border-y-2 border-sky-800/60 bg-[#0a0f1d] shadow-inner">
-		<div id={ fmt.Sprintf("comment-container-%d", line) } class="px-6 py-4 max-w-4xl mx-auto my-2 rounded-xl border border-slate-700/60 bg-[#0f172a] shadow-2xl">
+		<div id={ fmt.Sprintf("comment-container-%d", endLine) } class="px-6 py-4 max-w-4xl mx-auto my-2 rounded-xl border border-slate-700/60 bg-[#0f172a] shadow-2xl">
 			<!-- Thread Header -->
 			<div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
 				<div class="flex items-center space-x-2 text-xs">
 					<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-sky-950/70 text-sky-400 border border-sky-800/50">
-						{ fmt.Sprintf("%s : %d (%s)", filePath, line, side) }
+						if endLine > line {
+							{ fmt.Sprintf("%s : Lines %d–%d (%s)", filePath, line, endLine, side) }
+						} else {
+							{ fmt.Sprintf("%s : Line %d (%s)", filePath, line, side) }
+						}
 					</span>
 					if len(comments) > 0 {
 						if isThreadResolved(comments) {
@@ -33,7 +48,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, side
 					if len(comments) == 0 {
 						<button
 							type="button"
-							onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('comment-row-%d').innerHTML = '';", line)} }
+							onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('comment-row-%d').innerHTML = '';", endLine)} }
 							class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition"
 						>
 							Cancel
@@ -59,7 +74,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, side
 									<button
 										type="button"
 										hx-post={ fmt.Sprintf("/cl/%d/comments/%d/resolve?resolved=%t", clID, c.ID, !c.Resolved) }
-										hx-target={ fmt.Sprintf("#comment-row-%d", line) }
+										hx-target={ fmt.Sprintf("#comment-row-%d", endLine) }
 										hx-swap="innerHTML"
 										class={ "text-[11px] px-2 py-0.5 rounded font-medium transition flex items-center space-x-1", templ.KV("bg-emerald-900/40 text-emerald-300 hover:bg-emerald-800/50", !c.Resolved), templ.KV("bg-slate-800 text-slate-400 hover:bg-slate-700", c.Resolved) }
 									>
@@ -82,7 +97,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, side
 			<!-- Reply / New Comment Form -->
 			<form
 				hx-post={ fmt.Sprintf("/cl/%d/comments", clID) }
-				hx-target={ fmt.Sprintf("#comment-row-%d", line) }
+				hx-target={ fmt.Sprintf("#comment-row-%d", endLine) }
 				hx-swap="innerHTML"
 				class="space-y-3 pt-2"
 			>
@@ -90,6 +105,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, side
 				<input type="hidden" name="patchset_number" value={ strconv.Itoa(patchsetNumber) }/>
 				<input type="hidden" name="file_path" value={ filePath }/>
 				<input type="hidden" name="line_number" value={ strconv.Itoa(line) }/>
+				<input type="hidden" name="end_line_number" value={ strconv.Itoa(endLine) }/>
 				<input type="hidden" name="side" value={ side }/>
 
 				<div>
