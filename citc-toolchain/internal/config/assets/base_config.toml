@@ -45,6 +45,16 @@ proxy_port = 7331
 # Dynamically resolves to $USER or current OS user if set to "$USER" or empty
 default_reviewer = "$USER"
 
+[critique.auth]
+# Authentication and user identity resolution mode
+# Supported: "local" (default: $USER), "headers" (e.g. reverse proxy/IAP), "tailscale"
+mode = "local"
+# Default user identity for local mode (supports $USER / $HOME expansion)
+default_user = "$USER"
+# Header to inspect when mode = "headers" (e.g. "X-Forwarded-User", "Cf-Access-Authenticated-User-Email")
+header_name = "X-Forwarded-User"
+
+
 # ------------------------------------------------------------------------------
 # Critique Theme & Visual Styling
 # ------------------------------------------------------------------------------

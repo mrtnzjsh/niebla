@@ -127,4 +127,17 @@ func expandConfigEnv(cfg *Config) {
 		}
 	}
 	cfg.Critique.DefaultReviewer = reviewer
+
+	authUser := strings.TrimSpace(os.ExpandEnv(cfg.Critique.Auth.DefaultUser))
+	if authUser == "" || authUser == "$USER" {
+		authUser = reviewer
+	}
+	cfg.Critique.Auth.DefaultUser = authUser
+
+	if cfg.Critique.Auth.Mode == "" {
+		cfg.Critique.Auth.Mode = "local"
+	}
+	if cfg.Critique.Auth.HeaderName == "" {
+		cfg.Critique.Auth.HeaderName = "X-Forwarded-User"
+	}
 }

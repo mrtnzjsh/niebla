@@ -196,6 +196,19 @@ func Validate(cfg *Config) error {
 		})
 	}
 
+	// Critique auth mode validation
+	if cfg.Critique.Auth.Mode != "" {
+		authMode := strings.ToLower(strings.TrimSpace(cfg.Critique.Auth.Mode))
+		if authMode != "local" && authMode != "headers" && authMode != "tailscale" {
+			errs = append(errs, ValidationError{
+				Field:   "critique.auth.mode",
+				Value:   cfg.Critique.Auth.Mode,
+				Message: fmt.Sprintf("unknown auth mode %q", cfg.Critique.Auth.Mode),
+				Hint:    "Supported auth modes: 'local' (default: $USER), 'headers' (reverse proxy/IAP), 'tailscale'.",
+			})
+		}
+	}
+
 	// 3. Critique Theme validation
 	theme := cfg.Critique.Theme
 	if theme.Preset != "" {

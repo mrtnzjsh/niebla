@@ -30,13 +30,21 @@ type FSConfig struct {
 	CacheDir  string `toml:"cache_dir"`
 }
 
+// CritiqueAuthConfig governs user identity resolution in Critique.
+type CritiqueAuthConfig struct {
+	Mode        string `toml:"mode"`         // "local", "headers", "tailscale"
+	DefaultUser string `toml:"default_user"` // defaults to "$USER"
+	HeaderName  string `toml:"header_name"`  // defaults to "X-Forwarded-User"
+}
+
 // CritiqueConfig holds review web service options.
 type CritiqueConfig struct {
-	Host            string      `toml:"host"`
-	Port            int         `toml:"port"`
-	ProxyPort       int         `toml:"proxy_port"`
-	DefaultReviewer string      `toml:"default_reviewer"`
-	Theme           ThemeConfig `toml:"theme"`
+	Host            string             `toml:"host"`
+	Port            int                `toml:"port"`
+	ProxyPort       int                `toml:"proxy_port"`
+	DefaultReviewer string             `toml:"default_reviewer"`
+	Auth            CritiqueAuthConfig `toml:"auth"`
+	Theme           ThemeConfig        `toml:"theme"`
 }
 
 // ThemeConfig governs the UI visual appearance and Chroma syntax highlighting.
@@ -87,6 +95,11 @@ func DefaultConfig() *Config {
 			Port:            8080,
 			ProxyPort:       7331,
 			DefaultReviewer: "$USER",
+			Auth: CritiqueAuthConfig{
+				Mode:        "local",
+				DefaultUser: "$USER",
+				HeaderName:  "X-Forwarded-User",
+			},
 			Theme: ThemeConfig{
 				Preset:      "catppuccin-mocha",
 				SyntaxStyle: "catppuccin-mocha",

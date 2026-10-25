@@ -176,3 +176,23 @@ func TestValidateDefaultReviewer(t *testing.T) {
 	}
 }
 
+func TestValidateAuthMode(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// Valid modes
+	for _, m := range []string{"local", "headers", "tailscale"} {
+		cfg.Critique.Auth.Mode = m
+		if err := Validate(cfg); err != nil {
+			t.Errorf("expected mode %q to be valid, got: %v", m, err)
+		}
+	}
+
+	// Invalid mode
+	cfg.Critique.Auth.Mode = "invalid_mode"
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "unknown auth mode") {
+		t.Errorf("expected unknown auth mode error, got: %v", err)
+	}
+}
+
+
