@@ -397,7 +397,7 @@ func TestFileReviewEndpoints(t *testing.T) {
 		t.Errorf("expected '0 of 4 reviewed by alice', got: %s", bodyAlice)
 	}
 
-	// 2. Alice visits a file diff directly -> 1 of 4 reviewed by alice
+	// 2. Alice visits a file diff directly in standalone tab -> file is marked reviewed
 	reqAliceFile := httptest.NewRequest("GET", "/cl/1/file/internal/web/diff/engine.go?reviewer=alice", nil)
 	recAliceFile := httptest.NewRecorder()
 	handler.HandleCLFileDiff(recAliceFile, reqAliceFile)
@@ -405,8 +405,16 @@ func TestFileReviewEndpoints(t *testing.T) {
 		t.Fatalf("HandleCLFileDiff as alice returned status %d", recAliceFile.Code)
 	}
 	bodyAliceFile := recAliceFile.Body.String()
-	if !strings.Contains(bodyAliceFile, "1 of 4 reviewed by alice") {
-		t.Errorf("expected '1 of 4 reviewed by alice', got: %s", bodyAliceFile)
+	if !strings.Contains(bodyAliceFile, "reviewed") {
+		t.Errorf("expected file review badge to show reviewed in dedicated tab")
+	}
+
+	// Verify CL overview shows 1 of 4 reviewed by alice
+	reqAliceOverview := httptest.NewRequest("GET", "/cl/1?reviewer=alice", nil)
+	recAliceOverview := httptest.NewRecorder()
+	handler.HandleCLView(recAliceOverview, reqAliceOverview)
+	if !strings.Contains(recAliceOverview.Body.String(), "1 of 4 reviewed by alice") {
+		t.Errorf("expected '1 of 4 reviewed by alice' on CL overview, got: %s", recAliceOverview.Body.String())
 	}
 
 	// 3. Bob visits a different file in standalone tab -> 1 of 4 reviewed by bob
@@ -418,8 +426,16 @@ func TestFileReviewEndpoints(t *testing.T) {
 		t.Fatalf("HandleCLFileDiff as bob returned status %d", recBob.Code)
 	}
 	bodyBob := recBob.Body.String()
-	if !strings.Contains(bodyBob, "1 of 4 reviewed by bob") {
-		t.Errorf("expected '1 of 4 reviewed by bob', got: %s", bodyBob)
+	if !strings.Contains(bodyBob, "reviewed") {
+		t.Errorf("expected file review badge to show reviewed in dedicated tab for bob")
+	}
+
+	// Verify CL overview shows 1 of 4 reviewed by bob
+	reqBobOverview := httptest.NewRequest("GET", "/cl/1?reviewer=bob", nil)
+	recBobOverview := httptest.NewRecorder()
+	handler.HandleCLView(recBobOverview, reqBobOverview)
+	if !strings.Contains(recBobOverview.Body.String(), "1 of 4 reviewed by bob") {
+		t.Errorf("expected '1 of 4 reviewed by bob' on CL overview, got: %s", recBobOverview.Body.String())
 	}
 
 	// 4. Mark another file as reviewed for bob via POST /cl/1/file-review
@@ -754,22 +770,34 @@ func TestCLFileDiffStandaloneTab(t *testing.T) {
 
 	body := rec.Body.String()
 
-	// 1. The targeted file's accordion is expanded (not hidden)
-	if strings.Contains(body, `id="accordion-row-internal-web-diff-engine-go" class="border-b border-slate-800 bg-[#090d16] hidden"`) {
-		t.Errorf("targeted file accordion row should NOT be hidden in standalone tab")
+	// 1. Dedicated file header with navigation back to CL
+	if !strings.Contains(body, "Back to CL 1") {
+		t.Errorf("expected back link 'Back to CL 1' in dedicated file tab")
 	}
-	if !strings.Contains(body, `id="chevron-internal-web-diff-engine-go" class="text-slate-500 group-hover:text-slate-300 transition-transform duration-200 rotate-90"`) {
-		t.Errorf("targeted file chevron should be rotated 90 degrees")
+	if !strings.Contains(body, "internal/web/diff/engine.go") {
+		t.Errorf("expected targeted file path in dedicated file tab")
 	}
 
-	// 2. The diff for this file is rendered
+	// 2. The diff for this file is rendered with review badge and reply controls
 	if !strings.Contains(body, "Expand All Lines") {
 		t.Errorf("expected diff to be rendered in standalone file tab")
 	}
+	if !strings.Contains(body, "file-review-badge-internal-web-diff-engine-go") {
+		t.Errorf("expected file review badge in standalone file tab")
+	}
+	if !strings.Contains(body, "cl-reply-btn") {
+		t.Errorf("expected reply button in standalone file tab")
+	}
 
-	// 3. Other files remain hidden
-	if !strings.Contains(body, `id="accordion-row-cmd-critique-main-go" class="border-b border-slate-800 bg-[#090d16] hidden"`) {
-		t.Errorf("non-targeted file accordions should remain hidden")
+	// 3. Dedicated view does NOT include CL description fields or other file links
+	if strings.Contains(body, "Critique: fast server-authoritative code review web UI and diff visualizer") {
+		t.Errorf("dedicated file tab should NOT contain CL description fields")
+	}
+	if strings.Contains(body, "cmd/critique/main.go") {
+		t.Errorf("dedicated file tab should NOT contain links to other files")
+	}
+	if strings.Contains(body, "assets/css/input.css") {
+		t.Errorf("dedicated file tab should NOT contain links to other files")
 	}
 }
 

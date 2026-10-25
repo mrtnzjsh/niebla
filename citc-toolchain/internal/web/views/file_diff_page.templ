@@ -1,0 +1,90 @@
+package views
+
+import (
+	"fmt"
+	"citc-toolchain/internal/db"
+	"citc-toolchain/internal/web/diff"
+)
+
+// FileDiffPageData provides context for rendering a dedicated standalone file diff page.
+type FileDiffPageData struct {
+	CLID               int64
+	CurrentPatchset    int
+	BasePatchset       int
+	FilePath           string
+	ChangeType         string
+	Reviewed           bool
+	Detail             *diff.FileDiffDetail
+	CommentsByLine     map[int][]db.Comment
+	DraftCommentsCount int
+	DraftComments      []db.Comment
+	ActiveReviewer     string
+	Patchsets          []db.Patchset
+}
+
+templ FileDiffPage(data FileDiffPageData) {
+	@Layout(fmt.Sprintf("%s - CL %d", data.FilePath, data.CLID)) {
+		<div class="flex-1 flex flex-col bg-[#090d16]">
+			<!-- Dedicated File Review Top Bar -->
+			<div class="border-b border-slate-800 bg-[#0c1322] px-6 py-3 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+				<!-- Left: Back Navigation and File Identity -->
+				<div class="flex items-center space-x-4">
+					<a
+						href={ templ.SafeURL(fmt.Sprintf("/cl/%d?ps=%d&base_ps=%d", data.CLID, data.CurrentPatchset, data.BasePatchset)) }
+						class="text-xs font-mono text-sky-400 hover:text-sky-300 flex items-center space-x-1.5 transition py-1 px-2.5 rounded bg-sky-950/40 border border-sky-800/40 hover:bg-sky-900/50"
+						title={ fmt.Sprintf("Return to CL %d overview", data.CLID) }
+					>
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+						</svg>
+						<span>{ fmt.Sprintf("Back to CL %d", data.CLID) }</span>
+					</a>
+
+					<div class="h-4 w-px bg-slate-800"></div>
+
+					<div class="flex items-center space-x-2">
+						switch data.ChangeType {
+							case "M":
+								<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">M</span>
+							case "A":
+								<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">A</span>
+							case "D":
+								<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">D</span>
+							default:
+								<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-500/20 text-slate-400">M</span>
+						}
+						<span class="font-mono text-sm font-semibold text-white tracking-wide">{ data.FilePath }</span>
+					</div>
+
+					<!-- Patchset indicator -->
+					<div class="text-xs text-slate-400 font-mono">
+						if data.BasePatchset == 0 {
+							<span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">{ fmt.Sprintf("Patchset %d vs Base CL", data.CurrentPatchset) }</span>
+						} else {
+							<span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">{ fmt.Sprintf("Patchset %d vs Patchset %d", data.CurrentPatchset, data.BasePatchset) }</span>
+						}
+					</div>
+				</div>
+
+				<!-- Right: File Review Status, Reply button, and Diff Stats -->
+				<div class="flex items-center space-x-3 text-xs">
+					@FileReviewBadge(data.CLID, data.FilePath, data.Reviewed, data.CurrentPatchset, data.BasePatchset)
+					@ReplyButton(data.CLID, data.DraftCommentsCount)
+				</div>
+			</div>
+
+			<!-- Dedicated File Diff View -->
+			if data.Detail != nil {
+				<div class="flex-1 flex flex-col overflow-hidden">
+					@DiffView(data.CLID, data.CurrentPatchset, data.BasePatchset, data.Detail, data.CommentsByLine)
+				</div>
+			} else {
+				<div class="p-16 text-center text-slate-500 font-mono text-sm">
+					No diff available for this file.
+				</div>
+			}
+
+			@ReplyModal(data.CLID, data.ActiveReviewer, data.DraftCommentsCount, data.DraftComments)
+		</div>
+	}
+}

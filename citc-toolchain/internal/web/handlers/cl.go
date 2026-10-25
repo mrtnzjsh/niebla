@@ -149,7 +149,7 @@ func (h *CLHandler) HandleCLView(w http.ResponseWriter, r *http.Request) {
 	h.renderCLPage(w, r, clID, selectedFile)
 }
 
-// HandleCLFileDiff renders the review page focused on a specific file path.
+// HandleCLFileDiff renders the dedicated review page for a specific file path.
 // GET /cl/{id}/file/{path...}
 func (h *CLHandler) HandleCLFileDiff(w http.ResponseWriter, r *http.Request) {
 	clID, err := parseCLID(r)
@@ -163,7 +163,11 @@ func (h *CLHandler) HandleCLFileDiff(w http.ResponseWriter, r *http.Request) {
 	selectedFile := strings.TrimPrefix(r.URL.Path, pathPrefix)
 	selectedFile = strings.TrimPrefix(selectedFile, "/")
 
-	h.renderCLPage(w, r, clID, selectedFile)
+	if h.db != nil {
+		h.renderCLFileDiffPage(w, r, clID, selectedFile)
+	} else {
+		h.renderDemoCLFileDiffPage(w, r, clID, selectedFile)
+	}
 }
 
 // HandleCLDiffContent renders the fresh inline side-by-side diff for an accordion.
@@ -1149,6 +1153,215 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = views.CLDetail(data).Render(r.Context(), w)
+}
+
+func (h *CLHandler) renderCLFileDiffPage(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
+	ctx := r.Context()
+	cl, err := h.db.GetCL(ctx, clID)
+	if err != nil || cl == nil {
+		http.Error(w, "changelist not found", http.StatusNotFound)
+		return
+	}
+
+	patchsets, _ := h.db.ListPatchsets(ctx, clID)
+	currentPS := 1
+	if len(patchsets) > 0 {
+		currentPS = patchsets[len(patchsets)-1].PatchsetNumber
+	}
+	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
+		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
+			currentPS = parsed
+		}
+	}
+
+	basePS := 0
+	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
+		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
+			basePS = parsed
+		}
+	}
+
+	reviewer := h.resolveReviewer(r)
+	drafts, _ := h.db.ListDraftComments(ctx, clID, reviewer)
+
+	var modTreeHash []byte
+	psObj, psErr := h.db.GetPatchset(ctx, clID, currentPS)
+	if psErr == nil && len(psObj.RootTreeHash) > 0 {
+		modTreeHash = psObj.RootTreeHash
+	} else {
+		modTreeHash = cl.RootTreeHash
+	}
+
+	var baseTreeHash []byte
+	if basePS == 0 {
+		if cl.ParentCL != nil && *cl.ParentCL > 0 {
+			parentCL, parentErr := h.db.GetCL(ctx, *cl.ParentCL)
+			if parentErr == nil && len(parentCL.RootTreeHash) > 0 {
+				baseTreeHash = parentCL.RootTreeHash
+			}
+		}
+		if len(baseTreeHash) == 0 {
+			baseTreeHash = tree.EmptyTreeHash
+		}
+	} else {
+		basePSObj, basePSErr := h.db.GetPatchset(ctx, clID, basePS)
+		if basePSErr == nil && len(basePSObj.RootTreeHash) > 0 {
+			baseTreeHash = basePSObj.RootTreeHash
+		} else {
+			baseTreeHash = tree.EmptyTreeHash
+		}
+	}
+
+	fetchTree := func(hash []byte) ([]tree.Entry, error) {
+		return h.db.GetTreeEntries(ctx, hash)
+	}
+
+	baseEntry, _ := tree.ResolvePath(baseTreeHash, targetFile, fetchTree)
+	modEntry, _ := tree.ResolvePath(modTreeHash, targetFile, fetchTree)
+
+	changeType := "M"
+	var baseBlobSHA, modBlobSHA []byte
+	if baseEntry == nil && modEntry != nil {
+		changeType = "A"
+		modBlobSHA = modEntry.BlobSHA256
+	} else if baseEntry != nil && modEntry == nil {
+		changeType = "D"
+		baseBlobSHA = baseEntry.BlobSHA256
+	} else if baseEntry != nil && modEntry != nil {
+		baseBlobSHA = baseEntry.BlobSHA256
+		modBlobSHA = modEntry.BlobSHA256
+	}
+
+	baseData, _ := h.readBlobBytes(baseBlobSHA)
+	modData, _ := h.readBlobBytes(modBlobSHA)
+
+	detail, err := diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
+	if err != nil {
+		log.Printf("error computing side-by-side diff: %v", err)
+	}
+	if detail != nil {
+		if len(baseBlobSHA) > 0 {
+			detail.BaseBlobHex = hex.EncodeToString(baseBlobSHA)
+		}
+		if len(modBlobSHA) > 0 {
+			detail.ModBlobHex = hex.EncodeToString(modBlobSHA)
+		}
+	}
+
+	if targetFile != "" {
+		_ = h.db.MarkFileReviewed(ctx, clID, targetFile, reviewer, true)
+	}
+
+	reviewedMap, _ := h.db.ListReviewedFiles(ctx, clID, reviewer)
+	isReviewed := false
+	if reviewedMap != nil {
+		isReviewed = reviewedMap[targetFile]
+	}
+
+	comments, _ := h.db.ListComments(ctx, clID, targetFile)
+	commentsByLine := make(map[int][]db.Comment)
+	for _, c := range comments {
+		if !c.IsDraft || c.Author == reviewer {
+			anchorLine := c.EndLineNumber
+			if anchorLine <= 0 {
+				anchorLine = c.LineNumber
+			}
+			commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+		}
+	}
+
+	data := views.FileDiffPageData{
+		CLID:               clID,
+		CurrentPatchset:    currentPS,
+		BasePatchset:       basePS,
+		FilePath:           targetFile,
+		ChangeType:         changeType,
+		Reviewed:           isReviewed,
+		Detail:             detail,
+		CommentsByLine:     commentsByLine,
+		DraftCommentsCount: len(drafts),
+		DraftComments:      drafts,
+		ActiveReviewer:     reviewer,
+		Patchsets:          patchsets,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = views.FileDiffPage(data).Render(ctx, w)
+}
+
+func (h *CLHandler) renderDemoCLFileDiffPage(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
+	currentPS := 2
+	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
+		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
+			currentPS = parsed
+		}
+	}
+	basePS := 0
+	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
+		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
+			basePS = parsed
+		}
+	}
+
+	patchsets := []db.Patchset{
+		{PatchsetID: 1, CLID: clID, PatchsetNumber: 1, RootTreeHash: []byte{1, 2, 3}},
+		{PatchsetID: 2, CLID: clID, PatchsetNumber: 2, RootTreeHash: []byte{4, 5, 6}},
+	}
+
+	changeType := "M"
+	if targetFile == "internal/web/views/diff_view.templ" {
+		changeType = "A"
+	}
+
+	detail, _ := computeDemoFileDiff(targetFile, changeType)
+
+	reviewer := h.resolveReviewer(r)
+	demoFileReviewsMu.Lock()
+	if targetFile != "" {
+		demoFileReviewsStore[fmt.Sprintf("%d:%s:%s", clID, reviewer, targetFile)] = true
+	}
+	key := fmt.Sprintf("%d:%s:%s", clID, reviewer, targetFile)
+	isReviewed := demoFileReviewsStore[key]
+	demoFileReviewsMu.Unlock()
+
+	demoCommentsMu.RLock()
+	commentsByLine := make(map[int][]db.Comment)
+	var reviewerDrafts []db.Comment
+	for k, list := range demoCommentsStore {
+		for _, c := range list {
+			if c.CLID == clID && c.Author == reviewer && c.IsDraft {
+				reviewerDrafts = append(reviewerDrafts, c)
+			}
+			if strings.HasPrefix(k, fmt.Sprintf("%d:%s:", clID, targetFile)) {
+				if !c.IsDraft || c.Author == reviewer {
+					anchorLine := c.EndLineNumber
+					if anchorLine <= 0 {
+						anchorLine = c.LineNumber
+					}
+					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+				}
+			}
+		}
+	}
+	demoCommentsMu.RUnlock()
+
+	data := views.FileDiffPageData{
+		CLID:               clID,
+		CurrentPatchset:    currentPS,
+		BasePatchset:       basePS,
+		FilePath:           targetFile,
+		ChangeType:         changeType,
+		Reviewed:           isReviewed,
+		Detail:             detail,
+		CommentsByLine:     commentsByLine,
+		DraftCommentsCount: len(reviewerDrafts),
+		DraftComments:      reviewerDrafts,
+		ActiveReviewer:     reviewer,
+		Patchsets:          patchsets,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = views.FileDiffPage(data).Render(r.Context(), w)
 }
 
 func (h *CLHandler) renderCLDiffContent(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
