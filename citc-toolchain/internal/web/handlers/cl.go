@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
+	"citc-toolchain/internal/groups"
 	"citc-toolchain/internal/web/auth"
 	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/views"
@@ -26,6 +28,10 @@ var (
 	demoApprovalsStore   = make(map[int64][]db.Approval)
 	demoFileReviewsMu    sync.RWMutex
 	demoFileReviewsStore = make(map[string]bool)
+	demoReviewersMu      sync.RWMutex
+	demoReviewersStore   = make(map[int64][]db.ReviewerAssignment)
+	demoCLStatusMu       sync.RWMutex
+	demoCLStatusStore    = make(map[int64]string)
 )
 
 // ResetDemoStoresForTest resets all in-memory demo stores. Used in testing.
@@ -42,6 +48,14 @@ func ResetDemoStoresForTest() {
 	demoApprovalsMu.Lock()
 	demoApprovalsStore = make(map[int64][]db.Approval)
 	demoApprovalsMu.Unlock()
+
+	demoReviewersMu.Lock()
+	demoReviewersStore = make(map[int64][]db.ReviewerAssignment)
+	demoReviewersMu.Unlock()
+
+	demoCLStatusMu.Lock()
+	demoCLStatusStore = make(map[int64]string)
+	demoCLStatusMu.Unlock()
 }
 
 // CLHandler handles changelist reviews, patchset switching, diff views, and reviewer verdicts.
@@ -49,6 +63,14 @@ type CLHandler struct {
 	db           *db.DB
 	cas          *cas.Storage
 	authResolver auth.UserIdentityResolver
+	config       *config.Config
+	groups       groups.Resolver
+}
+
+// SetDependencies injects the toolchain config and enterprise user group resolver.
+func (h *CLHandler) SetDependencies(cfg *config.Config, gr groups.Resolver) {
+	h.config = cfg
+	h.groups = gr
 }
 
 // NewCLHandler initializes a new CLHandler with optional custom auth resolver.
@@ -164,18 +186,11 @@ func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
 
 	reviewer := h.resolveReviewer(r)
 
-	var approvals []db.Approval
 	if h.db != nil {
 		if err := h.db.SetApproval(r.Context(), clID, reviewer, verdict); err != nil {
 			log.Printf("failed to set approval: %v", err)
 			http.Error(w, "failed to record approval", http.StatusInternalServerError)
 			return
-		}
-
-		var err error
-		approvals, err = h.db.ListApprovals(r.Context(), clID)
-		if err != nil {
-			log.Printf("failed to list approvals: %v", err)
 		}
 	} else {
 		demoApprovalsMu.Lock()
@@ -198,13 +213,323 @@ func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		demoApprovalsStore[clID] = list
-		approvals = list
 		demoApprovalsMu.Unlock()
 	}
 
+	h.renderActionsBar(w, r, clID)
+}
+
+// HandleAddReviewers assigns one or more reviewers (or expanded groups) to a CL.
+// POST /cl/{id}/reviewers
+func (h *CLHandler) HandleAddReviewers(w http.ResponseWriter, r *http.Request) {
+	clID, err := parseCLID(r)
+	if err != nil {
+		http.Error(w, "invalid changelist id", http.StatusBadRequest)
+		return
+	}
+
+	input := r.FormValue("reviewer")
+	if input == "" {
+		input = r.URL.Query().Get("reviewer")
+	}
+	input = strings.TrimSpace(input)
+	if input == "" {
+		h.renderActionsBar(w, r, clID)
+		return
+	}
+
+	resolver := h.groups
+	if resolver == nil {
+		resolver = groups.NewResolver(config.CritiqueGroupConfig{Mode: "disabled"})
+	}
+
+	expanded, err := groups.ExpandReviewers(r.Context(), resolver, []string{input})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to expand reviewers: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if len(expanded) > 0 {
+		if h.db != nil {
+			if err := h.db.AddReviewers(r.Context(), clID, expanded); err != nil {
+				log.Printf("failed to add reviewers: %v", err)
+				http.Error(w, "failed to add reviewers", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			demoReviewersMu.Lock()
+			current := demoReviewersStore[clID]
+			exists := make(map[string]bool)
+			for _, rev := range current {
+				exists[rev.Reviewer] = true
+			}
+			for _, u := range expanded {
+				if !exists[u] {
+					current = append(current, db.ReviewerAssignment{
+						CLID:      clID,
+						Reviewer:  u,
+						Verdict:   "pending",
+						UpdatedAt: time.Now(),
+					})
+					exists[u] = true
+				}
+			}
+			demoReviewersStore[clID] = current
+			demoReviewersMu.Unlock()
+		}
+	}
+
+	h.renderActionsBar(w, r, clID)
+}
+
+// HandleRemoveReviewer unassigns a reviewer from a CL.
+// POST /cl/{id}/reviewers/{user}/remove
+// DELETE /cl/{id}/reviewers/{user}
+func (h *CLHandler) HandleRemoveReviewer(w http.ResponseWriter, r *http.Request) {
+	clID, err := parseCLID(r)
+	if err != nil {
+		http.Error(w, "invalid changelist id", http.StatusBadRequest)
+		return
+	}
+
+	user := r.PathValue("user")
+	if user == "" {
+		user = r.URL.Query().Get("user")
+		if user == "" {
+			user = r.FormValue("user")
+		}
+	}
+	user = strings.TrimSpace(user)
+	if user == "" {
+		http.Error(w, "reviewer username required", http.StatusBadRequest)
+		return
+	}
+
+	if h.db != nil {
+		if err := h.db.RemoveReviewer(r.Context(), clID, user); err != nil {
+			log.Printf("failed to remove reviewer: %v", err)
+			http.Error(w, "failed to remove reviewer", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		demoReviewersMu.Lock()
+		current := demoReviewersStore[clID]
+		filtered := make([]db.ReviewerAssignment, 0, len(current))
+		for _, rev := range current {
+			if rev.Reviewer != user {
+				filtered = append(filtered, rev)
+			}
+		}
+		demoReviewersStore[clID] = filtered
+		demoReviewersMu.Unlock()
+	}
+
+	h.renderActionsBar(w, r, clID)
+}
+
+// HandleSubmitCL validates approvals and unresolved comments policy before committing a CL to trunk.
+// POST /cl/{id}/submit
+func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
+	clID, err := parseCLID(r)
+	if err != nil {
+		http.Error(w, "invalid changelist id", http.StatusBadRequest)
+		return
+	}
+
+	reqApprovals := 0
+	allowUnresolved := false
+	if h.config != nil {
+		reqApprovals = h.config.Critique.GetRequiredApprovals()
+		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+	}
+
+	var clStatus string
+	var approvalsCount int
+	var unresolvedCount int
+
+	if h.db != nil {
+		ctx := r.Context()
+		cl, err := h.db.GetCL(ctx, clID)
+		if err != nil || cl == nil {
+			http.Error(w, fmt.Sprintf("CL %d not found", clID), http.StatusNotFound)
+			return
+		}
+		clStatus = cl.Status
+		approvalsCount, _ = h.db.CountApprovals(ctx, clID)
+		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
+	} else {
+		demoCLStatusMu.RLock()
+		clStatus = demoCLStatusStore[clID]
+		if clStatus == "" {
+			clStatus = "shelved"
+		}
+		demoCLStatusMu.RUnlock()
+
+		demoApprovalsMu.RLock()
+		for _, a := range demoApprovalsStore[clID] {
+			if a.Verdict == "approved" || a.Verdict == "lgtm" {
+				approvalsCount++
+			}
+		}
+		demoApprovalsMu.RUnlock()
+
+		demoCommentsMu.RLock()
+		for _, list := range demoCommentsStore {
+			for _, c := range list {
+				if c.CLID == clID && !c.IsDraft && !c.Resolved {
+					unresolvedCount++
+				}
+			}
+		}
+		demoCommentsMu.RUnlock()
+	}
+
+	if clStatus != "shelved" {
+		http.Error(w, fmt.Sprintf("CL %d cannot be submitted because its status is %q (expected 'shelved')", clID, clStatus), http.StatusBadRequest)
+		return
+	}
+
+	if !allowUnresolved && unresolvedCount > 0 {
+		http.Error(w, fmt.Sprintf("CL %d has %d unresolved comment thread(s); all comments must be resolved before submission", clID, unresolvedCount), http.StatusBadRequest)
+		return
+	}
+
+	if reqApprovals > 0 && approvalsCount < reqApprovals {
+		http.Error(w, fmt.Sprintf("CL %d requires %d approval(s) before submission (found %d)", clID, reqApprovals, approvalsCount), http.StatusBadRequest)
+		return
+	}
+
+	if h.db != nil {
+		if _, err := h.db.SubmitCL(r.Context(), clID); err != nil {
+			log.Printf("failed to submit CL %d: %v", clID, err)
+			http.Error(w, "failed to submit CL: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		demoCLStatusMu.Lock()
+		demoCLStatusStore[clID] = "submitted"
+		demoCLStatusMu.Unlock()
+	}
+
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", fmt.Sprintf("/cl/%d", clID))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	http.Redirect(w, r, fmt.Sprintf("/cl/%d", clID), http.StatusSeeOther)
+}
+
+func (h *CLHandler) renderActionsBar(w http.ResponseWriter, r *http.Request, clID int64) {
+	clStatus := "shelved"
+	var approvals []db.Approval
+	var reviewers []db.ReviewerAssignment
+	var approvedCount int
+	var unresolvedCount int
+	var draftCount int
+	author := h.resolveReviewer(r)
+
+	reqApprovals := 0
+	allowUnresolved := false
+	if h.config != nil {
+		reqApprovals = h.config.Critique.GetRequiredApprovals()
+		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+	}
+
+	if h.db != nil {
+		ctx := r.Context()
+		if cl, err := h.db.GetCL(ctx, clID); err == nil && cl != nil {
+			clStatus = cl.Status
+		}
+		approvals, _ = h.db.ListApprovals(ctx, clID)
+		reviewers, _ = h.db.ListReviewers(ctx, clID)
+		approvedCount, _ = h.db.CountApprovals(ctx, clID)
+		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
+		drafts, _ := h.db.ListDraftComments(ctx, clID, author)
+		draftCount = len(drafts)
+	} else {
+		demoCLStatusMu.RLock()
+		if s, ok := demoCLStatusStore[clID]; ok && s != "" {
+			clStatus = s
+		}
+		demoCLStatusMu.RUnlock()
+
+		demoApprovalsMu.RLock()
+		approvals = demoApprovalsStore[clID]
+		demoApprovalsMu.RUnlock()
+
+		for _, a := range approvals {
+			if a.Verdict == "approved" || a.Verdict == "lgtm" {
+				approvedCount++
+			}
+		}
+
+		demoReviewersMu.RLock()
+		rawReviewers := demoReviewersStore[clID]
+		demoReviewersMu.RUnlock()
+
+		verdictMap := make(map[string]string)
+		for _, a := range approvals {
+			verdictMap[a.Reviewer] = a.Verdict
+		}
+		found := make(map[string]bool)
+		for _, rev := range rawReviewers {
+			if v, ok := verdictMap[rev.Reviewer]; ok {
+				rev.Verdict = v
+			}
+			reviewers = append(reviewers, rev)
+			found[rev.Reviewer] = true
+		}
+		for _, a := range approvals {
+			if !found[a.Reviewer] {
+				reviewers = append(reviewers, db.ReviewerAssignment{
+					CLID:      clID,
+					Reviewer:  a.Reviewer,
+					Verdict:   a.Verdict,
+					UpdatedAt: a.UpdatedAt,
+				})
+			}
+		}
+
+		demoCommentsMu.RLock()
+		for _, list := range demoCommentsStore {
+			for _, c := range list {
+				if c.CLID == clID {
+					if c.IsDraft && c.Author == author {
+						draftCount++
+					}
+					if !c.IsDraft && !c.Resolved {
+						unresolvedCount++
+					}
+				}
+			}
+		}
+		demoCommentsMu.RUnlock()
+	}
+
+	data := views.CLDetailData{
+		CL: &db.Changelist{
+			CLID:   clID,
+			Status: clStatus,
+		},
+		Approvals:                 approvals,
+		Reviewers:                 reviewers,
+		RequiredApprovals:         reqApprovals,
+		ApprovedCount:             approvedCount,
+		AllowSubmitWithUnresolved: allowUnresolved,
+		UnresolvedComments:        unresolvedCount,
+		DraftCommentsCount:        draftCount,
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.ApprovalButtons(clID, approvals)
-	_ = component.Render(r.Context(), w)
+	target := r.Header.Get("HX-Target")
+	if target == "reviewers-control" {
+		_ = views.ReviewersControl(data).Render(r.Context(), w)
+	} else if target == "approvals-control" {
+		_ = views.ApprovalsControl(data).Render(r.Context(), w)
+	} else {
+		_ = views.CLActionsBar(data).Render(r.Context(), w)
+	}
 }
 
 // HandleFileReview marks a file as reviewed or not reviewed for the active reviewer.
@@ -545,27 +870,43 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		}
 	}
 
-	// 7. Approvals
+	// 7. Approvals, Reviewers, and Policy Requirements
 	approvals, err := h.db.ListApprovals(ctx, clID)
 	if err != nil {
 		log.Printf("error listing approvals: %v", err)
 	}
+	reviewers, err := h.db.ListReviewers(ctx, clID)
+	if err != nil {
+		log.Printf("error listing reviewers: %v", err)
+	}
+	approvedCount, _ := h.db.CountApprovals(ctx, clID)
+
+	reqApprovals := 0
+	allowUnresolved := false
+	if h.config != nil {
+		reqApprovals = h.config.Critique.GetRequiredApprovals()
+		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+	}
 
 	data := views.CLDetailData{
-		CL:                 cl,
-		Patchsets:          patchsets,
-		CurrentPatchset:    currentPS,
-		BasePatchset:       basePS,
-		Files:              files,
-		SelectedFilePath:   targetFile,
-		SelectedFileDiff:   selectedDetail,
-		CommentsByLine:     commentsByLine,
-		Approvals:          approvals,
-		UnresolvedComments: unresolvedTotal,
-		ActiveReviewer:     reviewer,
-		ReviewedFilesCount: reviewedCount,
-		DraftCommentsCount: len(drafts),
-		DraftComments:      drafts,
+		CL:                        cl,
+		Patchsets:                 patchsets,
+		CurrentPatchset:           currentPS,
+		BasePatchset:              basePS,
+		Files:                     files,
+		SelectedFilePath:          targetFile,
+		SelectedFileDiff:          selectedDetail,
+		CommentsByLine:            commentsByLine,
+		Approvals:                 approvals,
+		Reviewers:                 reviewers,
+		RequiredApprovals:         reqApprovals,
+		ApprovedCount:             approvedCount,
+		AllowSubmitWithUnresolved: allowUnresolved,
+		UnresolvedComments:        unresolvedTotal,
+		ActiveReviewer:            reviewer,
+		ReviewedFilesCount:        reviewedCount,
+		DraftCommentsCount:        len(drafts),
+		DraftComments:             drafts,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -598,11 +939,18 @@ func parseCLID(r *http.Request) (int64, error) {
 
 func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
 	currentUser := auth.CurrentOSUser()
+	demoCLStatus := "shelved"
+	demoCLStatusMu.RLock()
+	if s, ok := demoCLStatusStore[clID]; ok && s != "" {
+		demoCLStatus = s
+	}
+	demoCLStatusMu.RUnlock()
+
 	demoCL := &db.Changelist{
 		CLID:        clID,
 		Author:      fmt.Sprintf("%s@corp", currentUser),
 		Description: "Critique: fast server-authoritative code review web UI and diff visualizer\n\n- Pure Go + a-h/templ + HTMX + Tailwind CSS\n- Myers diff visualizer with Chroma syntax highlighting\n- Inline comment threads and reviewer verdicts\n- Live reload via air and templ proxy",
-		Status:      "shelved",
+		Status:      demoCLStatus,
 		CommittedAt: time.Now().Add(-2 * time.Hour),
 	}
 
@@ -766,21 +1114,67 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 	approvals := demoApprovalsStore[clID]
 	demoApprovalsMu.RUnlock()
 
+	approvedCount := 0
+	for _, a := range approvals {
+		if a.Verdict == "approved" || a.Verdict == "lgtm" {
+			approvedCount++
+		}
+	}
+
+	demoReviewersMu.RLock()
+	rawReviewers := demoReviewersStore[clID]
+	demoReviewersMu.RUnlock()
+
+	verdictMap := make(map[string]string)
+	for _, a := range approvals {
+		verdictMap[a.Reviewer] = a.Verdict
+	}
+	found := make(map[string]bool)
+	var reviewerList []db.ReviewerAssignment
+	for _, rev := range rawReviewers {
+		if v, ok := verdictMap[rev.Reviewer]; ok {
+			rev.Verdict = v
+		}
+		reviewerList = append(reviewerList, rev)
+		found[rev.Reviewer] = true
+	}
+	for _, a := range approvals {
+		if !found[a.Reviewer] {
+			reviewerList = append(reviewerList, db.ReviewerAssignment{
+				CLID:      clID,
+				Reviewer:  a.Reviewer,
+				Verdict:   a.Verdict,
+				UpdatedAt: a.UpdatedAt,
+			})
+		}
+	}
+
+	reqApprovals := 0
+	allowUnresolved := false
+	if h.config != nil {
+		reqApprovals = h.config.Critique.GetRequiredApprovals()
+		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+	}
+
 	data := views.CLDetailData{
-		CL:                 demoCL,
-		Patchsets:          patchsets,
-		CurrentPatchset:    currentPS,
-		BasePatchset:       basePS,
-		Files:              files,
-		SelectedFilePath:   targetFile,
-		SelectedFileDiff:   detail,
-		CommentsByLine:     commentsByLine,
-		Approvals:          approvals,
-		UnresolvedComments: unresolvedCount,
-		ActiveReviewer:     reviewer,
-		ReviewedFilesCount: reviewedCount,
-		DraftCommentsCount: len(reviewerDrafts),
-		DraftComments:      reviewerDrafts,
+		CL:                        demoCL,
+		Patchsets:                 patchsets,
+		CurrentPatchset:           currentPS,
+		BasePatchset:              basePS,
+		Files:                     files,
+		SelectedFilePath:          targetFile,
+		SelectedFileDiff:          detail,
+		CommentsByLine:            commentsByLine,
+		Approvals:                 approvals,
+		Reviewers:                 reviewerList,
+		RequiredApprovals:         reqApprovals,
+		ApprovedCount:             approvedCount,
+		AllowSubmitWithUnresolved: allowUnresolved,
+		UnresolvedComments:        unresolvedCount,
+		ActiveReviewer:            reviewer,
+		ReviewedFilesCount:        reviewedCount,
+		DraftCommentsCount:        len(reviewerDrafts),
+		DraftComments:             reviewerDrafts,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

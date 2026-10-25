@@ -17,6 +17,7 @@ import (
 
 	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
+	"citc-toolchain/internal/groups"
 	"citc-toolchain/internal/web/auth"
 	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/handlers"
@@ -125,6 +126,8 @@ func main() {
 	// 3. Initialize HTTP handlers
 	authResolver := auth.NewUserIdentityResolver(cfg.Critique.Auth)
 	clHandler := handlers.NewCLHandler(database, casStorage, authResolver)
+	groupResolver := groups.NewResolver(cfg.Critique.Groups)
+	clHandler.SetDependencies(cfg, groupResolver)
 	commentsHandler := handlers.NewCommentsHandler(database, authResolver)
 	rawHandler := handlers.NewRawHandler(database, casStorage)
 
@@ -149,6 +152,10 @@ func main() {
 	mux.HandleFunc("GET /cl/{id}/file/{path...}", clHandler.HandleCLFileDiff)
 	mux.HandleFunc("POST /cl/{id}/approval", clHandler.HandleApproval)
 	mux.HandleFunc("POST /cl/{id}/file-review", clHandler.HandleFileReview)
+	mux.HandleFunc("POST /cl/{id}/reviewers", clHandler.HandleAddReviewers)
+	mux.HandleFunc("POST /cl/{id}/reviewers/{user}/remove", clHandler.HandleRemoveReviewer)
+	mux.HandleFunc("DELETE /cl/{id}/reviewers/{user}", clHandler.HandleRemoveReviewer)
+	mux.HandleFunc("POST /cl/{id}/submit", clHandler.HandleSubmitCL)
 	mux.HandleFunc("POST /cl/{id}/reply", clHandler.HandlePublishReview)
 	mux.HandleFunc("POST /cl/{id}/publish", clHandler.HandlePublishReview)
 

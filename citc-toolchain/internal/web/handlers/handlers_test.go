@@ -6,13 +6,16 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"citc-toolchain/internal/config"
 	"citc-toolchain/internal/db"
+	"citc-toolchain/internal/groups"
 	"citc-toolchain/internal/web/diff"
 	"citc-toolchain/internal/web/views"
 	"citc-toolchain/pkg/cas"
@@ -164,18 +167,22 @@ func TestViewsRendering(t *testing.T) {
 	}
 
 	clData := views.CLDetailData{
-		CL:                 cl,
-		Patchsets:          patchsets,
-		CurrentPatchset:    1,
-		BasePatchset:       0,
-		Files:              files,
-		SelectedFilePath:   "math.go",
-		SelectedFileDiff:   detail,
-		CommentsByLine:     commentsMap,
-		Approvals:          []db.Approval{{CLID: 101, Reviewer: "bob", Verdict: "lgtm"}},
-		UnresolvedComments: 1,
-		ActiveReviewer:     "alice",
-		ReviewedFilesCount: 1,
+		CL:                        cl,
+		Patchsets:                 patchsets,
+		CurrentPatchset:           1,
+		BasePatchset:              0,
+		Files:                     files,
+		SelectedFilePath:          "math.go",
+		SelectedFileDiff:          detail,
+		CommentsByLine:            commentsMap,
+		Approvals:                 []db.Approval{{CLID: 101, Reviewer: "bob", Verdict: "lgtm"}},
+		Reviewers:                 []db.ReviewerAssignment{{CLID: 101, Reviewer: "bob", Verdict: "lgtm", UpdatedAt: time.Now()}},
+		RequiredApprovals:         1,
+		ApprovedCount:             1,
+		AllowSubmitWithUnresolved: false,
+		UnresolvedComments:        1,
+		ActiveReviewer:            "alice",
+		ReviewedFilesCount:        1,
 	}
 
 	var clDetailBuf bytes.Buffer
@@ -202,6 +209,18 @@ func TestViewsRendering(t *testing.T) {
 	}
 	if !strings.Contains(clDetailHTML, "Review") {
 		t.Errorf("expected Review column header in CLDetail")
+	}
+	if !strings.Contains(clDetailHTML, "Approvals: 1 of 1 required") {
+		t.Errorf("expected required approvals indicator in CLDetail, got %s", clDetailHTML)
+	}
+	if !strings.Contains(clDetailHTML, "bob") {
+		t.Errorf("expected reviewer bob in reviewers bar, got %s", clDetailHTML)
+	}
+	if !strings.Contains(clDetailHTML, "Submit CL") {
+		t.Errorf("expected Submit CL button in CLDetail, got %s", clDetailHTML)
+	}
+	if !strings.Contains(clDetailHTML, "unresolved-comments-modal") {
+		t.Errorf("expected unresolved comments modal dialog in CLDetail, got %s", clDetailHTML)
 	}
 }
 
@@ -403,6 +422,186 @@ func TestFileReviewEndpoints(t *testing.T) {
 	unreviewBadge := recUnreview.Body.String()
 	if !strings.Contains(unreviewBadge, "not reviewed") {
 		t.Errorf("expected not reviewed badge in response, got: %s", unreviewBadge)
+	}
+}
+
+func TestReviewerManagementEndpoints(t *testing.T) {
+	ResetDemoStoresForTest()
+	handler := NewCLHandler(nil, nil)
+
+	cfg := &config.Config{
+		Critique: config.CritiqueConfig{
+			Groups: config.CritiqueGroupConfig{
+				Mode: "static",
+				Static: map[string][]string{
+					"backend": {"charlie", "david"},
+				},
+			},
+		},
+	}
+	resolver := groups.NewResolver(cfg.Critique.Groups)
+	handler.SetDependencies(cfg, resolver)
+
+	// 1. Add single reviewer "alice"
+	form := url.Values{"reviewer": {"alice"}}
+	reqAddAlice := httptest.NewRequest("POST", "/cl/1/reviewers", strings.NewReader(form.Encode()))
+	reqAddAlice.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqAddAlice.SetPathValue("id", "1")
+	recAddAlice := httptest.NewRecorder()
+	handler.HandleAddReviewers(recAddAlice, reqAddAlice)
+
+	if recAddAlice.Code != http.StatusOK {
+		t.Fatalf("HandleAddReviewers returned status %d: %s", recAddAlice.Code, recAddAlice.Body.String())
+	}
+	bodyAddAlice := recAddAlice.Body.String()
+	if !strings.Contains(bodyAddAlice, "alice") {
+		t.Errorf("expected 'alice' in reviewers bar, got: %s", bodyAddAlice)
+	}
+
+	// 2. Add group "@backend" along with individual user "eve"
+	formGroup := url.Values{"reviewer": {"@backend,eve"}}
+	reqAddGroup := httptest.NewRequest("POST", "/cl/1/reviewers", strings.NewReader(formGroup.Encode()))
+	reqAddGroup.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqAddGroup.SetPathValue("id", "1")
+	recAddGroup := httptest.NewRecorder()
+	handler.HandleAddReviewers(recAddGroup, reqAddGroup)
+
+	if recAddGroup.Code != http.StatusOK {
+		t.Fatalf("HandleAddReviewers group returned status %d: %s", recAddGroup.Code, recAddGroup.Body.String())
+	}
+	bodyAddGroup := recAddGroup.Body.String()
+	for _, user := range []string{"alice", "charlie", "david", "eve"} {
+		if !strings.Contains(bodyAddGroup, user) {
+			t.Errorf("expected reviewer %q in reviewers bar after group expansion, got: %s", user, bodyAddGroup)
+		}
+	}
+
+	// 3. Remove reviewer "charlie"
+	reqRemoveCharlie := httptest.NewRequest("POST", "/cl/1/reviewers/charlie/remove", nil)
+	reqRemoveCharlie.SetPathValue("id", "1")
+	reqRemoveCharlie.SetPathValue("user", "charlie")
+	recRemoveCharlie := httptest.NewRecorder()
+	handler.HandleRemoveReviewer(recRemoveCharlie, reqRemoveCharlie)
+
+	if recRemoveCharlie.Code != http.StatusOK {
+		t.Fatalf("HandleRemoveReviewer returned status %d: %s", recRemoveCharlie.Code, recRemoveCharlie.Body.String())
+	}
+	bodyRemoveCharlie := recRemoveCharlie.Body.String()
+	if strings.Contains(bodyRemoveCharlie, "charlie") {
+		t.Errorf("expected 'charlie' to be removed from reviewers bar, got: %s", bodyRemoveCharlie)
+	}
+	if !strings.Contains(bodyRemoveCharlie, "david") {
+		t.Errorf("expected 'david' to remain in reviewers bar, got: %s", bodyRemoveCharlie)
+	}
+}
+
+func TestSubmitCLEndpointGuards(t *testing.T) {
+	ResetDemoStoresForTest()
+	handler := NewCLHandler(nil, nil)
+
+	reqApp := 2
+	allowUnres := false
+	cfg := &config.Config{
+		Critique: config.CritiqueConfig{
+			RequiredApprovals:                 &reqApp,
+			AllowSubmitWithUnresolvedComments: &allowUnres,
+		},
+	}
+	handler.SetDependencies(cfg, nil)
+
+	// Step 1: Seed an unresolved comment in demo store
+	demoCommentsMu.Lock()
+	demoCommentsStore["1:main.go:1:modified"] = []db.Comment{
+		{
+			ID:       10,
+			CLID:     1,
+			Author:   "reviewer1",
+			Body:     "Please fix this nil check",
+			Resolved: false,
+			IsDraft:  false,
+		},
+	}
+	demoCommentsMu.Unlock()
+
+	// Attempt submit with unresolved comment
+	reqSub1 := httptest.NewRequest("POST", "/cl/1/submit", nil)
+	reqSub1.SetPathValue("id", "1")
+	recSub1 := httptest.NewRecorder()
+	handler.HandleSubmitCL(recSub1, reqSub1)
+
+	if recSub1.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request when submitting with unresolved comments, got %d", recSub1.Code)
+	}
+	if !strings.Contains(recSub1.Body.String(), "unresolved comment thread") {
+		t.Errorf("expected unresolved comment error message, got: %s", recSub1.Body.String())
+	}
+
+	// Step 2: Mark comment as resolved, but 0 approvals (requires 2)
+	demoCommentsMu.Lock()
+	demoCommentsStore["1:main.go:1:modified"][0].Resolved = true
+	demoCommentsMu.Unlock()
+
+	reqSub2 := httptest.NewRequest("POST", "/cl/1/submit", nil)
+	reqSub2.SetPathValue("id", "1")
+	recSub2 := httptest.NewRecorder()
+	handler.HandleSubmitCL(recSub2, reqSub2)
+
+	if recSub2.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request when approvals < required, got %d", recSub2.Code)
+	}
+	if !strings.Contains(recSub2.Body.String(), "requires 2 approval(s) before submission (found 0)") {
+		t.Errorf("expected approval requirement error message, got: %s", recSub2.Body.String())
+	}
+
+	// Step 3: Record 1 approval ("alice", "lgtm"). Still 1 of 2 required.
+	demoApprovalsMu.Lock()
+	demoApprovalsStore[1] = []db.Approval{
+		{CLID: 1, Reviewer: "alice", Verdict: "lgtm", UpdatedAt: time.Now()},
+	}
+	demoApprovalsMu.Unlock()
+
+	reqSub3 := httptest.NewRequest("POST", "/cl/1/submit", nil)
+	reqSub3.SetPathValue("id", "1")
+	recSub3 := httptest.NewRecorder()
+	handler.HandleSubmitCL(recSub3, reqSub3)
+
+	if recSub3.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request when 1 of 2 approvals met, got %d", recSub3.Code)
+	}
+	if !strings.Contains(recSub3.Body.String(), "requires 2 approval(s) before submission (found 1)") {
+		t.Errorf("expected approval requirement error message, got: %s", recSub3.Body.String())
+	}
+
+	// Step 4: Record 2nd approval ("bob", "approved"). Now 2 of 2 met.
+	demoApprovalsMu.Lock()
+	demoApprovalsStore[1] = append(demoApprovalsStore[1], db.Approval{
+		CLID: 1, Reviewer: "bob", Verdict: "approved", UpdatedAt: time.Now(),
+	})
+	demoApprovalsMu.Unlock()
+
+	reqSub4 := httptest.NewRequest("POST", "/cl/1/submit", nil)
+	reqSub4.SetPathValue("id", "1")
+	recSub4 := httptest.NewRecorder()
+	handler.HandleSubmitCL(recSub4, reqSub4)
+
+	if recSub4.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 See Other on successful submit, got %d: %s", recSub4.Code, recSub4.Body.String())
+	}
+	if loc := recSub4.Header().Get("Location"); loc != "/cl/1" {
+		t.Errorf("expected redirect to /cl/1, got: %s", loc)
+	}
+
+	// Step 5: Verify subsequent submit is rejected because CL is now 'submitted'
+	reqSub5 := httptest.NewRequest("POST", "/cl/1/submit", nil)
+	reqSub5.SetPathValue("id", "1")
+	recSub5 := httptest.NewRecorder()
+	handler.HandleSubmitCL(recSub5, reqSub5)
+
+	if recSub5.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request when submitting already submitted CL, got %d", recSub5.Code)
+	}
+	if !strings.Contains(recSub5.Body.String(), "cannot be submitted because its status is \"submitted\"") {
+		t.Errorf("expected already submitted error message, got: %s", recSub5.Body.String())
 	}
 }
 
