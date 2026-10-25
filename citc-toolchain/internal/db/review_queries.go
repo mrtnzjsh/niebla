@@ -33,6 +33,7 @@ type Comment struct {
 	Body            string
 	Resolved        bool
 	ParentCommentID *int64
+	IsDraft         bool
 	CreatedAt       time.Time
 }
 
@@ -164,7 +165,7 @@ func (d *DB) CreatePatchset(ctx context.Context, clID int64, patchsetNumber int,
 // ListComments retrieves all comments for a specific file in a changelist.
 func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
 		FROM cl_comments
 		WHERE cl_id = $1 AND file_path = $2
 		ORDER BY line_number ASC, end_line_number ASC, created_at ASC;
@@ -190,6 +191,7 @@ func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]C
 			&c.Body,
 			&c.Resolved,
 			&c.ParentCommentID,
+			&c.IsDraft,
 			&c.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
@@ -205,7 +207,7 @@ func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]C
 // ListCommentsForLine retrieves comments for a specific file, line, and side.
 func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath string, line int, side string) ([]Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
 		FROM cl_comments
 		WHERE cl_id = $1 AND file_path = $2 AND (end_line_number = $3 OR (end_line_number <= 0 AND line_number = $3)) AND side = $4
 		ORDER BY created_at ASC;
@@ -231,6 +233,7 @@ func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath strin
 			&c.Body,
 			&c.Resolved,
 			&c.ParentCommentID,
+			&c.IsDraft,
 			&c.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
@@ -246,7 +249,7 @@ func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath strin
 // ListAllComments retrieves all comments for a changelist across all files.
 func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
 		FROM cl_comments
 		WHERE cl_id = $1
 		ORDER BY file_path ASC, line_number ASC, end_line_number ASC, created_at ASC;
@@ -272,6 +275,7 @@ func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error)
 			&c.Body,
 			&c.Resolved,
 			&c.ParentCommentID,
+			&c.IsDraft,
 			&c.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan comment: %w", err)
@@ -284,18 +288,18 @@ func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error)
 	return comments, rows.Err()
 }
 
-// CreateComment inserts a new comment into cl_comments with range support.
-func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, filePath string, line, endLine int, side, author, body string, parentID *int64) (*Comment, error) {
+// CreateComment inserts a new comment into cl_comments with range support and draft status.
+func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, filePath string, line, endLine int, side, author, body string, parentID *int64, isDraft bool) (*Comment, error) {
 	if endLine < line {
 		endLine = line
 	}
 	query := `
-		INSERT INTO cl_comments (cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, parent_comment_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at;
+		INSERT INTO cl_comments (cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, parent_comment_id, is_draft)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at;
 	`
 	var c Comment
-	err := d.pool.QueryRow(ctx, query, clID, patchsetNumber, filePath, line, endLine, side, author, body, parentID).Scan(
+	err := d.pool.QueryRow(ctx, query, clID, patchsetNumber, filePath, line, endLine, side, author, body, parentID, isDraft).Scan(
 		&c.ID,
 		&c.CLID,
 		&c.PatchsetNumber,
@@ -307,12 +311,100 @@ func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, 
 		&c.Body,
 		&c.Resolved,
 		&c.ParentCommentID,
+		&c.IsDraft,
 		&c.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert comment: %w", err)
 	}
 	return &c, nil
+}
+
+// ListDraftComments retrieves all unposted draft comments by a specific author on a changelist.
+func (d *DB) ListDraftComments(ctx context.Context, clID int64, author string) ([]Comment, error) {
+	query := `
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
+		FROM cl_comments
+		WHERE cl_id = $1 AND author = $2 AND is_draft = true
+		ORDER BY file_path ASC, line_number ASC, created_at ASC;
+	`
+	rows, err := d.pool.Query(ctx, query, clID, author)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query draft comments: %w", err)
+	}
+	defer rows.Close()
+
+	var comments []Comment
+	for rows.Next() {
+		var c Comment
+		if err := rows.Scan(
+			&c.ID,
+			&c.CLID,
+			&c.PatchsetNumber,
+			&c.FilePath,
+			&c.LineNumber,
+			&c.EndLineNumber,
+			&c.Side,
+			&c.Author,
+			&c.Body,
+			&c.Resolved,
+			&c.ParentCommentID,
+			&c.IsDraft,
+			&c.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan draft comment: %w", err)
+		}
+		if c.EndLineNumber <= 0 {
+			c.EndLineNumber = c.LineNumber
+		}
+		comments = append(comments, c)
+	}
+	return comments, rows.Err()
+}
+
+// CountDraftComments returns the number of unposted drafts for a reviewer on a changelist.
+func (d *DB) CountDraftComments(ctx context.Context, clID int64, author string) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM cl_comments
+		WHERE cl_id = $1 AND author = $2 AND is_draft = true;
+	`
+	var count int
+	err := d.pool.QueryRow(ctx, query, clID, author).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count draft comments: %w", err)
+	}
+	return count, nil
+}
+
+// PublishDraftComments marks all draft comments for a reviewer as published.
+func (d *DB) PublishDraftComments(ctx context.Context, clID int64, author string) (int64, error) {
+	query := `
+		UPDATE cl_comments
+		SET is_draft = false
+		WHERE cl_id = $1 AND author = $2 AND is_draft = true;
+	`
+	res, err := d.pool.Exec(ctx, query, clID, author)
+	if err != nil {
+		return 0, fmt.Errorf("failed to publish draft comments: %w", err)
+	}
+	return res.RowsAffected(), nil
+}
+
+// DiscardDraftComment deletes an unposted draft comment.
+func (d *DB) DiscardDraftComment(ctx context.Context, commentID int64, author string) error {
+	query := `
+		DELETE FROM cl_comments
+		WHERE id = $1 AND author = $2 AND is_draft = true;
+	`
+	res, err := d.pool.Exec(ctx, query, commentID, author)
+	if err != nil {
+		return fmt.Errorf("failed to discard draft comment: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ResolveComment updates the resolved status of a comment.
@@ -335,7 +427,7 @@ func (d *DB) ResolveComment(ctx context.Context, commentID int64, resolved bool)
 // GetComment retrieves a single comment by ID.
 func (d *DB) GetComment(ctx context.Context, commentID int64) (*Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, created_at
+		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
 		FROM cl_comments
 		WHERE id = $1;
 	`
@@ -352,6 +444,7 @@ func (d *DB) GetComment(ctx context.Context, commentID int64) (*Comment, error) 
 		&c.Body,
 		&c.Resolved,
 		&c.ParentCommentID,
+		&c.IsDraft,
 		&c.CreatedAt,
 	)
 	if err != nil {

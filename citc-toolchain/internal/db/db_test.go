@@ -302,4 +302,80 @@ func TestDatabaseOperationsWithTestcontainer(t *testing.T) {
 	if !bobReviewed["main.go"] {
 		t.Errorf("expected main.go to remain reviewed for bob")
 	}
+
+	// 7. Validate Draft Comments & Publishing Operations
+	// Alice creates two draft comments
+	draft1, err := database.CreateComment(ctx, 1, 1, "main.go", 10, 10, "modified", "alice", "Consider extracting helper", nil, true)
+	if err != nil {
+		t.Fatalf("CreateComment draft1 failed: %v", err)
+	}
+	if !draft1.IsDraft {
+		t.Errorf("expected draft1 to have IsDraft=true")
+	}
+
+	draft2, err := database.CreateComment(ctx, 1, 1, "main.go", 20, 25, "modified", "alice", "Check error return", nil, true)
+	if err != nil {
+		t.Fatalf("CreateComment draft2 failed: %v", err)
+	}
+	if !draft2.IsDraft {
+		t.Errorf("expected draft2 to have IsDraft=true")
+	}
+
+	// Verify Alice has 2 drafts
+	countAlice, err := database.CountDraftComments(ctx, 1, "alice")
+	if err != nil {
+		t.Fatalf("CountDraftComments failed: %v", err)
+	}
+	if countAlice != 2 {
+		t.Errorf("expected 2 drafts for alice, got %d", countAlice)
+	}
+
+	// Bob should have 0 drafts
+	countBob, err := database.CountDraftComments(ctx, 1, "bob")
+	if err != nil || countBob != 0 {
+		t.Errorf("expected 0 drafts for bob, got %d", countBob)
+	}
+
+	// List Alice's drafts
+	aliceDrafts, err := database.ListDraftComments(ctx, 1, "alice")
+	if err != nil {
+		t.Fatalf("ListDraftComments failed: %v", err)
+	}
+	if len(aliceDrafts) != 2 {
+		t.Errorf("expected 2 drafts in list, got %d", len(aliceDrafts))
+	}
+
+	// Alice discards draft2
+	err = database.DiscardDraftComment(ctx, draft2.ID, "alice")
+	if err != nil {
+		t.Fatalf("DiscardDraftComment failed: %v", err)
+	}
+	countAliceAfterDiscard, _ := database.CountDraftComments(ctx, 1, "alice")
+	if countAliceAfterDiscard != 1 {
+		t.Errorf("expected 1 draft after discard, got %d", countAliceAfterDiscard)
+	}
+
+	// Alice publishes her remaining drafts
+	publishedCount, err := database.PublishDraftComments(ctx, 1, "alice")
+	if err != nil {
+		t.Fatalf("PublishDraftComments failed: %v", err)
+	}
+	if publishedCount != 1 {
+		t.Errorf("expected 1 published comment, got %d", publishedCount)
+	}
+
+	// Count should now be 0
+	countAliceAfterPublish, _ := database.CountDraftComments(ctx, 1, "alice")
+	if countAliceAfterPublish != 0 {
+		t.Errorf("expected 0 drafts after publish, got %d", countAliceAfterPublish)
+	}
+
+	// Verify draft1 is now published
+	publishedComment, err := database.GetComment(ctx, draft1.ID)
+	if err != nil {
+		t.Fatalf("GetComment failed: %v", err)
+	}
+	if publishedComment.IsDraft {
+		t.Errorf("expected publishedComment to have IsDraft=false")
+	}
 }
