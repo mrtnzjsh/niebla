@@ -2,8 +2,8 @@
 name: citc-vcs
 description: >-
   Workflows, command syntax, and best practices for interacting with the CitC (Client in the Cloud)
-  version control system. Use when managing virtual workspaces, inspecting CoW scratch changes,
-  diffing against base CL blobs, shelving changelists, and submitting to trunk.
+  version control system and Critique code review UI. Use when managing virtual workspaces, inspecting CoW scratch changes,
+  diffing against base CL blobs, shelving changelists, submitting to trunk, and conducting code reviews with single-line or multi-line code block comments.
 ---
 
 # CitC Version Control System Runbook
@@ -18,6 +18,7 @@ CitC is a server-authoritative, cloud-native monorepo VCS inspired by Google Pip
 2. **Virtual Workspace Mounts:** Workspaces live in `~/citc/<name>`. Multiple workspaces run side-by-side concurrently without switching branches in-place.
 3. **Copy-on-Write (CoW) Scratch:** Edits made inside `~/citc/<name>` are stored in the local scratch overlay (`/citc/workspaces/<name>/scratch` or `~/.citc/workspaces/<name>/scratch`).
 4. **Automatic Workspace Detection:** Running `citc` commands inside `~/citc/<name>` automatically detects the active workspace via `$PWD`. When running from outside, specify `--workspace <name>`.
+5. **Code Review with Critique:** Code reviews and changelist inspections are conducted in Critique (`http://127.0.0.1:7331` or configured port), featuring side-by-side diffs, patchset history, and multi-line code block comments.
 
 ---
 
@@ -105,3 +106,45 @@ citc shelve -m "auth: fix token expiration handling"
 # 6. Submit to trunk
 citc submit
 ```
+
+---
+
+## 4. Critique Code Review & Multi-Line Commenting
+
+Critique is the web-based code review interface integrated into CitC. Authors and reviewers collaborate on shelved changelists using side-by-side diffs, patchset comparisons, and granular line/block commenting.
+
+### Accessing the Review UI
+* **Web UI URL:** `http://127.0.0.1:7331/cl/<cl_id>` (or live port from `citc config show`).
+* **Patchset Selector:** Switch between patchset versions (e.g. `Patchset 2 vs Patchset 1` or `Patchset 1 vs Base CL`).
+
+### Inline Commenting Mechanics
+
+Critique supports both single-line comments and multi-line code block comments:
+
+1. **Single-Line Commenting:**
+   - Click the line number or `+` gutter button on any line in the diff.
+   - The comment container opens immediately beneath that line with a badge displaying `Line <N>`.
+
+2. **Multi-Line Code Block Commenting:**
+   - **Click-and-Drag Selection:** Click and hold the mouse button on a line number, drag vertically across the desired lines (up or down), and release.
+   - **Shift-Click Selection:** Click the start line number, hold the `Shift` key, and click the end line number.
+   - **Visual Feedback:** All selected lines are highlighted with `.diff-line-selected` during selection, and the active range is styled with `.diff-row-comment-range` (subtle accent left border and glow).
+   - **Container Placement:** The comment box is anchored immediately below the ending line of the range, with a badge reading `Lines <start>–<end>`.
+
+3. **Submitting & Managing Comments:**
+   - **Thread Replies:** Reviewers and authors reply within the same comment thread container.
+   - **Resolving:** Toggle comment status between `Unresolved` and `Resolved`.
+   - **Approvals:** Submit `LGTM` (Approve) or `Needs Work` directly from the action bar.
+
+### Programmatic HTMX / REST API
+
+Agents interacting with Critique via HTTP can utilize the following endpoints:
+
+| Method | Endpoint | Parameters | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/cl/{id}` | `file={path}&ps={ps}&base_ps={base}` | Full review interface. |
+| `GET` | `/cl/{id}/comment-box` | `file={path}&line={start}&end_line={end}&side={side}&ps={ps}` | Fetches inline comment thread container. |
+| `POST` | `/cl/{id}/comments` | `file_path, line_number, end_line_number, side, author, body` | Creates single or multi-line comment. |
+| `POST` | `/cl/{id}/comments/{id}/resolve` | `resolved=true\|false` | Toggles resolution status. |
+| `POST` | `/cl/{id}/approve` | `verdict=lgtm\|needs_work` | Records review verdict. |
+
