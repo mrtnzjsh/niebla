@@ -28,6 +28,22 @@ var (
 	demoFileReviewsStore = make(map[string]bool)
 )
 
+// ResetDemoStoresForTest resets all in-memory demo stores. Used in testing.
+func ResetDemoStoresForTest() {
+	demoCommentsMu.Lock()
+	demoCommentsStore = make(map[string][]db.Comment)
+	nextCommentID = 100
+	demoCommentsMu.Unlock()
+
+	demoFileReviewsMu.Lock()
+	demoFileReviewsStore = make(map[string]bool)
+	demoFileReviewsMu.Unlock()
+
+	demoApprovalsMu.Lock()
+	demoApprovalsStore = make(map[int64][]db.Approval)
+	demoApprovalsMu.Unlock()
+}
+
 // CLHandler handles changelist reviews, patchset switching, diff views, and reviewer verdicts.
 type CLHandler struct {
 	db           *db.DB
@@ -246,6 +262,103 @@ func (h *CLHandler) HandleFileReview(w http.ResponseWriter, r *http.Request) {
 	_ = component.Render(r.Context(), w)
 }
 
+// HandlePublishReview publishes all draft comments by the active reviewer and applies optional overall summary and verdict.
+// POST /cl/{id}/reply
+func (h *CLHandler) HandlePublishReview(w http.ResponseWriter, r *http.Request) {
+	clID, err := parseCLID(r)
+	if err != nil {
+		http.Error(w, "invalid changelist id", http.StatusBadRequest)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	author := strings.TrimSpace(r.FormValue("author"))
+	if author == "" {
+		author = h.resolveReviewer(r)
+	}
+
+	overallMsg := strings.TrimSpace(r.FormValue("message"))
+	verdict := strings.TrimSpace(r.FormValue("verdict"))
+
+	if h.db != nil {
+		// 1. Publish all draft comments
+		if _, err := h.db.PublishDraftComments(r.Context(), clID, author); err != nil {
+			log.Printf("error publishing drafts: %v", err)
+		}
+
+		// 2. If overall message is provided, create a top-level review comment
+		if overallMsg != "" {
+			_, _ = h.db.CreateComment(r.Context(), clID, 1, "", 0, 0, "modified", author, overallMsg, nil, false)
+		}
+
+		// 3. If a verdict was submitted, record approval
+		if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
+			_ = h.db.SetApproval(r.Context(), clID, author, verdict)
+		}
+	} else {
+		demoCommentsMu.Lock()
+		for k, list := range demoCommentsStore {
+			for i := range list {
+				if list[i].CLID == clID && list[i].Author == author && list[i].IsDraft {
+					list[i].IsDraft = false
+				}
+			}
+			demoCommentsStore[k] = list
+		}
+
+		if overallMsg != "" {
+			nextCommentID++
+			c := db.Comment{
+				ID:             nextCommentID,
+				CLID:           clID,
+				PatchsetNumber: 1,
+				FilePath:       "",
+				LineNumber:     0,
+				EndLineNumber:  0,
+				Side:           "modified",
+				Author:         author,
+				Body:           overallMsg,
+				Resolved:       false,
+				IsDraft:        false,
+				CreatedAt:      time.Now(),
+			}
+			key := fmt.Sprintf("%d::0:modified", clID)
+			demoCommentsStore[key] = append(demoCommentsStore[key], c)
+		}
+		demoCommentsMu.Unlock()
+
+		if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
+			demoApprovalsMu.Lock()
+			list := demoApprovalsStore[clID]
+			updated := false
+			for i := range list {
+				if list[i].Reviewer == author {
+					list[i].Verdict = verdict
+					list[i].UpdatedAt = time.Now()
+					updated = true
+					break
+				}
+			}
+			if !updated {
+				list = append(list, db.Approval{
+					CLID:      clID,
+					Reviewer:  author,
+					Verdict:   verdict,
+					UpdatedAt: time.Now(),
+				})
+			}
+			demoApprovalsStore[clID] = list
+			demoApprovalsMu.Unlock()
+		}
+	}
+
+	http.Redirect(w, r, fmt.Sprintf("/cl/%d", clID), http.StatusSeeOther)
+}
+
 func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID int64, targetFile string) {
 	if h.db == nil {
 		h.renderDemoCLPage(w, r, clID, targetFile)
@@ -330,10 +443,13 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		log.Printf("error listing all comments: %v", err)
 	}
 
+	reviewer := h.resolveReviewer(r)
+	drafts, _ := h.db.ListDraftComments(ctx, clID, reviewer)
+
 	unresolvedTotal := 0
 	commentsPerFile := make(map[string]int)
 	for _, c := range allComments {
-		if !c.Resolved {
+		if !c.IsDraft && !c.Resolved {
 			unresolvedTotal++
 			commentsPerFile[c.FilePath]++
 		}
@@ -344,7 +460,6 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		targetFile = files[0].Path
 	}
 
-	reviewer := h.resolveReviewer(r)
 	if targetFile != "" {
 		_ = h.db.MarkFileReviewed(ctx, clID, targetFile, reviewer, true)
 	}
@@ -415,15 +530,17 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 			selectedDetail = detail
 		}
 
-		// Filter comments for this selected file
+		// Filter comments for this selected file (published or authored by reviewer)
 		fileComments, err := h.db.ListComments(ctx, clID, targetFile)
 		if err == nil {
 			for _, c := range fileComments {
-				anchorLine := c.EndLineNumber
-				if anchorLine <= 0 {
-					anchorLine = c.LineNumber
+				if !c.IsDraft || c.Author == reviewer {
+					anchorLine := c.EndLineNumber
+					if anchorLine <= 0 {
+						anchorLine = c.LineNumber
+					}
+					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
 				}
-				commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
 			}
 		}
 	}
@@ -447,6 +564,8 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		UnresolvedComments: unresolvedTotal,
 		ActiveReviewer:     reviewer,
 		ReviewedFilesCount: reviewedCount,
+		DraftCommentsCount: len(drafts),
+		DraftComments:      drafts,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -597,17 +716,23 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 	demoCommentsMu.RLock()
 	commentsByLine := make(map[int][]db.Comment)
 	unresolvedCount := 0
+	var reviewerDrafts []db.Comment
 	for key, list := range demoCommentsStore {
 		for _, c := range list {
-			if !c.Resolved {
+			if c.CLID == clID && c.Author == reviewer && c.IsDraft {
+				reviewerDrafts = append(reviewerDrafts, c)
+			}
+			if !c.IsDraft && !c.Resolved {
 				unresolvedCount++
 			}
 			if strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
-				anchorLine := c.EndLineNumber
-				if anchorLine <= 0 {
-					anchorLine = c.LineNumber
+				if !c.IsDraft || c.Author == reviewer {
+					anchorLine := c.EndLineNumber
+					if anchorLine <= 0 {
+						anchorLine = c.LineNumber
+					}
+					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
 				}
-				commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
 			}
 		}
 	}
@@ -626,6 +751,7 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 			Author:         currentUser,
 			Body:           "LGTM! The Myers diff traversal and Chroma tokenization align cleanly with Google Critique.",
 			Resolved:       false,
+			IsDraft:        false,
 			CreatedAt:      time.Now().Add(-30 * time.Minute),
 		}
 		commentsByLine[16] = []db.Comment{sampleComment}
@@ -653,6 +779,8 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 		UnresolvedComments: unresolvedCount,
 		ActiveReviewer:     reviewer,
 		ReviewedFilesCount: reviewedCount,
+		DraftCommentsCount: len(reviewerDrafts),
+		DraftComments:      reviewerDrafts,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

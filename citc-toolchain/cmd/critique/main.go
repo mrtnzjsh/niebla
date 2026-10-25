@@ -125,7 +125,7 @@ func main() {
 	// 3. Initialize HTTP handlers
 	authResolver := auth.NewUserIdentityResolver(cfg.Critique.Auth)
 	clHandler := handlers.NewCLHandler(database, casStorage, authResolver)
-	commentsHandler := handlers.NewCommentsHandler(database)
+	commentsHandler := handlers.NewCommentsHandler(database, authResolver)
 	rawHandler := handlers.NewRawHandler(database, casStorage)
 
 	// 4. Set up HTTP routing (Go 1.22+ ServeMux with method and pattern matching)
@@ -149,11 +149,14 @@ func main() {
 	mux.HandleFunc("GET /cl/{id}/file/{path...}", clHandler.HandleCLFileDiff)
 	mux.HandleFunc("POST /cl/{id}/approval", clHandler.HandleApproval)
 	mux.HandleFunc("POST /cl/{id}/file-review", clHandler.HandleFileReview)
+	mux.HandleFunc("POST /cl/{id}/reply", clHandler.HandlePublishReview)
+	mux.HandleFunc("POST /cl/{id}/publish", clHandler.HandlePublishReview)
 
 	// Inline comments HTMX endpoints
 	mux.HandleFunc("GET /cl/{id}/comment-box", commentsHandler.HandleGetCommentBox)
 	mux.HandleFunc("POST /cl/{id}/comments", commentsHandler.HandleCreateComment)
 	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/resolve", commentsHandler.HandleResolveComment)
+	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/discard", commentsHandler.HandleDiscardComment)
 
 	// Raw blobs
 	mux.HandleFunc("GET /cl/{id}/raw", rawHandler.ServeRawBlob)

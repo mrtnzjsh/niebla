@@ -224,7 +224,7 @@ func TestCommentHandlersMultiLine(t *testing.T) {
 		t.Errorf("expected hidden end_line_number input with value 15, got: %s", body)
 	}
 
-	// 2. Test POST /cl/101/comments creating a multi-line comment
+	// 2. Test POST /cl/101/comments creating a multi-line draft comment
 	form := strings.NewReader("cl_id=101&patchset_number=1&file_path=service.go&line_number=10&end_line_number=15&side=modified&author=alice&body=Please+extract+this+block+into+a+helper+function.")
 	postReq := httptest.NewRequest("POST", "/cl/101/comments", form)
 	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -241,9 +241,116 @@ func TestCommentHandlersMultiLine(t *testing.T) {
 	if !strings.Contains(postBody, "Please extract this block into a helper function.") {
 		t.Errorf("expected comment body in rendered comment box, got: %s", postBody)
 	}
+	if !strings.Contains(postBody, "Save Draft") {
+		t.Errorf("expected 'Save Draft' submit button, got: %s", postBody)
+	}
+	if !strings.Contains(postBody, "Draft") {
+		t.Errorf("expected 'Draft' badge in rendered comment box, got: %s", postBody)
+	}
+	if !strings.Contains(postBody, "Discard") {
+		t.Errorf("expected 'Discard' button in rendered comment box, got: %s", postBody)
+	}
+}
+
+func TestDraftCommentsAndReplyWorkflow(t *testing.T) {
+	ResetDemoStoresForTest()
+	clHandler := NewCLHandler(nil, nil)
+	commentsHandler := NewCommentsHandler(nil)
+
+	// 1. Alice creates draft comment 1 on math.go line 10
+	form1 := strings.NewReader("cl_id=1&patchset_number=1&file_path=internal/web/diff/engine.go&line_number=10&side=modified&author=alice&body=First+draft+note")
+	req1 := httptest.NewRequest("POST", "/cl/1/comments", form1)
+	req1.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec1 := httptest.NewRecorder()
+	commentsHandler.HandleCreateComment(rec1, req1)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("Create draft 1 failed with status %d: %s", rec1.Code, rec1.Body.String())
+	}
+	body1 := rec1.Body.String()
+	if !strings.Contains(body1, "First draft note") {
+		t.Errorf("expected draft body in comment box")
+	}
+	if !strings.Contains(body1, "Draft") {
+		t.Errorf("expected Draft badge in comment box")
+	}
+
+	// 2. Alice creates draft comment 2 on line 20
+	form2 := strings.NewReader("cl_id=1&patchset_number=1&file_path=internal/web/diff/engine.go&line_number=20&side=modified&author=alice&body=Second+draft+note")
+	req2 := httptest.NewRequest("POST", "/cl/1/comments", form2)
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec2 := httptest.NewRecorder()
+	commentsHandler.HandleCreateComment(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("Create draft 2 failed with status %d", rec2.Code)
+	}
+	body2 := rec2.Body.String()
+	if !strings.Contains(body2, "Second draft note") {
+		t.Errorf("expected second draft body in comment box")
+	}
+
+	// 2b. Alice creates draft comment 3, then discards it
+	form3 := strings.NewReader("cl_id=1&patchset_number=1&file_path=internal/web/diff/engine.go&line_number=30&side=modified&author=alice&body=Temporary+draft+note")
+	req3 := httptest.NewRequest("POST", "/cl/1/comments", form3)
+	req3.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec3 := httptest.NewRecorder()
+	commentsHandler.HandleCreateComment(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("Create draft 3 failed: %d", rec3.Code)
+	}
+
+	// Discard draft 3
+	reqDiscard := httptest.NewRequest("POST", "/cl/1/comments/103/discard?author=alice", nil)
+	reqDiscard.SetPathValue("comment_id", "103")
+	recDiscard := httptest.NewRecorder()
+	commentsHandler.HandleDiscardComment(recDiscard, reqDiscard)
+	if recDiscard.Code != http.StatusOK {
+		t.Fatalf("Discard draft failed with status %d: %s", recDiscard.Code, recDiscard.Body.String())
+	}
+	if strings.Contains(recDiscard.Body.String(), "Temporary draft note") {
+		t.Errorf("discarded draft should not appear in response")
+	}
+
+	// 3. Bob visits CL 1 page -> should have 0 drafts for bob (per-reviewer draft isolation)
+	reqBob := httptest.NewRequest("GET", "/cl/1?reviewer=bob", nil)
+	recBob := httptest.NewRecorder()
+	clHandler.HandleCLView(recBob, reqBob)
+	if recBob.Code != http.StatusOK {
+		t.Fatalf("HandleCLView as bob failed with status %d", recBob.Code)
+	}
+	bobView := recBob.Body.String()
+	if strings.Contains(bobView, "First draft note") {
+		t.Errorf("Bob should NOT see Alice's unposted draft comments")
+	}
+
+	// 4. Alice posts comments & reply with LGTM verdict
+	replyForm := strings.NewReader("author=alice&message=LGTM+overall!+Addressed+comments.&verdict=lgtm")
+	postReply := httptest.NewRequest("POST", "/cl/1/reply", replyForm)
+	postReply.SetPathValue("id", "1")
+	postReply.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recReply := httptest.NewRecorder()
+	clHandler.HandlePublishReview(recReply, postReply)
+
+	if recReply.Code != http.StatusSeeOther {
+		t.Fatalf("HandlePublishReview returned status %d, expected 303 redirect", recReply.Code)
+	}
+
+	// 5. Alice visits CL 1 after publishing -> drafts are now published comments
+	reqAliceAfter := httptest.NewRequest("GET", "/cl/1?reviewer=alice", nil)
+	recAliceAfter := httptest.NewRecorder()
+	clHandler.HandleCLView(recAliceAfter, reqAliceAfter)
+	aliceViewAfter := recAliceAfter.Body.String()
+	if !strings.Contains(aliceViewAfter, "First draft note") {
+		t.Errorf("expected published comment to be visible on CL view after reply")
+	}
+	if !strings.Contains(aliceViewAfter, "LGTM / Approve") {
+		t.Errorf("expected approval buttons on CL view")
+	}
 }
 
 func TestFileReviewEndpoints(t *testing.T) {
+	ResetDemoStoresForTest()
 	handler := NewCLHandler(nil, nil)
 
 	// 1. Visit CL page as alice (auto-selects first file and marks it reviewed for alice)
