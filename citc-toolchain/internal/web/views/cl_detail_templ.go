@@ -71,7 +71,7 @@ func CLDetail(data CLDetailData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex-1 flex flex-col bg-[#090d16]\"><!-- Centered Actions Row: Reply and Submit above CL status/info bar and below top header -->")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex-1 flex flex-col bg-[#090d16]\"><!-- CL Header Overview --><div class=\"border-b border-slate-800 bg-[#0c1322] px-6 py-3.5 shadow-sm\"><!-- Centered Actions Row: Reply and Submit -->")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -79,7 +79,7 @@ func CLDetail(data CLDetailData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<!-- CL Header Overview --><div class=\"border-b border-slate-800 bg-[#0c1322] px-6 py-4 shadow-sm\"><div class=\"flex flex-col lg:flex-row lg:items-center justify-between gap-4\"><!-- CL Identity and Status --><div class=\"flex flex-col space-y-1.5\"><div class=\"flex items-center space-x-3\"><span class=\"text-xl font-bold tracking-tight text-white font-mono\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"mt-3 flex flex-col lg:flex-row lg:items-center justify-between gap-4\"><!-- CL Identity and Status --><div class=\"flex flex-col space-y-1.5\"><div class=\"flex items-center space-x-3\"><span class=\"text-xl font-bold tracking-tight text-white font-mono\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -646,7 +646,7 @@ func CenterActions(data CLDetailData) templ.Component {
 			templ_7745c5c3_Var25 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<div id=\"cl-center-actions\" class=\"bg-[#0c1322] border-b border-slate-800 px-6 py-2.5 flex items-center justify-center space-x-4\"><div id=\"cl-reply-btn-container\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<div id=\"cl-center-actions\" class=\"flex items-center justify-center space-x-4\"><div id=\"cl-reply-btn-container\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
