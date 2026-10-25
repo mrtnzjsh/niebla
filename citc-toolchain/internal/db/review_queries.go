@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -599,4 +600,102 @@ func (d *DB) ListReviewedFiles(ctx context.Context, clID int64, reviewer string)
 	}
 	return reviewed, rows.Err()
 }
+
+// ReviewerAssignment captures an assigned reviewer, their review verdict, and timestamp.
+type ReviewerAssignment struct {
+	CLID      int64     `json:"cl_id"`
+	Reviewer  string    `json:"reviewer"`
+	Verdict   string    `json:"verdict"` // "pending", "lgtm", "changes_requested", "approved"
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AddReviewers registers a list of reviewers to a changelist.
+func (d *DB) AddReviewers(ctx context.Context, clID int64, reviewers []string) error {
+	if len(reviewers) == 0 {
+		return nil
+	}
+	query := `
+		INSERT INTO cl_reviewers (cl_id, reviewer, created_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (cl_id, reviewer) DO NOTHING;
+	`
+	for _, r := range reviewers {
+		trimmed := strings.TrimSpace(r)
+		if trimmed == "" {
+			continue
+		}
+		if _, err := d.pool.Exec(ctx, query, clID, trimmed); err != nil {
+			return fmt.Errorf("failed to add reviewer %s to cl %d: %w", trimmed, clID, err)
+		}
+	}
+	return nil
+}
+
+// RemoveReviewer unassigns a reviewer from a changelist.
+func (d *DB) RemoveReviewer(ctx context.Context, clID int64, reviewer string) error {
+	query := `DELETE FROM cl_reviewers WHERE cl_id = $1 AND reviewer = $2;`
+	if _, err := d.pool.Exec(ctx, query, clID, strings.TrimSpace(reviewer)); err != nil {
+		return fmt.Errorf("failed to remove reviewer %s from cl %d: %w", reviewer, clID, err)
+	}
+	return nil
+}
+
+// ListReviewers returns all reviewers assigned to a changelist along with any verdicts.
+// Reviewers who submitted a verdict are included even if not explicitly pre-assigned.
+func (d *DB) ListReviewers(ctx context.Context, clID int64) ([]ReviewerAssignment, error) {
+	query := `
+		SELECT COALESCE(r.cl_id, a.cl_id) as cl_id,
+		       COALESCE(r.reviewer, a.reviewer) as reviewer,
+		       COALESCE(a.verdict, 'pending') as verdict,
+		       COALESCE(a.updated_at, r.created_at) as updated_at
+		FROM cl_reviewers r
+		FULL OUTER JOIN cl_approvals a ON r.cl_id = a.cl_id AND r.reviewer = a.reviewer
+		WHERE COALESCE(r.cl_id, a.cl_id) = $1
+		ORDER BY reviewer ASC;
+	`
+	rows, err := d.pool.Query(ctx, query, clID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list reviewers for cl %d: %w", clID, err)
+	}
+	defer rows.Close()
+
+	var reviewers []ReviewerAssignment
+	for rows.Next() {
+		var ra ReviewerAssignment
+		if err := rows.Scan(&ra.CLID, &ra.Reviewer, &ra.Verdict, &ra.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan reviewer assignment: %w", err)
+		}
+		reviewers = append(reviewers, ra)
+	}
+	return reviewers, rows.Err()
+}
+
+// CountUnresolvedComments returns the number of published, unresolved comments on a changelist.
+func (d *DB) CountUnresolvedComments(ctx context.Context, clID int64) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM cl_comments
+		WHERE cl_id = $1 AND resolved = false AND is_draft = false;
+	`
+	var count int
+	if err := d.pool.QueryRow(ctx, query, clID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count unresolved comments for cl %d: %w", clID, err)
+	}
+	return count, nil
+}
+
+// CountApprovals returns the number of reviewers who have granted an approval ("lgtm" or "approved") on a changelist.
+func (d *DB) CountApprovals(ctx context.Context, clID int64) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM cl_approvals
+		WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved');
+	`
+	var count int
+	if err := d.pool.QueryRow(ctx, query, clID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count approvals for cl %d: %w", clID, err)
+	}
+	return count, nil
+}
+
 

@@ -21,6 +21,9 @@ var fileReviewsSQL string
 //go:embed migrations/0004_draft_comments.sql
 var draftCommentsSQL string
 
+//go:embed migrations/0005_cl_reviewers.sql
+var reviewersSQL string
+
 // DB wraps the pgxpool connection pool and provides access to database queries.
 type DB struct {
 	pool *pgxpool.Pool
@@ -103,6 +106,9 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 	}
 	if _, err := d.pool.Exec(ctx, draftCommentsSQL); err != nil {
 		return fmt.Errorf("failed to execute draft comments schema migration: %w", err)
+	}
+	if _, err := d.pool.Exec(ctx, reviewersSQL); err != nil {
+		return fmt.Errorf("failed to execute reviewers schema migration: %w", err)
 	}
 	return nil
 }

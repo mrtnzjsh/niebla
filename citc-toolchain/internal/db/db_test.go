@@ -378,4 +378,114 @@ func TestDatabaseOperationsWithTestcontainer(t *testing.T) {
 	if publishedComment.IsDraft {
 		t.Errorf("expected publishedComment to have IsDraft=false")
 	}
+
+	// 8. Test CL Reviewers and Counts
+	t.Log("Testing CL Reviewers and Counts")
+
+	// 8a. Add reviewers to CL 1
+	err = database.AddReviewers(ctx, 1, []string{"alice", "bob", "carol"})
+	if err != nil {
+		t.Fatalf("AddReviewers failed: %v", err)
+	}
+
+	// Idempotent add with duplicates and whitespace
+	err = database.AddReviewers(ctx, 1, []string{"alice", "  bob  ", ""})
+	if err != nil {
+		t.Fatalf("AddReviewers duplicate failed: %v", err)
+	}
+
+	// 8b. List reviewers - all should have 'pending' verdict initially
+	reviewers, err := database.ListReviewers(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListReviewers failed: %v", err)
+	}
+	if len(reviewers) != 3 {
+		t.Fatalf("expected 3 reviewers, got %d", len(reviewers))
+	}
+	for _, r := range reviewers {
+		if r.Verdict != "pending" {
+			t.Errorf("expected reviewer %s to have verdict 'pending', got %q", r.Reviewer, r.Verdict)
+		}
+	}
+
+	// 8c. Alice grants LGTM approval
+	err = database.SetApproval(ctx, 1, "alice", "lgtm")
+	if err != nil {
+		t.Fatalf("SetApproval failed: %v", err)
+	}
+
+	// Dave (not explicitly pre-assigned) requests changes
+	err = database.SetApproval(ctx, 1, "dave", "changes_requested")
+	if err != nil {
+		t.Fatalf("SetApproval for dave failed: %v", err)
+	}
+
+	// 8d. List reviewers again - should include Alice (lgtm), Bob (pending), Carol (pending), Dave (changes_requested)
+	reviewersAfter, err := database.ListReviewers(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListReviewers after approvals failed: %v", err)
+	}
+	if len(reviewersAfter) != 4 {
+		t.Fatalf("expected 4 reviewers, got %d", len(reviewersAfter))
+	}
+	reviewerMap := make(map[string]string)
+	for _, r := range reviewersAfter {
+		reviewerMap[r.Reviewer] = r.Verdict
+	}
+	if reviewerMap["alice"] != "lgtm" {
+		t.Errorf("expected alice to have verdict 'lgtm', got %q", reviewerMap["alice"])
+	}
+	if reviewerMap["bob"] != "pending" {
+		t.Errorf("expected bob to have verdict 'pending', got %q", reviewerMap["bob"])
+	}
+	if reviewerMap["dave"] != "changes_requested" {
+		t.Errorf("expected dave to have verdict 'changes_requested', got %q", reviewerMap["dave"])
+	}
+
+	// 8e. Remove Carol
+	err = database.RemoveReviewer(ctx, 1, "carol")
+	if err != nil {
+		t.Fatalf("RemoveReviewer failed: %v", err)
+	}
+	reviewersAfterRemove, err := database.ListReviewers(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListReviewers after remove failed: %v", err)
+	}
+	if len(reviewersAfterRemove) != 3 {
+		t.Fatalf("expected 3 reviewers after remove, got %d", len(reviewersAfterRemove))
+	}
+
+	// 8f. CountApprovals
+	approvedCount, err := database.CountApprovals(ctx, 1)
+	if err != nil {
+		t.Fatalf("CountApprovals failed: %v", err)
+	}
+	if approvedCount != 1 {
+		t.Errorf("expected 1 approved reviewer (alice), got %d", approvedCount)
+	}
+
+	// 8g. CountUnresolvedComments
+	// draft1 is published and currently unresolved
+	unresolvedCount, err := database.CountUnresolvedComments(ctx, 1)
+	if err != nil {
+		t.Fatalf("CountUnresolvedComments failed: %v", err)
+	}
+	if unresolvedCount != 1 {
+		t.Errorf("expected 1 unresolved comment, got %d", unresolvedCount)
+	}
+
+	// Mark draft1 as resolved
+	err = database.ResolveComment(ctx, draft1.ID, true)
+	if err != nil {
+		t.Fatalf("ResolveComment failed: %v", err)
+	}
+
+	unresolvedCountAfterResolve, err := database.CountUnresolvedComments(ctx, 1)
+	if err != nil {
+		t.Fatalf("CountUnresolvedComments after resolve failed: %v", err)
+	}
+	if unresolvedCountAfterResolve != 0 {
+		t.Errorf("expected 0 unresolved comments after resolve, got %d", unresolvedCountAfterResolve)
+	}
 }
+
