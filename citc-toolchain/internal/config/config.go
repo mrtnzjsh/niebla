@@ -8,8 +8,9 @@ type Config struct {
 	Core     CoreConfig     `toml:"core"`
 	Server   ServerConfig   `toml:"server"`
 	FS       FSConfig       `toml:"fs"`
-	Critique CritiqueConfig `toml:"critique"`
-	Events   EventsConfig   `toml:"events"`
+	Critique   CritiqueConfig   `toml:"critique"`
+	Events     EventsConfig     `toml:"events"`
+	Resilience ResilienceConfig `toml:"resilience"`
 }
 
 // CoreConfig holds settings shared across toolchain components.
@@ -76,6 +77,110 @@ type WebhookSinkConfig struct {
 type ExecSinkConfig struct {
 	Command   string `toml:"command"`
 	TimeoutMS int    `toml:"timeout_ms,omitempty"`
+}
+
+// ResilienceConfig governs distributed replication, encrypted backups, and disaster recovery.
+type ResilienceConfig struct {
+	Enabled             bool                      `toml:"enabled"`
+	DefaultMode         string                    `toml:"default_mode"` // "zfs_stream" (default) or "bundle"
+	ZFS                 ZFSReplicationConfig      `toml:"zfs,omitempty"`
+	Bundle              BundleConfig              `toml:"bundle,omitempty"`
+	Encryption          EncryptionConfig          `toml:"encryption,omitempty"`
+	Filesystem          FilesystemBackupConfig    `toml:"filesystem,omitempty"`
+	Nextcloud           NextcloudConfig           `toml:"nextcloud,omitempty"`
+	SFTP                SFTPConfig                `toml:"sftp,omitempty"`
+	S3                  S3BackupConfig            `toml:"s3,omitempty"`
+	PostgresReplication PostgresReplicationConfig `toml:"postgres_replication,omitempty"`
+	Schedule            BackupScheduleConfig      `toml:"schedule,omitempty"`
+}
+
+// ZFSReplicationConfig specifies parameters for native ZFS snapshot streaming over 10GbE.
+type ZFSReplicationConfig struct {
+	Enabled          bool   `toml:"enabled"`
+	LocalDataset     string `toml:"local_dataset"`
+	RemoteHost       string `toml:"remote_host"`
+	RemoteUser       string `toml:"remote_user"`
+	RemoteSSHPort    int    `toml:"remote_ssh_port,omitempty"`
+	RemoteKeyFile    string `toml:"remote_key_file,omitempty"`
+	RemoteDataset    string `toml:"remote_dataset"`
+	RawEncryptedSend bool   `toml:"raw_encrypted_send,omitempty"`
+	SnapshotPrefix   string `toml:"snapshot_prefix,omitempty"`
+	RetentionCount   int    `toml:"retention_count,omitempty"`
+	BandwidthLimitMB int    `toml:"bandwidth_limit_mb,omitempty"`
+}
+
+// BundleConfig specifies options for standalone encrypted archive packages (.citcbak).
+type BundleConfig struct {
+	Enabled          bool   `toml:"enabled"`
+	TargetDir        string `toml:"target_dir"`
+	Compression      string `toml:"compression,omitempty"`       // "zstd" or "gzip"
+	CompressionLevel int    `toml:"compression_level,omitempty"` // 1-9
+}
+
+// EncryptionConfig governs authenticated encryption at rest for backups.
+type EncryptionConfig struct {
+	Algorithm     string `toml:"algorithm"`                // "aes-256-gcm" or "chacha20-poly1305"
+	KeySource     string `toml:"key_source"`               // "env", "file", "passphrase"
+	KeyEnv        string `toml:"key_env,omitempty"`        // environment variable with master key
+	KeyFile       string `toml:"key_file,omitempty"`       // path to 0400/0600 key file
+	PassphraseEnv string `toml:"passphrase_env,omitempty"` // environment variable with passphrase
+}
+
+// FilesystemBackupConfig specifies high-speed filesystem destination (e.g. NFSv4/SMB3 10G mount).
+type FilesystemBackupConfig struct {
+	Enabled       bool   `toml:"enabled"`
+	Path          string `toml:"path"`
+	BufferSizeMB  int    `toml:"buffer_size_mb,omitempty"`
+	AutoCreateDir bool   `toml:"auto_create_dir,omitempty"`
+}
+
+// NextcloudConfig specifies WebDAV backup destination for Nextcloud storage.
+type NextcloudConfig struct {
+	Enabled        bool   `toml:"enabled"`
+	URL            string `toml:"url"`
+	Username       string `toml:"username"`
+	PasswordEnv    string `toml:"password_env"`
+	TimeoutSeconds int    `toml:"timeout_seconds,omitempty"`
+}
+
+// SFTPConfig specifies remote SSH/SFTP streaming destination over 10GbE.
+type SFTPConfig struct {
+	Enabled        bool   `toml:"enabled"`
+	Host           string `toml:"host"`
+	User           string `toml:"user"`
+	RemotePath     string `toml:"remote_path"`
+	KeyFile        string `toml:"key_file,omitempty"`
+	TimeoutSeconds int    `toml:"timeout_seconds,omitempty"`
+}
+
+// S3BackupConfig specifies S3-compatible protocol object storage destination.
+type S3BackupConfig struct {
+	Enabled        bool   `toml:"enabled"`
+	Endpoint       string `toml:"endpoint"`
+	Bucket         string `toml:"bucket"`
+	Region         string `toml:"region,omitempty"`
+	Prefix         string `toml:"prefix,omitempty"`
+	AccessKeyEnv   string `toml:"access_key_env,omitempty"`
+	SecretKeyEnv   string `toml:"secret_key_env,omitempty"`
+	ForcePathStyle bool   `toml:"force_path_style,omitempty"`
+	UseSSL         bool   `toml:"use_ssl,omitempty"`
+	StorageClass   string `toml:"storage_class,omitempty"`
+}
+
+// PostgresReplicationConfig specifies secondary PostgreSQL instance replication.
+type PostgresReplicationConfig struct {
+	Enabled        bool   `toml:"enabled"`
+	TargetDBURL    string `toml:"target_db_url"`
+	Mode           string `toml:"mode,omitempty"` // "snapshot" or "continuous"
+	TimeoutSeconds int    `toml:"timeout_seconds,omitempty"`
+}
+
+// BackupScheduleConfig specifies automated cadence and retention pruning.
+type BackupScheduleConfig struct {
+	AutoBackup       bool `toml:"auto_backup"`
+	IntervalHours    int  `toml:"interval_hours"`
+	RetentionCount   int  `toml:"retention_count"`
+	SnapshotOnSubmit bool `toml:"snapshot_on_submit,omitempty"`
 }
 
 // CritiqueConfig holds review web service options.
@@ -184,6 +289,48 @@ func DefaultConfig() *Config {
 			},
 			Exec: ExecSinkConfig{
 				TimeoutMS: 5000,
+			},
+		},
+		Resilience: ResilienceConfig{
+			Enabled:     false,
+			DefaultMode: "zfs_stream",
+			ZFS: ZFSReplicationConfig{
+				RawEncryptedSend: true,
+				RemoteSSHPort:    22,
+				SnapshotPrefix:   "citc-auto",
+				RetentionCount:   30,
+			},
+			Bundle: BundleConfig{
+				Compression:      "zstd",
+				CompressionLevel: 1,
+			},
+			Encryption: EncryptionConfig{
+				Algorithm: "aes-256-gcm",
+				KeySource: "env",
+				KeyEnv:    "CITC_MASTER_KEY",
+			},
+			Filesystem: FilesystemBackupConfig{
+				BufferSizeMB: 8,
+			},
+			Nextcloud: NextcloudConfig{
+				TimeoutSeconds: 180,
+			},
+			SFTP: SFTPConfig{
+				TimeoutSeconds: 60,
+			},
+			S3: S3BackupConfig{
+				Region:       "us-east-1",
+				StorageClass: "STANDARD",
+				UseSSL:       true,
+			},
+			PostgresReplication: PostgresReplicationConfig{
+				Mode:           "snapshot",
+				TimeoutSeconds: 300,
+			},
+			Schedule: BackupScheduleConfig{
+				IntervalHours:    4,
+				RetentionCount:   30,
+				SnapshotOnSubmit: true,
 			},
 		},
 	}

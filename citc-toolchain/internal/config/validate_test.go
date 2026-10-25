@@ -347,6 +347,91 @@ func TestValidateEventsConfig(t *testing.T) {
 	}
 }
 
+func TestValidateResilienceConfig(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// 1. Disabled by default should pass cleanly
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected DefaultConfig() to pass validation, got: %v", err)
+	}
+
+	// 2. Enable resilience with invalid default_mode
+	cfg.Resilience.Enabled = true
+	cfg.Resilience.DefaultMode = "invalid_mode"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "unsupported default_mode") {
+		t.Errorf("expected error for unsupported default_mode, got: %v", err)
+	}
+
+	// 3. Mode is zfs_stream but ZFS.Enabled = false
+	cfg.Resilience.DefaultMode = "zfs_stream"
+	cfg.Resilience.ZFS.Enabled = false
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "zfs replication must be enabled") {
+		t.Errorf("expected error when zfs_stream is active but zfs.enabled is false, got: %v", err)
+	}
+
+	// 4. Missing datasets for ZFS
+	cfg.Resilience.ZFS.Enabled = true
+	cfg.Resilience.ZFS.LocalDataset = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "local_dataset cannot be empty") {
+		t.Errorf("expected error for empty local_dataset, got: %v", err)
+	}
+
+	cfg.Resilience.ZFS.LocalDataset = "localpool/citc"
+	cfg.Resilience.ZFS.RemoteHost = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "remote_host cannot be empty") {
+		t.Errorf("expected error for empty remote_host, got: %v", err)
+	}
+
+	cfg.Resilience.ZFS.RemoteHost = "zfs-server.internal"
+	cfg.Resilience.ZFS.RemoteDataset = "tank/citc-replica"
+
+	// 5. Invalid encryption algorithm
+	cfg.Resilience.Encryption.Algorithm = "des-ede3"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "unsupported encryption algorithm") {
+		t.Errorf("expected error for unsupported cipher algorithm, got: %v", err)
+	}
+	cfg.Resilience.Encryption.Algorithm = "aes-256-gcm"
+
+	// 6. Nextcloud invalid URL
+	cfg.Resilience.Nextcloud.Enabled = true
+	cfg.Resilience.Nextcloud.URL = "ftp://nextcloud.internal"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "nextcloud url must begin with") {
+		t.Errorf("expected error for non-http nextcloud url, got: %v", err)
+	}
+	cfg.Resilience.Nextcloud.URL = "https://nextcloud.internal/remote.php/dav/files/user/citc"
+	cfg.Resilience.Nextcloud.Username = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "username cannot be empty") {
+		t.Errorf("expected error for empty nextcloud username, got: %v", err)
+	}
+	cfg.Resilience.Nextcloud.Username = "matatan"
+	cfg.Resilience.Nextcloud.PasswordEnv = "NEXTCLOUD_APP_PASSWORD"
+
+	// 7. S3 missing bucket
+	cfg.Resilience.S3.Enabled = true
+	cfg.Resilience.S3.Endpoint = "s3.us-east-1.amazonaws.com"
+	cfg.Resilience.S3.Bucket = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "bucket cannot be empty") {
+		t.Errorf("expected error for empty s3 bucket, got: %v", err)
+	}
+	cfg.Resilience.S3.Bucket = "citc-backups"
+	cfg.Resilience.S3.AccessKeyEnv = "AWS_ACCESS_KEY_ID"
+	cfg.Resilience.S3.SecretKeyEnv = "AWS_SECRET_ACCESS_KEY"
+
+	// 8. Postgres self-replication loop
+	cfg.Resilience.PostgresReplication.Enabled = true
+	cfg.Resilience.PostgresReplication.TargetDBURL = cfg.Server.DBURL
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "self-replication loop") {
+		t.Errorf("expected error for postgres self-replication loop, got: %v", err)
+	}
+	cfg.Resilience.PostgresReplication.TargetDBURL = "postgres://standby.internal:5432/citc"
+
+	// 9. Fully valid configuration should pass
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected fully configured resilience config to pass, got: %v", err)
+	}
+}
+
+
 
 
 

@@ -99,6 +99,63 @@ diff_add_bg     = "rgba(166, 227, 161, 0.20)"
 diff_add_border = "#a6e3a1"
 diff_del_bg     = "rgba(243, 139, 168, 0.20)"
 diff_del_border = "#f38ba8"
+
+[resilience]
+enabled = false
+default_mode = "zfs_stream" # "zfs_stream" (default) or "bundle"
+
+[resilience.zfs]
+enabled = false
+local_dataset = "zroot/data/citc"
+remote_host = "backup-node.internal"
+remote_user = "citc-repl"
+remote_ssh_port = 22
+remote_dataset = "backups/citc"
+raw_encrypted_send = true
+snapshot_prefix = "citc-auto"
+retention_count = 7
+bandwidth_limit_mb = 0
+
+[resilience.bundle]
+enabled = false
+target_dir = "/mnt/zfs-pool/citc-backups"
+compression = "zstd"
+compression_level = 3
+
+[resilience.encryption]
+algorithm = "aes-256-gcm" # "aes-256-gcm" or "chacha20-poly1305"
+key_source = "env"        # "env", "file", "passphrase"
+key_env = "CITC_MASTER_KEY"
+passphrase_env = "CITC_BACKUP_PASSPHRASE"
+
+[resilience.filesystem]
+enabled = false
+path = "/mnt/zfs-pool/citc-backups"
+buffer_size_mb = 8
+
+[resilience.nextcloud]
+enabled = false
+url = "https://nextcloud.internal/remote.php/dav/files/citc"
+username = "citc-backup"
+password_env = "CITC_NEXTCLOUD_PASSWORD"
+timeout_seconds = 180
+
+[resilience.s3]
+enabled = false
+endpoint = "s3.amazonaws.com"
+bucket = "citc-backups-bucket"
+region = "us-east-1"
+prefix = "citc"
+access_key_env = "AWS_ACCESS_KEY_ID"
+secret_key_env = "AWS_SECRET_ACCESS_KEY"
+force_path_style = false
+use_ssl = true
+
+[resilience.schedule]
+auto_backup = false
+interval_minutes = 60
+retention_count = 14
+prune_cadence_hours = 24
 ```
 
 ---
@@ -138,6 +195,14 @@ When modifying `config.toml`, CitC enforces:
 7. `critique.theme.preset`: Must match a known preset. Typos trigger Levenshtein distance suggestions (e.g. typing `cattppuccin` suggests `catppuccin-mocha`).
 8. `critique.theme.syntax_style`: Must match a registered Chroma style.
 9. `critique.theme.colors.*`: Must be valid `#RGB`, `#RRGGBB`, `#RRGGBBAA`, or `rgba(...)` color syntax.
+10. **Resilience & Replication Rules:**
+    - `resilience.default_mode`: Must be `"zfs_stream"` or `"bundle"`.
+    - `resilience.zfs.local_dataset` & `remote_dataset`: Cannot contain whitespace or invalid characters.
+    - `resilience.encryption.algorithm`: Must be `"aes-256-gcm"` or `"chacha20-poly1305"`.
+    - `resilience.encryption.key_source`: Must be `"env"`, `"file"`, or `"passphrase"`.
+    - `resilience.nextcloud.url`: Must be an `http://` or `https://` WebDAV URL.
+    - `resilience.s3.bucket`: Must not be empty when S3 driver is enabled.
+    - `resilience.postgres_replication.target_db_url`: Cannot be identical to primary `server.db_url`.
 
 ---
 

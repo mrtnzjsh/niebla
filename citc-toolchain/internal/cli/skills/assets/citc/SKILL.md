@@ -212,4 +212,63 @@ Agents interacting with Critique via HTTP can utilize the following endpoints:
 | `POST` | `/cl/{id}/submit` | *(none)* | Commits CL to trunk if approvals and unresolved comments policy guards pass. |
 | `POST` | `/cl/{id}/file-review` | `file={path}&reviewed=true\|false&reviewer={user}&ps={ps}&base_ps={base}` | Toggles per-reviewer file review status and returns updated badge HTML. |
 
+---
+
+## 4. Disaster Recovery, Backup & Replication (`citc backup`)
+
+CitC includes an enterprise-grade, completely decoupled resilience and replication suite designed for mission-critical VCS repositories with legal compliance and tamper-evident provenance requirements.
+
+### Architecture Highlights
+1. **Zero VCS Coupling:** Replication and backup processes run independently and never block developers or fail core VCS workflows if network/remote storage goes offline.
+2. **Native ZFS 10GbE Snapshot Streaming (Default):**
+   - High-throughput block-level streaming directly across dedicated 10GbE LAN links via `zfs send -w | ssh zfs recv -F`.
+   - Raw dataset encryption (`-w`) preserves dataset-level encryption without decrypting on the source or re-encrypting across the wire.
+3. **Standalone Encrypted Bundles (`.citcbak`):**
+   - Standard tar archives compressed with zstd and encrypted using AES-256-GCM or ChaCha20-Poly1305 envelope encryption.
+   - Each bundle contains an authenticated cryptographic header (`CITCBAK\x01`), ephemeral DEK wrapped with the Master KEK, Argon2id KDF salt, and SHA-256 integrity verifications.
+4. **Multi-Target Storage Drivers:**
+   - **ZFS Pool:** Native block-level streaming.
+   - **Filesystem / 10G Mount:** High-throughput streaming with 8MB buffer pools.
+   - **Nextcloud WebDAV:** Seamless synchronization into personal Nextcloud storage.
+   - **S3 Protocol Stores:** Direct AWS SigV4 signed uploads to AWS S3, MinIO, Cloudflare R2, Ceph, and Wasabi without heavy cloud SDK dependencies.
+
+### Command Quick Reference
+
+| Command | Description |
+| :--- | :--- |
+| `citc backup create [--mode <zfs\|bundle>] [--target <zfs\|filesystem\|nextcloud\|s3>] [--label <label>]` | Creates a new ZFS recursive snapshot or envelope-encrypted standalone bundle archive. |
+| `citc backup list [--target <target>] [--dir <path>]` | Lists historical snapshots or remote backup archives with sizes and timestamps. |
+| `citc backup verify <file\|snapshot> [--target <target>]` | Verifies cryptographic AEAD headers, DEK unwrap, and snapshot validity without unpacking. |
+| `citc backup restore <file\|snapshot> [--dry-run] [--dest <dir>]` | Restores dataset from ZFS snapshot or decrypts and unpacks `.citcbak` bundle. `--dry-run` validates safety without disk writes. |
+| `citc backup prune [--keep <count>] [--target <target>]` | Enforces retention policy by safely destroying older snapshots or deleting aged archives. |
+
+### Operational Examples
+
+* **Create a native ZFS snapshot and replicate over 10G link:**
+  ```bash
+  citc backup create --mode zfs --label daily
+  ```
+
+* **Create an encrypted bundle and upload to Nextcloud:**
+  ```bash
+  export CITC_MASTER_KEY="<32-byte-hex-key>"
+  export CITC_NEXTCLOUD_PASSWORD="<app-password>"
+  citc backup create --mode bundle --target nextcloud --label offsite
+  ```
+
+* **Perform a non-destructive dry-run restore validation:**
+  ```bash
+  citc backup restore citc-daily-20261025.citcbak --dry-run
+  ```
+
+* **Restore an archive into an isolated verification directory:**
+  ```bash
+  citc backup restore citc-daily-20261025.citcbak --dest ./disaster-recovery-test
+  ```
+
+* **Prune older snapshots beyond retention policy (keep 7):**
+  ```bash
+  citc backup prune --keep 7 --target zfs
+  ```
+
 

@@ -379,6 +379,180 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// 9. Resilience, replication, and backup subsystem validation
+	if cfg.Resilience.Enabled {
+		mode := strings.ToLower(strings.TrimSpace(cfg.Resilience.DefaultMode))
+		if mode == "" {
+			mode = "zfs_stream"
+		}
+		if mode != "zfs_stream" && mode != "bundle" {
+			errs = append(errs, ValidationError{
+				Field:   "resilience.default_mode",
+				Value:   cfg.Resilience.DefaultMode,
+				Message: fmt.Sprintf("unsupported default_mode %q", cfg.Resilience.DefaultMode),
+				Hint:    "Supported modes: 'zfs_stream' (default for 10G ZFS pools) or 'bundle' (encrypted archive packages).",
+			})
+		}
+
+		if mode == "zfs_stream" && !cfg.Resilience.ZFS.Enabled {
+			errs = append(errs, ValidationError{
+				Field:   "resilience.zfs.enabled",
+				Value:   "false",
+				Message: "zfs replication must be enabled when default_mode is 'zfs_stream'",
+				Hint:    "Set 'resilience.zfs.enabled = true' or set 'default_mode = \"bundle\"'.",
+			})
+		}
+
+		if cfg.Resilience.ZFS.Enabled {
+			if strings.TrimSpace(cfg.Resilience.ZFS.LocalDataset) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.zfs.local_dataset",
+					Value:   cfg.Resilience.ZFS.LocalDataset,
+					Message: "local_dataset cannot be empty when ZFS replication is active",
+					Hint:    "Specify the local ZFS dataset (e.g. 'localpool/citc').",
+				})
+			}
+			if strings.TrimSpace(cfg.Resilience.ZFS.RemoteDataset) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.zfs.remote_dataset",
+					Value:   cfg.Resilience.ZFS.RemoteDataset,
+					Message: "remote_dataset cannot be empty when ZFS replication is active",
+					Hint:    "Specify destination dataset on remote server (e.g. 'tank/citc-replica').",
+				})
+			}
+			if strings.TrimSpace(cfg.Resilience.ZFS.RemoteHost) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.zfs.remote_host",
+					Value:   cfg.Resilience.ZFS.RemoteHost,
+					Message: "remote_host cannot be empty when ZFS replication is active",
+					Hint:    "Specify remote ZFS server hostname or IP address.",
+				})
+			}
+		}
+
+		if cfg.Resilience.Encryption.Algorithm != "" {
+			algo := strings.ToLower(strings.TrimSpace(cfg.Resilience.Encryption.Algorithm))
+			if algo != "aes-256-gcm" && algo != "chacha20-poly1305" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.encryption.algorithm",
+					Value:   cfg.Resilience.Encryption.Algorithm,
+					Message: fmt.Sprintf("unsupported encryption algorithm %q", cfg.Resilience.Encryption.Algorithm),
+					Hint:    "Supported algorithms: 'aes-256-gcm' (recommended) or 'chacha20-poly1305'.",
+				})
+			}
+		}
+
+		if cfg.Resilience.Encryption.KeySource != "" {
+			ks := strings.ToLower(strings.TrimSpace(cfg.Resilience.Encryption.KeySource))
+			if ks != "env" && ks != "file" && ks != "passphrase" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.encryption.key_source",
+					Value:   cfg.Resilience.Encryption.KeySource,
+					Message: fmt.Sprintf("unknown key_source %q", cfg.Resilience.Encryption.KeySource),
+					Hint:    "Supported key sources: 'env', 'file', or 'passphrase'.",
+				})
+			}
+			if ks == "env" && strings.TrimSpace(cfg.Resilience.Encryption.KeyEnv) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.encryption.key_env",
+					Value:   "",
+					Message: "key_env must be specified when key_source is 'env'",
+					Hint:    "Set 'key_env = \"CITC_MASTER_KEY\"' or another environment variable name.",
+				})
+			}
+			if ks == "passphrase" && strings.TrimSpace(cfg.Resilience.Encryption.PassphraseEnv) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.encryption.passphrase_env",
+					Value:   "",
+					Message: "passphrase_env must be specified when key_source is 'passphrase'",
+					Hint:    "Set 'passphrase_env = \"CITC_BACKUP_PASSPHRASE\"'.",
+				})
+			}
+		}
+
+		if cfg.Resilience.Nextcloud.Enabled {
+			u := strings.TrimSpace(cfg.Resilience.Nextcloud.URL)
+			if u == "" || (!strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://")) {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.nextcloud.url",
+					Value:   u,
+					Message: "nextcloud url must begin with http:// or https://",
+					Hint:    "Specify full WebDAV path (e.g. 'https://nextcloud.domain.com/remote.php/dav/files/user/citc').",
+				})
+			}
+			if strings.TrimSpace(cfg.Resilience.Nextcloud.Username) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.nextcloud.username",
+					Value:   "",
+					Message: "username cannot be empty when Nextcloud backup is enabled",
+					Hint:    "Specify your Nextcloud username.",
+				})
+			}
+			if strings.TrimSpace(cfg.Resilience.Nextcloud.PasswordEnv) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.nextcloud.password_env",
+					Value:   "",
+					Message: "password_env cannot be empty when Nextcloud backup is enabled",
+					Hint:    "Specify environment variable containing your Nextcloud App Password.",
+				})
+			}
+		}
+
+		if cfg.Resilience.S3.Enabled {
+			if strings.TrimSpace(cfg.Resilience.S3.Endpoint) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.s3.endpoint",
+					Value:   "",
+					Message: "endpoint cannot be empty when S3 backup is enabled",
+					Hint:    "Specify S3 endpoint (e.g. 's3.us-east-1.amazonaws.com' or 'http://127.0.0.1:9000').",
+				})
+			}
+			if strings.TrimSpace(cfg.Resilience.S3.Bucket) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.s3.bucket",
+					Value:   "",
+					Message: "bucket cannot be empty when S3 backup is enabled",
+					Hint:    "Specify destination S3 bucket name.",
+				})
+			}
+			if strings.TrimSpace(cfg.Resilience.S3.AccessKeyEnv) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.s3.access_key_env",
+					Value:   "",
+					Message: "access_key_env cannot be empty when S3 backup is enabled",
+					Hint:    "Specify environment variable name containing S3 access key (default: 'AWS_ACCESS_KEY_ID').",
+				})
+			}
+			if strings.TrimSpace(cfg.Resilience.S3.SecretKeyEnv) == "" {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.s3.secret_key_env",
+					Value:   "",
+					Message: "secret_key_env cannot be empty when S3 backup is enabled",
+					Hint:    "Specify environment variable name containing S3 secret key (default: 'AWS_SECRET_ACCESS_KEY').",
+				})
+			}
+		}
+
+		if cfg.Resilience.PostgresReplication.Enabled {
+			targetURL := strings.TrimSpace(cfg.Resilience.PostgresReplication.TargetDBURL)
+			if targetURL == "" || (!strings.HasPrefix(targetURL, "postgres://") && !strings.HasPrefix(targetURL, "postgresql://")) {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.postgres_replication.target_db_url",
+					Value:   targetURL,
+					Message: "target_db_url must begin with postgres:// or postgresql://",
+					Hint:    "Specify connection string to standby PostgreSQL instance.",
+				})
+			} else if targetURL == strings.TrimSpace(cfg.Server.DBURL) {
+				errs = append(errs, ValidationError{
+					Field:   "resilience.postgres_replication.target_db_url",
+					Value:   targetURL,
+					Message: "target_db_url cannot be identical to server.db_url (self-replication loop)",
+					Hint:    "Target instance must be a distinct standby/replica database.",
+				})
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return errs
 	}

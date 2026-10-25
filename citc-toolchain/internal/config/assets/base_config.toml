@@ -113,3 +113,83 @@ max_retries = 3
 # command = "/usr/local/bin/citc-event-router.sh"
 timeout_ms = 5000
 
+# ------------------------------------------------------------------------------
+# Resilience, Distributed Replication & Cryptographic Backup
+# ------------------------------------------------------------------------------
+[resilience]
+# Master switch for automated backups and replication.
+# Disabled by default for local development.
+enabled = false
+
+# Primary replication mode: "zfs_stream" (default for 10G ZFS) or "bundle"
+default_mode = "zfs_stream"
+
+[resilience.zfs]
+# Native ZFS snapshot streaming over 10GbE network link
+enabled = true
+# Local ZFS dataset containing CitC data
+local_dataset = "localpool/citc"
+# Remote dedicated ZFS storage server hostname or IP
+remote_host = "zfs-server.internal.net"
+remote_user = "citc-backup"
+remote_ssh_port = 22
+remote_key_file = "$HOME/.ssh/id_ed25519"
+# Target dataset on remote server
+remote_dataset = "tank/citc-replica"
+# Raw send (-w) preserves native ZFS dataset encryption in-flight and at rest
+raw_encrypted_send = true
+snapshot_prefix = "citc-auto"
+retention_count = 30
+bandwidth_limit_mb = 0
+
+[resilience.bundle]
+# Portable encrypted archive packages (.citcbak)
+enabled = false
+target_dir = "/mnt/zfs-pool/citc-backups"
+compression = "zstd"
+compression_level = 1
+
+[resilience.encryption]
+# Cryptographic envelope encryption settings
+algorithm = "aes-256-gcm"
+key_source = "env"
+key_env = "CITC_MASTER_KEY"
+# key_file = "/etc/citc/master.key"
+# passphrase_env = "CITC_BACKUP_PASSPHRASE"
+
+[resilience.nextcloud]
+# Nextcloud WebDAV destination
+enabled = false
+url = "https://nextcloud.internal.net/remote.php/dav/files/user/citc-backups"
+username = "matatan"
+password_env = "NEXTCLOUD_APP_PASSWORD"
+timeout_seconds = 180
+
+[resilience.s3]
+# S3-compatible protocol object storage (AWS, MinIO, Cloudflare R2, Ceph)
+enabled = false
+endpoint = "s3.us-east-1.amazonaws.com"
+bucket = "citc-company-backups"
+region = "us-east-1"
+prefix = "vcs/"
+access_key_env = "AWS_ACCESS_KEY_ID"
+secret_key_env = "AWS_SECRET_ACCESS_KEY"
+force_path_style = false
+use_ssl = true
+storage_class = "STANDARD"
+
+[resilience.postgres_replication]
+# Secondary PostgreSQL instance replication
+enabled = false
+target_db_url = "postgres://citc_replica@standby.internal:5432/citc?sslmode=verify-full"
+mode = "snapshot"
+timeout_seconds = 300
+
+[resilience.schedule]
+# Background automated backup cadence
+auto_backup = false
+interval_hours = 4
+retention_count = 30
+snapshot_on_submit = true
+
+
