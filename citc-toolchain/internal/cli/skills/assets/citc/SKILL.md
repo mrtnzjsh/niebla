@@ -131,10 +131,20 @@ Critique supports both single-line comments and multi-line code block comments:
    - **Visual Feedback:** All selected lines are highlighted with `.diff-line-selected` during selection, and the active range is styled with `.diff-row-comment-range` (subtle accent left border and glow).
    - **Container Placement:** The comment box is anchored immediately below the ending line of the range, with a badge reading `Lines <start>–<end>`.
 
-3. **Submitting & Managing Comments:**
-   - **Thread Replies:** Reviewers and authors reply within the same comment thread container.
-   - **Resolving:** Toggle comment status between `Unresolved` and `Resolved`.
-   - **Approvals:** Submit `LGTM` (Approve) or `Needs Work` directly from the action bar.
+3. **Draft Comments & Reply Workflow:**
+   - **Save Draft:** The inline comment button is **`Save Draft`** (amber styling). New inline comments are recorded as unposted drafts (`is_draft = true`).
+   - **Draft Isolation:** Unposted drafts are strictly private to the author; other reviewers visiting the CL do not see another user's unposted drafts.
+   - **Draft Inspection & Discard:** In the inline comment thread, draft comments display an amber `Draft` badge and an inline `Discard` button (`POST /cl/{id}/comments/{id}/discard`) to abandon drafts before publishing.
+   - **Real-Time Reply Counter:** The header action bar features a prominent **`Reply`** button displaying `Reply (N)` with an amber badge whenever the reviewer has `N` unposted drafts, dynamically refreshed via HTMX out-of-band updates.
+   - **Reply Modal & Publishing:** Clicking `Reply` opens the `<dialog id="reply-modal">`, allowing the reviewer to:
+     - Review all pending drafts across files with line range summaries and content previews.
+     - Provide an optional top-level review summary / message.
+     - Choose a review verdict (`LGTM / Approve`, `Request Changes`, or `Comment Only`).
+     - Click `Post Comments` (`POST /cl/{id}/reply`), which atomically publishes all drafts (`is_draft = false`), posts the summary message, registers the verdict, and redirects back to `/cl/{id}`.
+
+4. **Thread Resolution & Approvals:**
+   - **Resolving:** Toggle comment status between `Unresolved` and `Resolved` once comments are published.
+   - **Approvals:** Submit `LGTM` (Approve) or `Request Changes` directly from the action bar or within the Reply modal dialog.
 
 ### File Review Tracking & Status
 
@@ -162,10 +172,13 @@ Agents interacting with Critique via HTTP can utilize the following endpoints:
 
 | Method | Endpoint | Parameters | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/cl/{id}` | `file={path}&ps={ps}&base_ps={base}&reviewer={user}` | Full review interface; auto-marks selected file reviewed. |
+| `GET` | `/cl/{id}` | `file={path}&ps={ps}&base_ps={base}&reviewer={user}` | Full review interface; auto-marks selected file reviewed and displays active reviewer's drafts. |
 | `GET` | `/cl/{id}/comment-box` | `file={path}&line={start}&end_line={end}&side={side}&ps={ps}` | Fetches inline comment thread container. |
-| `POST` | `/cl/{id}/comments` | `file_path, line_number, end_line_number, side, author, body` | Creates single or multi-line comment. |
-| `POST` | `/cl/{id}/comments/{id}/resolve` | `resolved=true\|false` | Toggles resolution status. |
+| `POST` | `/cl/{id}/comments` | `file_path, line_number, end_line_number, side, author, body` | Creates single or multi-line comment as an unposted draft (`is_draft=true`). |
+| `POST` | `/cl/{id}/comments/{id}/discard` | `author={user}` | Discards a single unposted draft comment. |
+| `POST` | `/cl/{id}/reply` | `author={user}&message={msg}&verdict=lgtm\|changes_requested\|none` | Publishes all pending draft comments for reviewer, posts summary message, and records verdict. |
+| `POST` | `/cl/{id}/comments/{id}/resolve` | `resolved=true\|false` | Toggles resolution status of a published comment. |
 | `POST` | `/cl/{id}/approve` | `verdict=lgtm\|needs_work&reviewer={user}` | Records review verdict. |
 | `POST` | `/cl/{id}/file-review` | `file={path}&reviewed=true\|false&reviewer={user}&ps={ps}&base_ps={base}` | Toggles per-reviewer file review status and returns updated badge HTML. |
+
 
