@@ -84,21 +84,37 @@ func TestViewsRendering(t *testing.T) {
 		},
 	}
 
+	// 1a. Test CommentBox View Rendering (Single Line)
 	var commentBuf bytes.Buffer
-	commentComp := views.CommentBox(101, 1, "main.go", 42, "modified", comments)
+	commentComp := views.CommentBox(101, 1, "main.go", 42, 42, "modified", comments)
 	if err := commentComp.Render(ctx, &commentBuf); err != nil {
 		t.Fatalf("CommentBox rendering failed: %v", err)
 	}
 
 	commentHTML := commentBuf.String()
-	if !strings.Contains(commentHTML, "main.go : 42 (modified)") {
-		t.Errorf("expected header with file and line in CommentBox")
+	if !strings.Contains(commentHTML, "main.go : Line 42 (modified)") {
+		t.Errorf("expected header with file and single line in CommentBox, got %s", commentHTML)
 	}
 	if !strings.Contains(commentHTML, "Please consider refactoring this function.") {
 		t.Errorf("expected comment body in CommentBox")
 	}
 	if !strings.Contains(commentHTML, "Unresolved") {
 		t.Errorf("expected unresolved badge in CommentBox")
+	}
+
+	// 1b. Test CommentBox View Rendering (Multi-Line Code Block)
+	var multiCommentBuf bytes.Buffer
+	multiCommentComp := views.CommentBox(101, 1, "main.go", 42, 48, "modified", comments)
+	if err := multiCommentComp.Render(ctx, &multiCommentBuf); err != nil {
+		t.Fatalf("CommentBox multi-line rendering failed: %v", err)
+	}
+
+	multiHTML := multiCommentBuf.String()
+	if !strings.Contains(multiHTML, "main.go : Lines 42–48 (modified)") {
+		t.Errorf("expected header with multi-line range in CommentBox, got %s", multiHTML)
+	}
+	if !strings.Contains(multiHTML, `value="48"`) {
+		t.Errorf("expected end_line_number input value 48 in CommentBox")
 	}
 
 	// 2. Test DiffView View Rendering
@@ -181,9 +197,48 @@ func TestViewsRendering(t *testing.T) {
 	}
 }
 
+func TestCommentHandlersMultiLine(t *testing.T) {
+	commentsHandler := NewCommentsHandler(nil)
+
+	// 1. Test GET /cl/101/comment-box with line=10&end_line=15
+	req := httptest.NewRequest("GET", "/cl/101/comment-box?file=service.go&line=10&end_line=15&side=modified&ps=1", nil)
+	rec := httptest.NewRecorder()
+	commentsHandler.HandleGetCommentBox(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HandleGetCommentBox failed with status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "service.go : Lines 10–15 (modified)") {
+		t.Errorf("expected multi-line header 'service.go : Lines 10–15 (modified)', got: %s", body)
+	}
+	if !strings.Contains(body, `name="end_line_number" value="15"`) {
+		t.Errorf("expected hidden end_line_number input with value 15, got: %s", body)
+	}
+
+	// 2. Test POST /cl/101/comments creating a multi-line comment
+	form := strings.NewReader("cl_id=101&patchset_number=1&file_path=service.go&line_number=10&end_line_number=15&side=modified&author=matatan&body=Please+extract+this+block+into+a+helper+function.")
+	postReq := httptest.NewRequest("POST", "/cl/101/comments", form)
+	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	postRec := httptest.NewRecorder()
+	commentsHandler.HandleCreateComment(postRec, postReq)
+
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("HandleCreateComment failed with status %d: %s", postRec.Code, postRec.Body.String())
+	}
+	postBody := postRec.Body.String()
+	if !strings.Contains(postBody, "service.go : Lines 10–15 (modified)") {
+		t.Errorf("expected multi-line header in rendered comment box, got: %s", postBody)
+	}
+	if !strings.Contains(postBody, "Please extract this block into a helper function.") {
+		t.Errorf("expected comment body in rendered comment box, got: %s", postBody)
+	}
+}
+
 func init() {
 	// Ensure working directory is repo root if running from submodule
 	if _, err := os.Stat("internal/web/views"); os.IsNotExist(err) {
 		_ = os.Chdir(filepath.Join("..", ".."))
 	}
 }
+

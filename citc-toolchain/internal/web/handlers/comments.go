@@ -65,26 +65,39 @@ func (h *CommentsHandler) HandleGetCommentBox(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	endLineStr := r.URL.Query().Get("end_line")
+	endLine, _ := strconv.Atoi(endLineStr)
+	if endLine <= 0 {
+		endLine = line
+	}
+	if endLine < line {
+		line, endLine = endLine, line
+	}
+
 	var comments []db.Comment
 	if h.db != nil {
 		var err error
-		comments, err = h.db.ListCommentsForLine(r.Context(), clID, filePath, line, side)
+		comments, err = h.db.ListCommentsForLine(r.Context(), clID, filePath, endLine, side)
 		if err != nil {
 			log.Printf("error listing comments for line: %v", err)
 		}
 	} else {
 		demoCommentsMu.RLock()
-		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, line, side)
+		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, endLine, side)
 		comments = demoCommentsStore[key]
+		if len(comments) == 0 && endLine != line {
+			keyStart := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, line, side)
+			comments = demoCommentsStore[keyStart]
+		}
 		demoCommentsMu.RUnlock()
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.CommentBox(clID, psNum, filePath, line, side, comments)
+	component := views.CommentBox(clID, psNum, filePath, line, endLine, side, comments)
 	_ = component.Render(r.Context(), w)
 }
 
-// HandleCreateComment creates a new inline comment on a specific code line.
+// HandleCreateComment creates a new inline comment on a specific code line or multi-line range.
 // POST /cl/{id}/comments
 func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -107,6 +120,14 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 	if err != nil || line <= 0 {
 		http.Error(w, "invalid line_number", http.StatusBadRequest)
 		return
+	}
+
+	endLine, _ := strconv.Atoi(r.FormValue("end_line_number"))
+	if endLine <= 0 {
+		endLine = line
+	}
+	if endLine < line {
+		line, endLine = endLine, line
 	}
 
 	side := r.FormValue("side")
@@ -134,7 +155,7 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 	var comments []db.Comment
 
 	if h.db != nil {
-		newComment, err := h.db.CreateComment(r.Context(), clID, psNum, filePath, line, side, author, body, nil)
+		newComment, err := h.db.CreateComment(r.Context(), clID, psNum, filePath, line, endLine, side, author, body, nil)
 		if err != nil {
 			log.Printf("failed to insert comment: %v", err)
 			http.Error(w, "failed to record comment", http.StatusInternalServerError)
@@ -145,7 +166,7 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 			_ = h.db.ResolveComment(r.Context(), newComment.ID, true)
 		}
 
-		comments, err = h.db.ListCommentsForLine(r.Context(), clID, filePath, line, side)
+		comments, err = h.db.ListCommentsForLine(r.Context(), clID, filePath, endLine, side)
 		if err != nil {
 			log.Printf("error fetching updated comments: %v", err)
 		}
@@ -158,20 +179,21 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 			PatchsetNumber: psNum,
 			FilePath:       filePath,
 			LineNumber:     line,
+			EndLineNumber:  endLine,
 			Side:           side,
 			Author:         author,
 			Body:           body,
 			Resolved:       resolved,
 			CreatedAt:      time.Now(),
 		}
-		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, line, side)
+		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, endLine, side)
 		demoCommentsStore[key] = append(demoCommentsStore[key], c)
 		comments = demoCommentsStore[key]
 		demoCommentsMu.Unlock()
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.CommentBox(clID, psNum, filePath, line, side, comments)
+	component := views.CommentBox(clID, psNum, filePath, line, endLine, side, comments)
 	_ = component.Render(r.Context(), w)
 }
 
@@ -211,13 +233,18 @@ func (h *CommentsHandler) HandleResolveComment(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		comments, err := h.db.ListCommentsForLine(r.Context(), comment.CLID, comment.FilePath, comment.LineNumber, comment.Side)
+		anchorLine := comment.EndLineNumber
+		if anchorLine <= 0 {
+			anchorLine = comment.LineNumber
+		}
+
+		comments, err := h.db.ListCommentsForLine(r.Context(), comment.CLID, comment.FilePath, anchorLine, comment.Side)
 		if err != nil {
 			log.Printf("error querying comments for resolved line: %v", err)
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		component := views.CommentBox(comment.CLID, comment.PatchsetNumber, comment.FilePath, comment.LineNumber, comment.Side, comments)
+		component := views.CommentBox(comment.CLID, comment.PatchsetNumber, comment.FilePath, comment.LineNumber, anchorLine, comment.Side, comments)
 		_ = component.Render(r.Context(), w)
 		return
 	}
@@ -246,7 +273,12 @@ func (h *CommentsHandler) HandleResolveComment(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	anchorLine := matched.EndLineNumber
+	if anchorLine <= 0 {
+		anchorLine = matched.LineNumber
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.CommentBox(matched.CLID, matched.PatchsetNumber, matched.FilePath, matched.LineNumber, matched.Side, comments)
+	component := views.CommentBox(matched.CLID, matched.PatchsetNumber, matched.FilePath, matched.LineNumber, anchorLine, matched.Side, comments)
 	_ = component.Render(r.Context(), w)
 }

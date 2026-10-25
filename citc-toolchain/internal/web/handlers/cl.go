@@ -328,7 +328,11 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		fileComments, err := h.db.ListComments(ctx, clID, targetFile)
 		if err == nil {
 			for _, c := range fileComments {
-				commentsByLine[c.LineNumber] = append(commentsByLine[c.LineNumber], c)
+				anchorLine := c.EndLineNumber
+				if anchorLine <= 0 {
+					anchorLine = c.LineNumber
+				}
+				commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
 			}
 		}
 	}
@@ -490,7 +494,11 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 				unresolvedCount++
 			}
 			if strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
-				commentsByLine[c.LineNumber] = append(commentsByLine[c.LineNumber], c)
+				anchorLine := c.EndLineNumber
+				if anchorLine <= 0 {
+					anchorLine = c.LineNumber
+				}
+				commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
 			}
 		}
 	}
@@ -504,15 +512,16 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 			PatchsetNumber: 1,
 			FilePath:       targetFile,
 			LineNumber:     13,
+			EndLineNumber:  16,
 			Side:           "modified",
 			Author:         "matatan",
 			Body:           "LGTM! The Myers diff traversal and Chroma tokenization align cleanly with Google Critique.",
 			Resolved:       false,
 			CreatedAt:      time.Now().Add(-30 * time.Minute),
 		}
-		commentsByLine[13] = []db.Comment{sampleComment}
+		commentsByLine[16] = []db.Comment{sampleComment}
 		demoCommentsMu.Lock()
-		key := fmt.Sprintf("%d:%s:%d:%s", clID, targetFile, 13, "modified")
+		key := fmt.Sprintf("%d:%s:%d:%s", clID, targetFile, 16, "modified")
 		demoCommentsStore[key] = []db.Comment{sampleComment}
 		demoCommentsMu.Unlock()
 		unresolvedCount = 1
