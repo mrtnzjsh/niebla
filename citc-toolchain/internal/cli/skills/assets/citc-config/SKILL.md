@@ -79,6 +79,14 @@ proxy_port = 7331
 # Default author identity for reviews (resolves to $USER if omitted)
 default_reviewer = "$USER"
 
+[critique.auth]
+# Authentication mode: "local" (default: $USER), "headers" (reverse-proxy/IAP), "tailscale"
+mode = "local"
+# Default user identity for local mode (dynamically resolves to $USER if set to "$USER" or empty)
+default_user = "$USER"
+# Header name when mode = "headers" (e.g. "X-Forwarded-User", "Cf-Access-Authenticated-User-Email")
+header_name = "X-Forwarded-User"
+
 [critique.theme]
 # Built-in presets: "catppuccin-mocha", "catppuccin-latte", "catppuccin-macchiato",
 #                   "catppuccin-frappe", "tokyo-night", "dracula", "nord", "github-dark", "custom"
@@ -138,6 +146,7 @@ When modifying `config.toml`, CitC enforces:
 7. `critique.theme.preset`: Must match a known preset. Typos trigger Levenshtein distance suggestions (e.g. typing `cattppuccin` suggests `catppuccin-mocha`).
 8. `critique.theme.syntax_style`: Must match a registered Chroma style.
 9. `critique.theme.colors.*`: Must be valid `#RGB`, `#RRGGBB`, `#RRGGBBAA`, or `rgba(...)` color syntax.
+10. `critique.auth.mode`: Must be `'local'`, `'headers'`, or `'tailscale'`.
 
 ---
 

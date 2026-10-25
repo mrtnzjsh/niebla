@@ -136,15 +136,36 @@ Critique supports both single-line comments and multi-line code block comments:
    - **Resolving:** Toggle comment status between `Unresolved` and `Resolved`.
    - **Approvals:** Submit `LGTM` (Approve) or `Needs Work` directly from the action bar.
 
+### File Review Tracking & Status
+
+Critique tracks the review status of each file in a changelist on a **per-reviewer basis**:
+
+1. **Default State:**
+   - Every changed file starts as `not reviewed` for each reviewer.
+2. **Automatic Review on Selection:**
+   - When a reviewer selects and views a file in Critique, that file is automatically transitioned to `reviewed` and persists permanently across sessions.
+3. **Per-Reviewer Isolation:**
+   - File review states are keyed by `(cl_id, file_path, reviewer)`. When Reviewer A marks a file reviewed, it remains `not reviewed` for Reviewer B.
+4. **Visual Progress & Manual Toggling:**
+   - **Header Progress:** The overview header displays `X of Y reviewed by <reviewer>` with live counts.
+   - **Interactive HTMX Badges:** The changed files table displays a status pill for each file:
+     - `reviewed` (emerald badge with checkmark)
+     - `not reviewed` (muted slate badge)
+   - Clicking the pill badge instantly toggles between `reviewed` and `not reviewed` without a full page reload.
+5. **Dynamic User Identity:**
+   - Defaults dynamically to the active OS username (`$USER`), configured via `[critique.auth]` in `~/.config/citc-toolchain/config.toml`.
+   - Emulate or test different reviewers by passing `?reviewer=<username>` in any Critique URL.
+
 ### Programmatic HTMX / REST API
 
 Agents interacting with Critique via HTTP can utilize the following endpoints:
 
 | Method | Endpoint | Parameters | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/cl/{id}` | `file={path}&ps={ps}&base_ps={base}` | Full review interface. |
+| `GET` | `/cl/{id}` | `file={path}&ps={ps}&base_ps={base}&reviewer={user}` | Full review interface; auto-marks selected file reviewed. |
 | `GET` | `/cl/{id}/comment-box` | `file={path}&line={start}&end_line={end}&side={side}&ps={ps}` | Fetches inline comment thread container. |
 | `POST` | `/cl/{id}/comments` | `file_path, line_number, end_line_number, side, author, body` | Creates single or multi-line comment. |
 | `POST` | `/cl/{id}/comments/{id}/resolve` | `resolved=true\|false` | Toggles resolution status. |
-| `POST` | `/cl/{id}/approve` | `verdict=lgtm\|needs_work` | Records review verdict. |
+| `POST` | `/cl/{id}/approve` | `verdict=lgtm\|needs_work&reviewer={user}` | Records review verdict. |
+| `POST` | `/cl/{id}/file-review` | `file={path}&reviewed=true\|false&reviewer={user}&ps={ps}&base_ps={base}` | Toggles per-reviewer file review status and returns updated badge HTML. |
 
