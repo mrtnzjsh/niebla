@@ -138,3 +138,57 @@ When modifying `config.toml`, CitC enforces:
 7. `critique.theme.preset`: Must match a known preset. Typos trigger Levenshtein distance suggestions (e.g. typing `cattppuccin` suggests `catppuccin-mocha`).
 8. `critique.theme.syntax_style`: Must match a registered Chroma style.
 9. `critique.theme.colors.*`: Must be valid `#RGB`, `#RRGGBB`, `#RRGGBBAA`, or `rgba(...)` color syntax.
+
+---
+
+## 6. Leveraging the Validation Suite (Agent Workflows)
+
+AI harnesses should always leverage CitC's validation suite to ensure changes never break the running environment or introduce invalid states.
+
+### A. Pre-Flight Validation Pattern (Safe Config Edits)
+When modifying `~/.config/citc-toolchain/config.toml`, never write untested changes in-place:
+1. **Prepare Candidate:** Write proposed edits to a temporary candidate file (e.g. `/tmp/candidate_config.toml`).
+2. **Execute Validation Suite:**
+   ```bash
+   citc config validate /tmp/candidate_config.toml
+   ```
+3. **Automated Self-Correction via Hints:**
+   If `citc config validate` exits with code 1, parse the output:
+   ```
+   ❌ Configuration validation failed:
+     • [critique.theme.preset]: unknown theme preset "tokyonight"
+       Hint: Did you mean "tokyo-night"? Supported presets: catppuccin-mocha, ...
+   ```
+   Inspect the `Hint:` line, apply the correction to the candidate, and re-run validation.
+4. **Atomic Commit:**
+   Once validation returns `✓ Configuration is valid`, copy the candidate file:
+   ```bash
+   cp /tmp/candidate_config.toml ~/.config/citc-toolchain/config.toml
+   rm -f /tmp/candidate_config.toml
+   ```
+5. **Final Check:**
+   ```bash
+   citc config validate
+   ```
+
+### B. Unit & Regression Test Suite (Code Changes)
+When modifying the configuration schema, parsers, or adding new validation rules in Go:
+1. Run the `internal/config` unit test suite:
+   ```bash
+   nix develop --command bash -c "cd citc-toolchain && go test -v ./internal/config/..."
+   ```
+   This validates:
+   - `TestValidateDefaultConfig`: Baseline config integrity.
+   - `TestValidatePortRanges` & `TestValidatePortCollision`: Network boundary rules.
+   - `TestValidateThemePresetWithTypoSuggestion`: Levenshtein matching and suggestions.
+   - `TestValidateThemeColors`: Hex and CSS color format regexes.
+   - `TestValidateSyntaxStyle`: Chroma registry style lookup.
+   - `TestLoadBytesValidOverride`: Smart 3-way merge precedence.
+   - `TestLoadBytesInvalidTOMLSyntaxFailsFast`: Line/column syntax diagnostics.
+   - `TestEnvironmentVariableExpansion`: `$USER` and `$HOME` dynamic resolution.
+
+2. Run the CLI validation command tests:
+   ```bash
+   nix develop --command bash -c "cd citc-toolchain && go test -v -run TestConfig ./internal/cli/..."
+   ```
+
