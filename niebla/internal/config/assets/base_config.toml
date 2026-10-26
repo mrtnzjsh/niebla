@@ -1,0 +1,201 @@
+# ==============================================================================
+# Niebla Toolchain Unified Configuration
+# Location: ~/.config/niebla/config.toml
+# ==============================================================================
+
+version = 1
+
+[core]
+# Address of the active Niebla gRPC repository service
+server_addr = "127.0.0.1:50051"
+
+# Default workspace name if unspecified in CLI invocations
+default_workspace = "default"
+
+[server]
+# Bind address for niebla-server gRPC daemon
+host = "0.0.0.0"
+port = 50051
+
+# PostgreSQL connection URI (PostgreSQL socket or TCP URL)
+db_url = "postgres:///niebla?host=/run/postgresql"
+
+# Local root path for content-addressable storage (CAS) blob store
+blob_path = "/devpool/niebla_blobs"
+
+# Maximum number of tree nodes cached in LRU memory
+cache_size = 10000
+
+[fs]
+# Root mount directory for virtual FUSE workspaces
+mount_base = "/niebla"
+
+# Cache directory for local blob chunks (supports $HOME expansion)
+cache_dir = "$HOME/.cache/niebla/blobs"
+
+[critique]
+# HTTP server address for Critique code review web UI
+host = "0.0.0.0"
+port = 8080
+
+# Live-reloading proxy port (used by templ generate --watch)
+proxy_port = 7331
+
+# Default author/reviewer identity for comments and verdicts
+# Dynamically resolves to $USER or current OS user if set to "$USER" or empty
+default_reviewer = "$USER"
+
+# Number of reviewer approvals required before submission (default: 0)
+required_approvals = 0
+
+# Whether submission is permitted with unresolved comment threads (default: false)
+allow_submit_with_unresolved_comments = false
+
+[critique.auth]
+# Authentication and user identity resolution mode
+# Supported: "local" (default: $USER), "headers" (e.g. reverse proxy/IAP), "tailscale"
+mode = "local"
+# Default user identity for local mode (supports $USER / $HOME expansion)
+default_user = "$USER"
+# Header to inspect when mode = "headers" (e.g. "X-Forwarded-User", "Cf-Access-Authenticated-User-Email")
+header_name = "X-Forwarded-User"
+
+
+# ------------------------------------------------------------------------------
+# Critique Theme & Visual Styling
+# ------------------------------------------------------------------------------
+[critique.theme]
+# Built-in presets:
+#   "catppuccin-mocha"     - Dark pastel (default)
+#   "catppuccin-macchiato" - Dark medium
+#   "catppuccin-frappe"    - Low contrast dark
+#   "catppuccin-latte"     - Warm light mode
+#   "tokyo-night"          - Cyberpunk indigo/blue
+#   "dracula"              - Gothic purple
+#   "nord"                 - Arctic blue
+#   "github-dark"          - Monokai / GitHub dark
+#   "custom"               - Define completely custom palette in [critique.theme.colors]
+preset = "catppuccin-mocha"
+
+# Syntax highlighting style (Chroma style name; defaults to matching the preset)
+syntax_style = "catppuccin-mocha"
+
+# Optional color overrides (override individual preset colors, or provide all for "custom")
+[critique.theme.colors]
+# bg_canvas       = "#1e1e2e"                  # Deep canvas background
+# bg_surface      = "#181825"                  # Top navbar, sticky toolbars
+# bg_card         = "#11111b"                  # Elevated cards and file table background
+# border          = "#313244"                  # Table, row, and card borders
+# text_primary    = "#cdd6f4"                  # Primary text, file paths, and code
+# text_muted      = "#a6adc8"                  # Line numbers, timestamps, subtitles
+# accent          = "#89b4fa"                  # Primary action buttons and badges
+# diff_add_bg     = "rgba(166, 227, 161, 0.20)" # Subtle green diff tint
+# diff_add_border = "#a6e3a1"                   # Left border on added lines
+# diff_del_bg     = "rgba(243, 139, 168, 0.20)" # Subtle red diff tint
+# diff_del_border = "#f38ba8"                   # Left border on deleted lines
+
+# ------------------------------------------------------------------------------
+# Events & Notification Subsystem
+# ------------------------------------------------------------------------------
+[events]
+# Master toggle for publishing events across the toolchain.
+# Disabled by default for local development.
+enabled = false
+
+# Active driver: "webhook", "exec", "log", or "noop"
+sink = "noop"
+
+# Event type filtering (optional; default: all events)
+# filter = ["niebla.cl.*"]
+
+[events.webhook]
+# HTTP POST destination endpoint for published events
+endpoint = "https://events.internal.corp/niebla"
+# secret_token_env = "NIEBLA_EVENT_SECRET"
+timeout_ms = 3000
+max_retries = 3
+
+[events.exec]
+# command = "/usr/local/bin/niebla-event-router.sh"
+timeout_ms = 5000
+
+# ------------------------------------------------------------------------------
+# Resilience, Distributed Replication & Cryptographic Backup
+# ------------------------------------------------------------------------------
+[resilience]
+# Master switch for automated backups and replication.
+# Disabled by default for local development.
+enabled = false
+
+# Primary replication mode: "zfs_stream" (default for 10G ZFS) or "bundle"
+default_mode = "zfs_stream"
+
+[resilience.zfs]
+# Native ZFS snapshot streaming over 10GbE network link
+enabled = true
+# Local ZFS dataset containing Niebla data
+local_dataset = "localpool/niebla"
+# Remote dedicated ZFS storage server hostname or IP
+remote_host = "zfs-server.internal.net"
+remote_user = "niebla-backup"
+remote_ssh_port = 22
+remote_key_file = "$HOME/.ssh/id_ed25519"
+# Target dataset on remote server
+remote_dataset = "tank/niebla-replica"
+# Raw send (-w) preserves native ZFS dataset encryption in-flight and at rest
+raw_encrypted_send = true
+snapshot_prefix = "niebla-auto"
+retention_count = 30
+bandwidth_limit_mb = 0
+
+[resilience.bundle]
+# Portable encrypted archive packages (.nieblabak)
+enabled = false
+target_dir = "/mnt/zfs-pool/niebla-backups"
+compression = "zstd"
+compression_level = 1
+
+[resilience.encryption]
+# Cryptographic envelope encryption settings
+algorithm = "aes-256-gcm"
+key_source = "env"
+key_env = "NIEBLA_MASTER_KEY"
+# key_file = "/etc/niebla/master.key"
+# passphrase_env = "NIEBLA_BACKUP_PASSPHRASE"
+
+[resilience.nextcloud]
+# Nextcloud WebDAV destination
+enabled = false
+url = "https://nextcloud.internal.net/remote.php/dav/files/user/niebla-backups"
+username = "matatan"
+password_env = "NEXTCLOUD_APP_PASSWORD"
+timeout_seconds = 180
+
+[resilience.s3]
+# S3-compatible protocol object storage (AWS, MinIO, Cloudflare R2, Ceph)
+enabled = false
+endpoint = "s3.us-east-1.amazonaws.com"
+bucket = "niebla-company-backups"
+region = "us-east-1"
+prefix = "vcs/"
+access_key_env = "AWS_ACCESS_KEY_ID"
+secret_key_env = "AWS_SECRET_ACCESS_KEY"
+force_path_style = false
+use_ssl = true
+storage_class = "STANDARD"
+
+[resilience.postgres_replication]
+# Secondary PostgreSQL instance replication
+enabled = false
+target_db_url = "postgres://niebla_replica@standby.internal:5432/niebla?sslmode=verify-full"
+mode = "snapshot"
+timeout_seconds = 300
+
+[resilience.schedule]
+# Background automated backup cadence
+auto_backup = false
+interval_hours = 4
+retention_count = 30
+snapshot_on_submit = true
+
+

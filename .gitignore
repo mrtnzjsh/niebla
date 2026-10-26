@@ -5,7 +5,8 @@
 /.direnv/
 /bin/
 /tmp/
-citc-toolchain/tmp/
+niebla/tmp/
+niebla/bin/
 
 # IDE and Editor files
 /.idea/

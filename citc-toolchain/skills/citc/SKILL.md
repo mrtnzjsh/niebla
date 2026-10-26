@@ -1,1 +1,0 @@
-../../internal/cli/skills/assets/citc/SKILL.md

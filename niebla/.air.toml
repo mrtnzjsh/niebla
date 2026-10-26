@@ -1,0 +1,42 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/cotejo ./cmd/cotejo"
+  bin = "./tmp/cotejo"
+  full_bin = ""
+  include_ext = ["go"]
+  exclude_dir = ["assets", "tmp", "vendor", ".direnv", ".git"]
+  include_dir = []
+  exclude_file = []
+  exclude_regex = [".*_test\\.go$", ".*_templ\\.go$"]
+  exclude_unchanged = false
+  follow_symlink = false
+  log = "build-errors.log"
+  poll = false
+  poll_interval = 0
+  delay = 300
+  stop_on_error = true
+  send_interrupt = false
+  kill_delay = "500ms"
+  rerun = false
+  rerun_delay = 500
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+  app = "white"
+
+[log]
+  time = false
+  main_only = false
+  silent = false
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

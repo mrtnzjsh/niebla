@@ -1,15 +1,18 @@
-.PHONY: all dev build test clean
+.PHONY: all dev dev-cotejo build test clean
 
 all: build
 
 dev:
-	@$(MAKE) -C citc-toolchain dev
+	@$(MAKE) -C niebla dev
+
+dev-cotejo:
+	@$(MAKE) -C niebla dev-cotejo
 
 build:
-	@$(MAKE) -C citc-toolchain build
+	@$(MAKE) -C niebla build
 
 test:
-	@$(MAKE) -C citc-toolchain test
+	@$(MAKE) -C niebla test
 
 clean:
-	@$(MAKE) -C citc-toolchain clean
+	@$(MAKE) -C niebla clean

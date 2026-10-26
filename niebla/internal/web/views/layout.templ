@@ -1,0 +1,85 @@
+package views
+
+import "fmt"
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en" class="dark h-full bg-[#090d16] text-slate-100 antialiased">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ title } - Cotejo</title>
+			<link rel="stylesheet" href="/static/styles.css"/>
+			<script src="/static/htmx.min.js"></script>
+			<link rel="preconnect" href="https://fonts.googleapis.com"/>
+			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+			<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+			@templ.Raw("<style>\n" + GetActiveThemeCSS() + "\n</style>")
+			<style>
+				body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+				code, pre, .font-mono { font-family: 'Fira Code', ui-monospace, monospace; }
+				.diff-line-num:hover .comment-hint { opacity: 1; }
+			</style>
+		</head>
+		<body class="min-h-full flex flex-col bg-[#090d16] text-slate-200">
+			<!-- Top Navbar -->
+			<header class="sticky top-0 z-50 border-b border-slate-800/80 bg-[#0c1322]/90 backdrop-blur px-4 py-2.5 flex items-center justify-between">
+				<div class="flex items-center space-x-4">
+					<a href="/" class="flex items-center space-x-2.5 text-white font-semibold text-lg hover:text-sky-400 transition-colors">
+						<div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-sky-600 flex items-center justify-center shadow-md shadow-indigo-500/20 text-white font-bold text-base">
+							C
+						</div>
+						<div class="flex flex-col">
+							<span class="tracking-tight leading-none font-bold">Cotejo</span>
+							<span class="text-[10px] text-slate-400 font-normal leading-tight">Niebla Code Review</span>
+						</div>
+					</a>
+					<div class="h-5 w-px bg-slate-800"></div>
+					<!-- Jump to CL Form -->
+					<form action="/" method="GET" class="flex items-center" onsubmit="event.preventDefault(); const val=document.getElementById('cl-jump-input').value.trim(); if(val){ window.location.href='/cl/'+val; }">
+						<div class="relative flex items-center">
+							<span class="absolute left-2.5 text-xs text-slate-500 font-mono">CL/</span>
+							<input
+								id="cl-jump-input"
+								type="text"
+								placeholder="jump to id..."
+								class="pl-9 pr-3 py-1 bg-slate-900/90 border border-slate-700/60 rounded-md text-xs font-mono text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 w-36 transition"
+							/>
+						</div>
+					</form>
+				</div>
+				<div class="flex items-center space-x-3 text-xs">
+					<div class="flex items-center space-x-2 bg-slate-900/80 border border-slate-800 px-2.5 py-1 rounded-full text-slate-300">
+						<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+						<span class="text-slate-400">Server:</span>
+						<span class="font-mono text-emerald-400">niebla-server:50051</span>
+					</div>
+					<div class="flex items-center space-x-2 bg-slate-800/60 border border-slate-700/50 px-2.5 py-1 rounded-md text-slate-300">
+						<div class="w-5 h-5 rounded-full bg-sky-600/40 text-sky-300 flex items-center justify-center font-bold text-[10px]">
+							{ ActiveUserInitial() }
+						</div>
+						<span class="font-medium">{ ActiveUser() }</span>
+						<span class="text-[10px] text-slate-500 uppercase tracking-wider">Reviewer</span>
+					</div>
+				</div>
+			</header>
+
+			<!-- Main View Slot -->
+			<main class="flex-1 flex flex-col">
+				{ children... }
+			</main>
+
+			<!-- Footer -->
+			<footer class="border-t border-slate-800/60 bg-[#080c14] py-3 px-6 text-center text-xs text-slate-500 flex justify-between items-center">
+				<div class="flex items-center space-x-2">
+					<span class="font-semibold text-slate-400">Cotejo Web UI</span>
+					<span>•</span>
+					<span>Niebla code review & Myers diff visualizer</span>
+				</div>
+				<div class="text-[11px] text-slate-600 font-mono">
+					{ fmt.Sprintf("Pure Go + Templ + HTMX + Tailwind") }
+				</div>
+			</footer>
+		</body>
+	</html>
+}

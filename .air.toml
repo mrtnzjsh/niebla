@@ -1,15 +1,15 @@
 root = "."
-tmp_dir = "citc-toolchain/tmp"
+tmp_dir = "niebla/tmp"
 
 [build]
-  cmd = "cd citc-toolchain && go build -o ./tmp/critique ./cmd/critique"
-  bin = "./citc-toolchain/tmp/critique"
+  cmd = "cd niebla && go build -o ./tmp/cotejo ./cmd/cotejo"
+  bin = "./niebla/tmp/cotejo"
   full_bin = ""
   include_ext = ["go"]
-  exclude_dir = ["citc-toolchain/assets", "citc-toolchain/tmp", "tmp", "vendor", ".direnv", ".git"]
+  exclude_dir = ["niebla/assets", "niebla/tmp", "tmp", "vendor", ".direnv", ".git"]
   include_dir = []
   exclude_file = []
-  exclude_regex = [".*_test\\.go$"]
+  exclude_regex = [".*_test\\.go$", ".*_templ\\.go$"]
   exclude_unchanged = false
   follow_symlink = false
   log = "build-errors.log"

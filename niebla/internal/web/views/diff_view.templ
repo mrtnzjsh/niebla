@@ -1,0 +1,321 @@
+package views
+
+import (
+	"fmt"
+	"strconv"
+	"niebla/internal/db"
+	"niebla/internal/web/diff"
+)
+
+templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *diff.FileDiffDetail, commentsByLine map[int][]db.Comment) {
+	<div class="flex flex-col flex-1 bg-[#090d16] overflow-hidden">
+		<!-- File Diff Header -->
+		<div class="bg-[#0c1322] border-b border-slate-800 px-6 py-2 flex items-center justify-between shadow-sm">
+			<div class="flex items-center space-x-3">
+				<div class="flex items-center space-x-2">
+					<span class="font-mono text-sm font-semibold text-slate-100 tracking-wide">{ detail.Path }</span>
+				</div>
+				<div class="flex items-center space-x-1.5 text-xs font-mono">
+					<span class="text-emerald-400 font-medium">{ fmt.Sprintf("+%d", detail.Additions) }</span>
+					<span class="text-slate-600">/</span>
+					<span class="text-rose-400 font-medium">{ fmt.Sprintf("-%d", detail.Deletions) }</span>
+				</div>
+			</div>
+
+			<div class="flex items-center space-x-3 text-xs">
+				<div class="flex items-center space-x-1 bg-slate-900/80 border border-slate-800 rounded-md p-0.5">
+					if detail.BaseBlobHex != "" {
+						<a
+							href={ templ.SafeURL(fmt.Sprintf("/cl/%d/raw?hash=%s", clID, detail.BaseBlobHex)) }
+							target="_blank"
+							class="px-2.5 py-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition flex items-center space-x-1"
+							title="View base raw blob"
+						>
+							<span>Base Raw</span>
+						</a>
+					}
+					if detail.ModBlobHex != "" {
+						<a
+							href={ templ.SafeURL(fmt.Sprintf("/cl/%d/raw?hash=%s", clID, detail.ModBlobHex)) }
+							target="_blank"
+							class="px-2.5 py-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition flex items-center space-x-1"
+							title="View modified raw blob"
+						>
+							<span>Modified Raw</span>
+						</a>
+					}
+				</div>
+				<button
+					type="button"
+					onclick="toggleAllUnchangedLines()"
+					class="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 rounded border border-slate-700/60 transition flex items-center space-x-1.5"
+				>
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+					<span id="expand-toggle-label">Expand All Lines</span>
+				</button>
+			</div>
+		</div>
+
+		if detail.IsBinary {
+			<div class="p-16 text-center text-slate-400 flex flex-col items-center justify-center space-y-3">
+				<svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+				<p class="text-sm font-medium">Binary file changed. Raw byte diffing suppressed.</p>
+			</div>
+		} else {
+			<!-- Side-by-Side Diff Table -->
+			<div class="flex-1 overflow-x-auto">
+				<table class="w-full border-collapse font-mono text-xs select-text">
+					<!-- Table Columns Header -->
+					<thead>
+						<tr class="bg-[#0b101c] text-slate-400 border-b border-slate-800/80 text-[11px] uppercase tracking-wider">
+							<th class="w-12 px-2 py-1.5 text-right font-normal border-r border-slate-800/80 select-none">#</th>
+							<th class="w-1/2 px-4 py-1.5 text-left font-semibold border-r border-slate-800/80">
+								if basePatchsetNumber == 0 {
+									<span>Base CL</span>
+								} else {
+									<span>{ fmt.Sprintf("Patchset %d", basePatchsetNumber) }</span>
+								}
+							</th>
+							<th class="w-12 px-2 py-1.5 text-right font-normal border-r border-slate-800/80 select-none">#</th>
+							<th class="w-1/2 px-4 py-1.5 text-left font-semibold">
+								<span>{ fmt.Sprintf("Patchset %d (Modified)", patchsetNumber) }</span>
+							</th>
+						</tr>
+					</thead>
+	{{
+		commentedLines := make(map[int]bool)
+		for _, comments := range commentsByLine {
+			for _, c := range comments {
+				start := c.LineNumber
+				end := c.EndLineNumber
+				if end <= 0 {
+					end = start
+				}
+				if end > start {
+					for l := start; l <= end; l++ {
+						commentedLines[l] = true
+					}
+				}
+			}
+		}
+	}}
+	<style>
+		.diff-line-selected {
+			background-color: rgba(56, 189, 248, 0.15) !important;
+		}
+		.diff-line-num.diff-line-selected {
+			background-color: rgba(56, 189, 248, 0.35) !important;
+			color: #38bdf8 !important;
+		}
+		.diff-row-comment-range {
+			border-left: 2px solid #38bdf8 !important;
+		}
+	</style>
+					<tbody class="divide-y divide-slate-800/20">
+						for _, row := range detail.Rows {
+							<tr class={ "diff-row group transition-colors", getRowClass(row.RowType), templ.KV("diff-row-comment-range", commentedLines[row.ModLine.LineNum]) }>
+								<!-- Left (Base) Line Number -->
+								<td class="w-12 px-2 py-0.5 text-right text-slate-500 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]">
+									if row.BaseLine.LineNum > 0 {
+										{ strconv.Itoa(row.BaseLine.LineNum) }
+									}
+								</td>
+
+								<!-- Left (Base) Code Content -->
+								<td class={ "px-3 py-0.5 border-r border-slate-800/60 whitespace-pre overflow-x-auto", getCellHighlightClass(row.BaseLine.Type) }>
+									if row.BaseLine.HighlightedHTML != "" {
+										@templ.Raw(string(row.BaseLine.HighlightedHTML))
+									} else {
+										{ " " }
+									}
+								</td>
+
+								<!-- Right (Modified) Line Number (Interactive Comment Trigger) -->
+								<td
+									if row.ModLine.LineNum > 0 {
+										hx-get={ fmt.Sprintf("/cl/%d/comment-box?file=%s&line=%d&end_line=%d&side=modified", clID, detail.Path, row.ModLine.LineNum, row.ModLine.LineNum) }
+										hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(detail.Path), row.ModLine.LineNum) }
+										hx-swap="innerHTML"
+										data-line={ strconv.Itoa(row.ModLine.LineNum) }
+										data-cl={ strconv.FormatInt(clID, 10) }
+										data-file={ detail.Path }
+										data-patchset={ strconv.Itoa(patchsetNumber) }
+										title="Click line to comment, or Shift-click / drag to comment on code block"
+										class="diff-line-num w-12 px-2 py-0.5 text-right text-slate-400 hover:text-sky-300 hover:bg-sky-950/60 cursor-pointer border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px] relative transition"
+									} else {
+										class="w-12 px-2 py-0.5 text-right text-slate-600 border-r border-slate-800/60 select-none bg-slate-900/40 text-[11px]"
+									}
+								>
+									if row.ModLine.LineNum > 0 {
+										<span class="comment-hint opacity-0 group-hover:opacity-100 absolute left-1 text-sky-400 text-[10px] font-bold select-none">+</span>
+										<span>{ strconv.Itoa(row.ModLine.LineNum) }</span>
+									}
+								</td>
+
+								<!-- Right (Modified) Code Content -->
+								<td class={ "px-3 py-0.5 whitespace-pre overflow-x-auto", getCellHighlightClass(row.ModLine.Type) }>
+									if row.ModLine.HighlightedHTML != "" {
+										@templ.Raw(string(row.ModLine.HighlightedHTML))
+									} else {
+										{ " " }
+									}
+								</td>
+							</tr>
+
+							<!-- Comment Thread Row (directly under the line) -->
+							if row.ModLine.LineNum > 0 {
+								<tr id={ fmt.Sprintf("comment-row-%s-%d", sanitizeHTMLID(detail.Path), row.ModLine.LineNum) } class="comment-thread-row">
+									if comments, exists := commentsByLine[row.ModLine.LineNum]; exists && len(comments) > 0 {
+										@CommentBox(clID, patchsetNumber, detail.Path, comments[0].LineNumber, row.ModLine.LineNum, "modified", comments)
+									}
+								</tr>
+							}
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
+
+	<script>
+		function toggleAllUnchangedLines() {
+			const label = document.getElementById('expand-toggle-label');
+			const equalRows = document.querySelectorAll('.diff-row-equal');
+			if (window._linesCollapsed) {
+				equalRows.forEach(r => r.style.display = '');
+				label.textContent = "Collapse Unchanged";
+				window._linesCollapsed = false;
+			} else {
+				window._linesCollapsed = true;
+				label.textContent = "Expand All Lines";
+			}
+		}
+
+		(function initMultiLineSelection() {
+			let selectStart = null;
+			let isMouseDown = false;
+
+			function clearRangeSelection() {
+				document.querySelectorAll('.diff-line-selected').forEach(el => el.classList.remove('diff-line-selected'));
+			}
+
+			function highlightRange(start, end) {
+				clearRangeSelection();
+				const minL = Math.min(start, end);
+				const maxL = Math.max(start, end);
+				document.querySelectorAll('.diff-line-num[data-line]').forEach(el => {
+					const l = parseInt(el.getAttribute('data-line'), 10);
+					if (l >= minL && l <= maxL) {
+						el.classList.add('diff-line-selected');
+						const row = el.closest('tr');
+						if (row) row.classList.add('diff-line-selected');
+					}
+				});
+			}
+
+			function openCommentBoxForRange(start, end, filePath, clID, psNum) {
+				const minL = Math.min(start, end);
+				const maxL = Math.max(start, end);
+				const safePath = filePath.replace(/[/.]/g, '-');
+				const targetId = '#comment-row-' + safePath + '-' + maxL;
+				const targetRow = document.querySelector(targetId);
+				if (!targetRow) return;
+
+				const url = `/cl/${clID}/comment-box?file=${encodeURIComponent(filePath)}&line=${minL}&end_line=${maxL}&side=modified&ps=${psNum}`;
+				htmx.ajax('GET', url, { target: targetId, swap: 'innerHTML' });
+				setTimeout(() => {
+					const container = document.getElementById('comment-container-' + safePath + '-' + maxL);
+					if (container) {
+						container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+						const ta = container.querySelector('textarea');
+						if (ta) ta.focus();
+					}
+				}, 150);
+			}
+
+			document.querySelectorAll('.diff-line-num[data-line]').forEach(el => {
+				el.addEventListener('mousedown', function(e) {
+					if (e.button !== 0) return;
+					const line = parseInt(this.getAttribute('data-line'), 10);
+					if (!line) return;
+
+					if (e.shiftKey && window._lastClickedLine) {
+						e.preventDefault();
+						const start = window._lastClickedLine;
+						const end = line;
+						highlightRange(start, end);
+						const cl = this.getAttribute('data-cl');
+						const file = this.getAttribute('data-file');
+						const ps = this.getAttribute('data-patchset');
+						openCommentBoxForRange(start, end, file, cl, ps);
+						window._lastClickedLine = end;
+						return;
+					}
+
+					isMouseDown = true;
+					selectStart = line;
+					window._lastClickedLine = line;
+					clearRangeSelection();
+					this.classList.add('diff-line-selected');
+				});
+
+				el.addEventListener('mouseenter', function() {
+					if (!isMouseDown || !selectStart) return;
+					const currentLine = parseInt(this.getAttribute('data-line'), 10);
+					if (!currentLine) return;
+					highlightRange(selectStart, currentLine);
+				});
+
+				el.addEventListener('mouseup', function(e) {
+					if (!isMouseDown) return;
+					isMouseDown = false;
+					const endLine = parseInt(this.getAttribute('data-line'), 10);
+					if (!selectStart || !endLine) return;
+
+					if (selectStart !== endLine) {
+						e.preventDefault();
+						e.stopPropagation();
+						const cl = this.getAttribute('data-cl');
+						const file = this.getAttribute('data-file');
+						const ps = this.getAttribute('data-patchset');
+						openCommentBoxForRange(selectStart, endLine, file, cl, ps);
+					}
+					selectStart = null;
+				});
+			});
+
+			document.addEventListener('mouseup', function() {
+				if (isMouseDown) {
+					isMouseDown = false;
+					selectStart = null;
+				}
+			});
+		})();
+	</script>
+}
+
+func getRowClass(rowType string) string {
+	switch rowType {
+	case "modify":
+		return "diff-row-modify bg-[#111927]/60 hover:bg-[#142033]"
+	case "add":
+		return "diff-row-add bg-emerald-950/20 hover:bg-emerald-950/30"
+	case "delete":
+		return "diff-row-delete bg-rose-950/20 hover:bg-rose-950/30"
+	default:
+		return "diff-row-equal hover:bg-[#111827]/40"
+	}
+}
+
+func getCellHighlightClass(lineType diff.LineType) string {
+	switch lineType {
+	case diff.LineAdded:
+		return "bg-emerald-950/40 text-emerald-200 border-l-2 border-emerald-500/70"
+	case diff.LineDeleted:
+		return "bg-rose-950/40 text-rose-200 border-l-2 border-rose-500/70 opacity-90 line-through decoration-rose-500/50"
+	case diff.LineEmpty:
+		return "bg-[#090d16]/70"
+	default:
+		return "text-slate-200"
+	}
+}

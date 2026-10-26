@@ -1,0 +1,1 @@
+../../internal/cli/skills/assets/niebla/SKILL.md
