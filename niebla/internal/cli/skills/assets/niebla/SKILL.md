@@ -31,7 +31,7 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
   ```bash
   niebla workspace create <name> [--cl <base_cl>] [--mount-dir <path>] [--no-fuse] [--json]
   ```
-  Creates a workspace on the server (bound to head CL by default or `--cl <id>`). By default, mounts the `nieblafs` virtual filesystem at `/niebla/workspaces/<name>`. When `--no-fuse` is set, materializes the base CL Merkle tree directly into the mount directory without requiring `/dev/fuse`.
+  Creates a workspace on the server (bound to head CL by default or `--cl <id>`). By default, mounts the `nieblafs` virtual filesystem at `/niebla/workspaces/<name>` and starts a background Unix control socket (`nieblafs.sock`). The CLI detects daemon readiness deterministically via control socket `ping` in <5ms. When `--no-fuse` is set, materializes the base CL Merkle tree directly into the mount directory without requiring `/dev/fuse`.
 
 * **Stateless tree materialization (`niebla export`):**
   ```bash
@@ -91,7 +91,8 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
   niebla sync [--workspace <name>] [--dry-run] [--json]
   ```
   Reconciles the local workspace's base tree with the server's latest rebased tree or trunk:
-  * **Clean Sync:** If server auto-rebase succeeded without conflict, fast-forwards `root_tree_hash` and re-anchors `nieblafs` FUSE mount with zero file copy.
+  * **Clean Sync (FUSE Mode):** If server auto-rebase succeeded without conflict, fast-forwards `root_tree_hash` and sends a `reanchor` IPC request over the Unix domain control socket (`pkg/nieblafs/control`) to `nieblafs.sock`. The daemon purges in-memory metadata/inode caches and re-binds to the new root tree in sub-millisecond time with zero file copy.
+  * **Clean Sync (`--no-fuse` Mode):** Directly re-materializes modified/added files into the workspace mount directory (`pkg/materialize`) using cached CAS blobs.
   * **Conflict Handling:** If server detected overlapping edits between parent and child, outputs conflict diagnostics and injects standard conflict markers (`<<<<<<< PARENT`, `=======`, `>>>>>>> CHILD`) into the workspace scratch files for manual resolution.
   * After editing and resolving markers, run `niebla shelve` to commit the rebased patchset.
 

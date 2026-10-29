@@ -188,8 +188,8 @@ flowchart TD
 - [x] Add integration tests in `cmd/nieblafs/test/` verifying file lookup, read, and control socket re-anchoring.
 
 ### Commit 4.4: `docs(skills): update niebla skill and roadmap checklists with FUSE control socket`
-- [ ] Update `docs/agentic_development_analysis.md` checklist items for Phase 1 P0 and P1.
-- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded skill documentation.
+- [x] Update `docs/agentic_development_analysis.md` checklist items for Phase 1 P0 and P1.
+- [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded skill documentation.
 
 
 
