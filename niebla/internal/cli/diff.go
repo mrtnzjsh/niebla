@@ -59,7 +59,7 @@ func NewDiffCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			fetchTree := makeTreeFetcher(ctx, client)
-			changes, err := ScanScratchChanges(ws.ScratchDir, rootTreeHash, fetchTree)
+			changes, err := ScanScratchChanges(ws.ScratchDir, rootTreeHash, fetchTree, loadWorkspaceMatcher(ws))
 			if err != nil {
 				return fmt.Errorf("failed to scan workspace changes: %w", err)
 			}

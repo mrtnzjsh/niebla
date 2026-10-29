@@ -13,8 +13,9 @@ import (
 	"time"
 
 	"niebla/internal/cli/config"
-	"niebla/pkg/tree"
+	"niebla/pkg/ignore"
 	nieblav1 "niebla/pkg/proto/nieblav1"
+	"niebla/pkg/tree"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -75,7 +76,8 @@ func NewStatusCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			fetchTree := makeTreeFetcher(ctx, client)
-			changes, err := ScanScratchChanges(ws.ScratchDir, rootTreeHash, fetchTree)
+			matcher := loadWorkspaceMatcher(ws)
+			changes, err := ScanScratchChanges(ws.ScratchDir, rootTreeHash, fetchTree, matcher)
 			if err != nil {
 				return fmt.Errorf("failed to scan workspace changes: %w", err)
 			}
@@ -88,10 +90,39 @@ func NewStatusCmd(rootFlags *RootFlags) *cobra.Command {
 	return cmd
 }
 
+// loadWorkspaceMatcher loads .nieblaignore from ScratchDir or MountDir if present.
+func loadWorkspaceMatcher(ws *config.WorkspaceConfig) ignore.Matcher {
+	if ws != nil {
+		for _, dir := range []string{ws.ScratchDir, ws.MountDir} {
+			if dir == "" {
+				continue
+			}
+			p := filepath.Join(dir, ".nieblaignore")
+			if _, err := os.Stat(p); err == nil {
+				if m, err := ignore.LoadFile(p); err == nil {
+					return m
+				}
+			}
+		}
+	}
+	return ignore.NewMatcher()
+}
+
 // ScanScratchChanges inspects scratchDir and compares against rootTreeHash to identify M, A, D files.
-func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.FetchTreeFunc) ([]FileChange, error) {
+func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.FetchTreeFunc, matchers ...ignore.Matcher) ([]FileChange, error) {
 	if _, err := os.Stat(scratchDir); os.IsNotExist(err) {
 		return []FileChange{}, nil
+	}
+
+	var matcher ignore.Matcher
+	if len(matchers) > 0 && matchers[0] != nil {
+		matcher = matchers[0]
+	} else {
+		var err error
+		matcher, err = ignore.LoadFile(filepath.Join(scratchDir, ".nieblaignore"))
+		if err != nil {
+			matcher = ignore.NewMatcher()
+		}
 	}
 
 	changeMap := make(map[string]FileChange)
@@ -100,17 +131,25 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
 
 		rel, err := filepath.Rel(scratchDir, path)
 		if err != nil {
 			return err
 		}
+		if rel == "." {
+			return nil
+		}
 
 		// Normalize to forward slashes
 		rel = filepath.ToSlash(rel)
+
+		if d.IsDir() {
+			if matcher.Match(rel, true) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
 		fileName := d.Name()
 
 		info, err := d.Info()
@@ -144,6 +183,10 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 				originalPath = rel
 			}
 
+			if matcher.Match(originalPath, false) {
+				return nil
+			}
+
 			baseEntry, _ := tree.ResolvePath(rootTreeHash, originalPath, fetchTree)
 			changeMap[originalPath] = FileChange{
 				Path:      originalPath,
@@ -151,6 +194,10 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 				DiskPath:  path,
 				BaseEntry: baseEntry,
 			}
+			return nil
+		}
+
+		if matcher.Match(rel, false) {
 			return nil
 		}
 

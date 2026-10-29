@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,5 +137,108 @@ func TestScanScratchChanges(t *testing.T) {
 		!strings.Contains(output, "added.txt") ||
 		!strings.Contains(output, "to_delete.txt") {
 		t.Errorf("renderStatus output missing expected entries: %s", output)
+	}
+}
+
+func TestScanScratchChanges_NieblaIgnoreFiltering(t *testing.T) {
+	scratchDir := t.TempDir()
+
+	// Write .nieblaignore
+	ignoreRules := `
+# Ignore build and dependency directories
+node_modules/
+build/
+*.o
+*.log
+!important.log
+`
+	if err := os.WriteFile(filepath.Join(scratchDir, ".nieblaignore"), []byte(ignoreRules), 0644); err != nil {
+		t.Fatalf("write .nieblaignore: %v", err)
+	}
+
+	// Create files in ignored directories
+	mustWriteFile(t, filepath.Join(scratchDir, "node_modules", "pkg", "index.js"), "module.exports = {}")
+	mustWriteFile(t, filepath.Join(scratchDir, "build", "output.bin"), "binary")
+	mustWriteFile(t, filepath.Join(scratchDir, ".niebla", "metadata.json"), "{}")
+
+	// Create ignored files and negated files
+	mustWriteFile(t, filepath.Join(scratchDir, "src", "main.o"), "obj")
+	mustWriteFile(t, filepath.Join(scratchDir, "debug.log"), "debug")
+	mustWriteFile(t, filepath.Join(scratchDir, "important.log"), "keep me")
+
+	// Create normal modified, added, and deleted (whiteout) files
+	mustWriteFile(t, filepath.Join(scratchDir, "src", "main.go"), "package main\nfunc main() {}\n")
+	mustWriteFile(t, filepath.Join(scratchDir, "README.md"), "# Updated\n")
+	mustWriteFile(t, filepath.Join(scratchDir, ".wh.old.txt"), "")
+
+	// Build an in-memory base tree with README.md, old.txt, and a node_modules subtree
+	// so we can assert node_modules subtree is NEVER fetched when skipped via filepath.SkipDir.
+	nodeModulesSubHash := bytes.Repeat([]byte{0xaa}, 32)
+	srcSubEntries := []tree.Entry{
+		{Name: "existing.go", Mode: 0100644, Size: 10, BlobSHA256: bytes.Repeat([]byte{0x11}, 32)},
+	}
+	srcSubHash := tree.ComputeTreeHash(srcSubEntries)
+
+	rootEntries := []tree.Entry{
+		{Name: "README.md", Mode: 0100644, Size: 5, BlobSHA256: bytes.Repeat([]byte{0x22}, 32)},
+		{Name: "node_modules", Mode: 0040755, SubTreeHash: nodeModulesSubHash},
+		{Name: "old.txt", Mode: 0100644, Size: 3, BlobSHA256: bytes.Repeat([]byte{0x33}, 32)},
+		{Name: "src", Mode: 0040755, SubTreeHash: srcSubHash},
+	}
+	tree.SortEntries(rootEntries)
+	rootHash := tree.ComputeTreeHash(rootEntries)
+
+	fetchedTrees := make(map[string]int)
+	fetchTree := func(hash []byte) ([]tree.Entry, error) {
+		key := hex.EncodeToString(hash)
+		fetchedTrees[key]++
+		if bytes.Equal(hash, rootHash) {
+			return rootEntries, nil
+		}
+		if bytes.Equal(hash, srcSubHash) {
+			return srcSubEntries, nil
+		}
+		if bytes.Equal(hash, nodeModulesSubHash) {
+			t.Errorf("fetchTree was unexpectedly called for ignored directory subtree node_modules")
+		}
+		return nil, nil
+	}
+
+	changes, err := ScanScratchChanges(scratchDir, rootHash, fetchTree)
+	if err != nil {
+		t.Fatalf("ScanScratchChanges failed: %v", err)
+	}
+
+	want := map[string]ChangeType{
+		".nieblaignore": ChangeAdded,
+		"README.md":     ChangeModified,
+		"important.log": ChangeAdded,
+		"old.txt":       ChangeDeleted,
+		"src/main.go":   ChangeAdded,
+	}
+
+	if len(changes) != len(want) {
+		t.Fatalf("got %d changes (%+v), want %d (%+v)", len(changes), changes, len(want), want)
+	}
+
+	for _, c := range changes {
+		expectedType, ok := want[c.Path]
+		if !ok {
+			t.Errorf("unexpected file change reported: %s (%s)", c.Path, c.Type)
+			continue
+		}
+		if c.Type != expectedType {
+			t.Errorf("change %s: got type %s, want %s", c.Path, c.Type, expectedType)
+		}
+	}
+}
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
 	}
 }

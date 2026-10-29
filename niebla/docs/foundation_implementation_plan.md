@@ -100,8 +100,8 @@ flowchart TD
 - [x] Add comprehensive table-driven unit tests in `pkg/ignore/ignore_test.go`.
 
 ### Commit 2.2: `feat(cli): integrate .nieblaignore filtering into ScanScratchChanges`
-- [ ] Wire `ignore.Matcher` into [`ScanScratchChanges`](file:///home/matatan/Developer/niebla/niebla/internal/cli/status.go#L92) so ignored directories return `filepath.SkipDir` immediately without making gRPC `ResolvePath` calls or uploading build artifacts during `shelve`.
-- [ ] Add unit/integration tests in `internal/cli/status_test.go` verifying ignored directories and files are excluded from status and shelve scans.
+- [x] Wire `ignore.Matcher` into [`ScanScratchChanges`](file:///home/matatan/Developer/niebla/niebla/internal/cli/status.go#L92) so ignored directories return `filepath.SkipDir` immediately without making gRPC `ResolvePath` calls or uploading build artifacts during `shelve`.
+- [x] Add unit/integration tests in `internal/cli/status_test.go` verifying ignored directories and files are excluded from status and shelve scans.
 
 ### Commit 2.3: `feat(materialize): add standalone concurrent tree materializer with CAS hardlink fast-path`
 - [ ] Create standalone package `pkg/materialize` (`MaterializeTree` accepting `tree.FetchTreeFunc`, `BlobFetcher`, and `Options{Concurrency, HardlinkCAS, Filter}`).
