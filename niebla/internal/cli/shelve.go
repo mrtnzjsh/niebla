@@ -27,6 +27,16 @@ type uploadedBlob struct {
 	Mode uint32
 }
 
+// ShelveOutput represents the machine-readable JSON output for 'niebla shelve --json'.
+type ShelveOutput struct {
+	Workspace    string `json:"workspace"`
+	CLID         int64  `json:"cl_id"`
+	ParentCL     int64  `json:"parent_cl"`
+	Description  string `json:"description"`
+	RootTreeHash string `json:"root_tree_hash"`
+	FilesShelved int    `json:"files_shelved"`
+}
+
 // NewShelveCmd constructs the 'shelve' command.
 func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 	var description string
@@ -154,10 +164,22 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			// 5. Update workspace metadata with active CL and updated tree hash
+			newTreeHex := hex.EncodeToString(newRootTreeHash)
 			ws.ActiveCL = shelveResp.ClId
-			ws.RootTreeHash = hex.EncodeToString(newRootTreeHash)
+			ws.RootTreeHash = newTreeHex
 			if err := mgr.Save(ws); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update workspace active CL metadata: %v\n", err)
+			}
+
+			if rootFlags.JSON {
+				return writeJSON(cmd.OutOrStdout(), ShelveOutput{
+					Workspace:    ws.Name,
+					CLID:         shelveResp.ClId,
+					ParentCL:     effectiveParentCL,
+					Description:  description,
+					RootTreeHash: newTreeHex,
+					FilesShelved: len(changes),
+				})
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Shelved CL %d: %q\n", shelveResp.ClId, description)

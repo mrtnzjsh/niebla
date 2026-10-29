@@ -34,10 +34,20 @@ const (
 
 // FileChange describes a single modified, added, or deleted file.
 type FileChange struct {
-	Path      string
-	Type      ChangeType
-	DiskPath  string
-	BaseEntry *tree.Entry
+	Path      string      `json:"path"`
+	Type      ChangeType  `json:"type"`
+	DiskPath  string      `json:"-"`
+	BaseEntry *tree.Entry `json:"-"`
+}
+
+// StatusOutput represents the machine-readable JSON output for 'niebla status --json'.
+type StatusOutput struct {
+	Workspace    string       `json:"workspace"`
+	BaseCL       int64        `json:"base_cl"`
+	ActiveCL     int64        `json:"active_cl,omitempty"`
+	RootTreeHash string       `json:"root_tree_hash"`
+	Clean        bool         `json:"clean"`
+	Changes      []FileChange `json:"changes"`
 }
 
 // NewStatusCmd constructs the 'status' command.
@@ -81,6 +91,20 @@ func NewStatusCmd(rootFlags *RootFlags) *cobra.Command {
 			changes, err := ScanWorkspaceChanges(ws, rootTreeHash, fetchTree)
 			if err != nil {
 				return fmt.Errorf("failed to scan workspace changes: %w", err)
+			}
+
+			if rootFlags.JSON {
+				if changes == nil {
+					changes = []FileChange{}
+				}
+				return writeJSON(cmd.OutOrStdout(), StatusOutput{
+					Workspace:    ws.Name,
+					BaseCL:       ws.BaseCL,
+					ActiveCL:     ws.ActiveCL,
+					RootTreeHash: ws.RootTreeHash,
+					Clean:        len(changes) == 0,
+					Changes:      changes,
+				})
 			}
 
 			renderStatus(cmd.OutOrStdout(), changes)

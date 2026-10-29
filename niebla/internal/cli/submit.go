@@ -12,6 +12,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// SubmitOutput represents the machine-readable JSON output for 'niebla submit --json'.
+type SubmitOutput struct {
+	CLID            int64  `json:"cl_id"`
+	Status          string `json:"status"`
+	CommittedAtUnix int64  `json:"committed_at_unix"`
+}
+
 // NewSubmitCmd constructs the 'submit' command.
 func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 	var targetCL int64
@@ -74,6 +81,14 @@ func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 				if err := mgr.Save(activeWS); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update workspace base CL: %v\n", err)
 				}
+			}
+
+			if rootFlags.JSON {
+				return writeJSON(cmd.OutOrStdout(), SubmitOutput{
+					CLID:            resp.ClId,
+					Status:          "submitted",
+					CommittedAtUnix: resp.CommittedAtUnix,
+				})
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Successfully submitted CL %d at revision %d.\n", resp.ClId, resp.ClId)

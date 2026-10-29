@@ -13,6 +13,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// SyncOutput represents the machine-readable JSON output for 'niebla sync --json'.
+type SyncOutput struct {
+	Workspace       string `json:"workspace"`
+	CLID            int64  `json:"cl_id"`
+	ParentCL        int64  `json:"parent_cl,omitempty"`
+	PatchsetNumber  int32  `json:"patchset_number"`
+	OldRootTreeHash string `json:"old_root_tree_hash"`
+	NewRootTreeHash string `json:"new_root_tree_hash"`
+	UpToDate        bool   `json:"up_to_date"`
+	NeedsRebase     bool   `json:"needs_rebase"`
+	ConflictDetails string `json:"conflict_details,omitempty"`
+	DryRun          bool   `json:"dry_run"`
+}
+
 // NewSyncCmd constructs the 'sync' command for reconciling local workspaces with upstream trees.
 func NewSyncCmd(rootFlags *RootFlags) *cobra.Command {
 	var dryRun bool
@@ -60,30 +74,86 @@ func NewSyncCmd(rootFlags *RootFlags) *cobra.Command {
 				return fmt.Errorf("failed to sync workspace with server: %w", err)
 			}
 
+			newTreeHex := hex.EncodeToString(resp.RootTreeHash)
+			oldTreeHex := ws.RootTreeHash
+
 			if resp.NeedsRebase {
-				fmt.Fprintf(cmd.ErrOrStderr(), "⚠️  Rebase conflict detected with Parent CL %d!\n", resp.ParentCl)
-				if resp.RebaseConflictDetails != "" {
-					fmt.Fprintf(cmd.ErrOrStderr(), "   Conflicts: %s\n", resp.RebaseConflictDetails)
+				if rootFlags.JSON {
+					_ = writeJSON(cmd.OutOrStdout(), SyncOutput{
+						Workspace:       ws.Name,
+						CLID:            resp.ClId,
+						ParentCL:        resp.ParentCl,
+						PatchsetNumber:  resp.PatchsetNumber,
+						OldRootTreeHash: oldTreeHex,
+						NewRootTreeHash: newTreeHex,
+						UpToDate:        false,
+						NeedsRebase:     true,
+						ConflictDetails: resp.RebaseConflictDetails,
+						DryRun:          dryRun,
+					})
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "⚠️  Rebase conflict detected with Parent CL %d!\n", resp.ParentCl)
+					if resp.RebaseConflictDetails != "" {
+						fmt.Fprintf(cmd.ErrOrStderr(), "   Conflicts: %s\n", resp.RebaseConflictDetails)
+					}
+					fmt.Fprintln(cmd.ErrOrStderr(), "   Please resolve the conflicting files in your workspace, then run 'niebla shelve' to commit the resolution.")
 				}
-				fmt.Fprintln(cmd.ErrOrStderr(), "   Please resolve the conflicting files in your workspace, then run 'niebla shelve' to commit the resolution.")
 				return fmt.Errorf("rebase conflicts detected with parent CL %d", resp.ParentCl)
 			}
 
-			newTreeHex := hex.EncodeToString(resp.RootTreeHash)
-			if ws.RootTreeHash == newTreeHex {
+			if oldTreeHex == newTreeHex {
+				if rootFlags.JSON {
+					return writeJSON(cmd.OutOrStdout(), SyncOutput{
+						Workspace:       ws.Name,
+						CLID:            resp.ClId,
+						ParentCL:        resp.ParentCl,
+						PatchsetNumber:  resp.PatchsetNumber,
+						OldRootTreeHash: oldTreeHex,
+						NewRootTreeHash: newTreeHex,
+						UpToDate:        true,
+						NeedsRebase:     false,
+						DryRun:          dryRun,
+					})
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q is already up to date with CL %d (Patchset %d).\n", ws.Name, resp.ClId, resp.PatchsetNumber)
 				return nil
 			}
 
 			if dryRun {
+				if rootFlags.JSON {
+					return writeJSON(cmd.OutOrStdout(), SyncOutput{
+						Workspace:       ws.Name,
+						CLID:            resp.ClId,
+						ParentCL:        resp.ParentCl,
+						PatchsetNumber:  resp.PatchsetNumber,
+						OldRootTreeHash: oldTreeHex,
+						NewRootTreeHash: newTreeHex,
+						UpToDate:        false,
+						NeedsRebase:     false,
+						DryRun:          true,
+					})
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "[Dry Run] Workspace %q can be updated: %s -> %s (Patchset %d)\n", ws.Name, ws.RootTreeHash, newTreeHex, resp.PatchsetNumber)
 				return nil
 			}
 
-			oldTreeHex := ws.RootTreeHash
 			ws.RootTreeHash = newTreeHex
 			if err := mgr.Save(ws); err != nil {
 				return fmt.Errorf("failed to save updated workspace metadata: %w", err)
+			}
+
+			if rootFlags.JSON {
+				return writeJSON(cmd.OutOrStdout(), SyncOutput{
+					Workspace:       ws.Name,
+					CLID:            resp.ClId,
+					ParentCL:        resp.ParentCl,
+					PatchsetNumber:  resp.PatchsetNumber,
+					OldRootTreeHash: oldTreeHex,
+					NewRootTreeHash: newTreeHex,
+					UpToDate:        true,
+					NeedsRebase:     false,
+					DryRun:          false,
+				})
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "✓ Successfully synced workspace %q with CL %d (Patchset %d).\n", ws.Name, resp.ClId, resp.PatchsetNumber)

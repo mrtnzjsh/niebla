@@ -167,6 +167,10 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 				}
 			}()
 
+			if rootFlags.JSON {
+				return writeJSON(cmd.OutOrStdout(), wsConfig)
+			}
+
 			fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q created successfully.\n", name)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Base CL   : %d\n", resp.BaseCl)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Tree Hash : %s\n", rootTreeHashHex)
@@ -189,6 +193,11 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 	return cmd
 }
 
+type workspaceListEntry struct {
+	*config.WorkspaceConfig
+	Status string `json:"status"`
+}
+
 func newWorkspaceListCmd(rootFlags *RootFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -202,6 +211,17 @@ func newWorkspaceListCmd(rootFlags *RootFlags) *cobra.Command {
 			workspaces, err := mgr.List()
 			if err != nil {
 				return err
+			}
+
+			if rootFlags.JSON {
+				entries := make([]workspaceListEntry, 0, len(workspaces))
+				for _, ws := range workspaces {
+					entries = append(entries, workspaceListEntry{
+						WorkspaceConfig: ws,
+						Status:          checkWorkspaceStatus(ws),
+					})
+				}
+				return writeJSON(cmd.OutOrStdout(), entries)
 			}
 
 			if len(workspaces) == 0 {

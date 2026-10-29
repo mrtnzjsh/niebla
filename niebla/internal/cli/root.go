@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
+	"io"
+
 	"github.com/spf13/cobra"
 )
 
@@ -9,6 +12,13 @@ type RootFlags struct {
 	Server    string
 	Workspace string
 	ConfigDir string
+	JSON      bool
+}
+
+func writeJSON(out io.Writer, v any) error {
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 // NewRootCmd constructs the root niebla command.
@@ -26,6 +36,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&flags.Server, "server", "", "Niebla server gRPC endpoint (precedence: --server, NIEBLA_SERVER, 127.0.0.1:50051)")
 	rootCmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "Explicit workspace name (overrides PWD detection)")
 	rootCmd.PersistentFlags().StringVar(&flags.ConfigDir, "config-dir", "", "Custom configuration directory for workspace metadata")
+	rootCmd.PersistentFlags().BoolVar(&flags.JSON, "json", false, "Emit machine-readable JSON output for automation and AI agents")
 
 	// Register subcommands
 	rootCmd.AddCommand(NewWorkspaceCmd(flags))

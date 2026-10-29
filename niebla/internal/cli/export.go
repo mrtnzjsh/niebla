@@ -18,6 +18,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ExportOutput represents the machine-readable JSON output for 'niebla export --json'.
+type ExportOutput struct {
+	CLID               int64  `json:"cl_id"`
+	Patchset           int32  `json:"patchset"`
+	RootTreeHash       string `json:"root_tree_hash"`
+	Dest               string `json:"dest"`
+	FilesMaterialized  int    `json:"files_materialized"`
+	DirectoriesCreated int    `json:"directories_created"`
+	BytesWritten       uint64 `json:"bytes_written"`
+	HardlinkedFiles    int    `json:"hardlinked_files"`
+}
+
 // NewExportCmd constructs the 'export' command for stateless FUSE-less tree materialization.
 func NewExportCmd(rootFlags *RootFlags) *cobra.Command {
 	var targetCL int64
@@ -95,10 +107,24 @@ func NewExportCmd(rootFlags *RootFlags) *cobra.Command {
 				return fmt.Errorf("failed to export CL %d to %s: %w", resolvedCL, absDest, err)
 			}
 
+			rootTreeHex := hex.EncodeToString(rootTreeHash)
+			if rootFlags.JSON {
+				return writeJSON(cmd.OutOrStdout(), ExportOutput{
+					CLID:               resolvedCL,
+					Patchset:           resolvedPS,
+					RootTreeHash:       rootTreeHex,
+					Dest:               absDest,
+					FilesMaterialized:  stats.FilesMaterialized,
+					DirectoriesCreated: stats.DirectoriesCreated,
+					BytesWritten:       stats.BytesWritten,
+					HardlinkedFiles:    stats.HardlinkedFiles,
+				})
+			}
+
 			fmt.Fprintf(cmd.OutOrStdout(), "Exported CL %d (patchset %d, tree %s) to %s (%d files, %d dirs, %d bytes).\n",
 				resolvedCL,
 				resolvedPS,
-				hex.EncodeToString(rootTreeHash),
+				rootTreeHex,
 				absDest,
 				stats.FilesMaterialized,
 				stats.DirectoriesCreated,

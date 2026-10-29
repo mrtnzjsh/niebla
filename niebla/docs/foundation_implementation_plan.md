@@ -113,8 +113,8 @@ flowchart TD
 - [x] Add `testcontainers-go` integration test in `internal/cli/export_integration_test.go` verifying end-to-end workspace creation, `.nieblaignore` filtering on shelve, and `niebla export` byte-for-byte verification.
 
 ### Commit 2.5: `feat(cli): add global --json flag and machine-readable output contracts`
-- [ ] Add global `--json` flag to `RootFlags` in `internal/cli/root.go` and structured JSON output envelopes for `status`, `shelve`, `submit`, `sync`, and `export`.
-- [ ] Add CLI JSON schema output tests in `internal/cli/json_output_test.go`.
+- [x] Add global `--json` flag to `RootFlags` in `internal/cli/root.go` and structured JSON output envelopes for `status`, `shelve`, `submit`, `sync`, and `export`.
+- [x] Add CLI JSON schema output tests in `internal/cli/json_output_test.go`.
 
 ### Commit 2.6: `docs(skills): update niebla skill with --no-fuse, export, .nieblaignore, and --json`
 - [ ] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to document `workspace create --no-fuse`, `niebla export`, `.nieblaignore`, and `--json` usage for AI agents.
