@@ -111,4 +111,3 @@ func (t *TailscaleResolver) ResolveUser(r *http.Request) string {
 	}
 	return CurrentOSUser()
 }
-

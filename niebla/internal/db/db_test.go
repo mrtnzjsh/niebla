@@ -534,4 +534,3 @@ func TestDatabaseOperationsWithTestcontainer(t *testing.T) {
 		t.Errorf("expected 0 unresolved comments after resolve, got %d", unresolvedCountAfterResolve)
 	}
 }
-

@@ -539,8 +539,6 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-
-
 	if h.db != nil {
 		if _, err := h.db.SubmitCL(r.Context(), clID); err != nil {
 			log.Printf("failed to submit CL %d: %v", clID, err)
@@ -1743,4 +1741,3 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 	}
 	return detail, err
 }
-

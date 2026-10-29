@@ -69,7 +69,7 @@ func TestValidateThemePresetWithTypoSuggestion(t *testing.T) {
 func TestValidateThemeColors(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Critique.Theme.Colors.BGCanvas = "invalid-color-value"
-	cfg.Critique.Theme.Colors.Accent = "#89b4fa"                  // Valid
+	cfg.Critique.Theme.Colors.Accent = "#89b4fa"                      // Valid
 	cfg.Critique.Theme.Colors.DiffAddBG = "rgba(166, 227, 161, 0.20)" // Valid
 
 	err := Validate(cfg)
@@ -491,9 +491,3 @@ func TestCIValidation(t *testing.T) {
 		t.Fatalf("expected valid forgejo runner config to pass, got: %v", err)
 	}
 }
-
-
-
-
-
-

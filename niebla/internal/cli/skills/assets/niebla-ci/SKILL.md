@@ -193,3 +193,4 @@ jobs:
 * **How do I inspect check runs for a CL?**
   * In the Cotejo Web UI: Open `http://127.0.0.1:7331/cl/<id>` to view check run badges and log output links.
   * Via REST API: `curl http://127.0.0.1:7331/api/v1/ci/status?cl_id=<id>&patchset=<n>`.
+

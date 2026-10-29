@@ -8,9 +8,9 @@ import (
 
 // ItemInfo describes a remote or local stored backup item.
 type ItemInfo struct {
-	Name      string    `json:"name"`
-	Size      int64     `json:"size"`
-	ModTime   time.Time `json:"mod_time"`
+	Name    string    `json:"name"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mod_time"`
 }
 
 // StorageDriver defines the common interface for backup storage destinations.

@@ -736,5 +736,3 @@ func (d *DB) CountApprovals(ctx context.Context, clID int64) (int, error) {
 	}
 	return count, nil
 }
-
-

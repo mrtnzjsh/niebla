@@ -274,18 +274,18 @@ func Validate(cfg *Config) error {
 
 	// 5. Custom Color Hex validation
 	colorFields := map[string]string{
-		"critique.theme.colors.bg_canvas":        theme.Colors.BGCanvas,
-		"critique.theme.colors.bg_surface":       theme.Colors.BGSurface,
-		"critique.theme.colors.bg_card":          theme.Colors.BGCard,
-		"critique.theme.colors.border":           theme.Colors.Border,
-		"critique.theme.colors.text_primary":     theme.Colors.TextPrimary,
-		"critique.theme.colors.text_muted":       theme.Colors.TextMuted,
-		"critique.theme.colors.accent":           theme.Colors.Accent,
-		"critique.theme.colors.diff_add_bg":      theme.Colors.DiffAddBG,
-		"critique.theme.colors.diff_add_border":  theme.Colors.DiffAddBorder,
-		"critique.theme.colors.diff_del_bg":      theme.Colors.DiffDelBG,
-		"critique.theme.colors.diff_del_border":  theme.Colors.DiffDelBorder,
-		"critique.theme.colors.diff_mod_left_bg": theme.Colors.DiffModLeftBG,
+		"critique.theme.colors.bg_canvas":         theme.Colors.BGCanvas,
+		"critique.theme.colors.bg_surface":        theme.Colors.BGSurface,
+		"critique.theme.colors.bg_card":           theme.Colors.BGCard,
+		"critique.theme.colors.border":            theme.Colors.Border,
+		"critique.theme.colors.text_primary":      theme.Colors.TextPrimary,
+		"critique.theme.colors.text_muted":        theme.Colors.TextMuted,
+		"critique.theme.colors.accent":            theme.Colors.Accent,
+		"critique.theme.colors.diff_add_bg":       theme.Colors.DiffAddBG,
+		"critique.theme.colors.diff_add_border":   theme.Colors.DiffAddBorder,
+		"critique.theme.colors.diff_del_bg":       theme.Colors.DiffDelBG,
+		"critique.theme.colors.diff_del_border":   theme.Colors.DiffDelBorder,
+		"critique.theme.colors.diff_mod_left_bg":  theme.Colors.DiffModLeftBG,
 		"critique.theme.colors.diff_mod_right_bg": theme.Colors.DiffModRightBG,
 	}
 

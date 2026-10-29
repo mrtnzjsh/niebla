@@ -57,9 +57,9 @@ func TestExpandReviewers(t *testing.T) {
 	// Comma separated with mixed groups, individual users, whitespace, and duplicates
 	inputs := []string{
 		"eve, @team-core, frank",
-		"alice",      // Duplicate (already in @team-core)
-		"  carol  ",  // Whitespace
-		"@unknown",   // Unresolved group treated as single user "unknown"
+		"alice",     // Duplicate (already in @team-core)
+		"  carol  ", // Whitespace
+		"@unknown",  // Unresolved group treated as single user "unknown"
 	}
 
 	expanded, err := ExpandReviewers(ctx, resolver, inputs)

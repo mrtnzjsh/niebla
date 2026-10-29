@@ -171,9 +171,9 @@ func (n *NextcloudDriver) Download(ctx context.Context, relativePath string) (io
 
 // XML structs for WebDAV PROPFIND responses
 type propfindResponse struct {
-	XMLName   xml.Name `xml:"response"`
-	Href      string   `xml:"href"`
-	PropStat  propStat `xml:"propstat"`
+	XMLName  xml.Name `xml:"response"`
+	Href     string   `xml:"href"`
+	PropStat propStat `xml:"propstat"`
 }
 
 type propStat struct {
@@ -181,8 +181,8 @@ type propStat struct {
 }
 
 type prop struct {
-	GetContentLength int64  `xml:"getcontentlength"`
-	GetLastModified  string `xml:"getlastmodified"`
+	GetContentLength int64   `xml:"getcontentlength"`
+	GetLastModified  string  `xml:"getlastmodified"`
 	ResourceType     resType `xml:"resourcetype"`
 }
 

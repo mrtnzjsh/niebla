@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"niebla/pkg/tree"
 	"github.com/jackc/pgx/v5"
+	"niebla/pkg/tree"
 )
 
 // ErrNotFound is returned when a requested record is not found in the database.
@@ -515,4 +515,3 @@ func (d *DB) RecordRebaseEvent(ctx context.Context, clID, parentCL int64, trigge
 	}
 	return nil
 }
-

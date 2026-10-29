@@ -166,10 +166,11 @@ func (d *DB) GetLatestPatchsetNumber(ctx context.Context, clID int64) (int, erro
 
 // AreCheckRunsGreen determines if all check runs for a CL patchset have completed successfully.
 // Returns:
-//   green: true if total > 0 and pending == 0 and failed == 0.
-//   total: total number of check runs recorded for this patchset.
-//   pending: count of runs currently in 'queued' or 'running'.
-//   failed: count of runs in 'failed', 'canceled', or 'cancelled'.
+//
+//	green: true if total > 0 and pending == 0 and failed == 0.
+//	total: total number of check runs recorded for this patchset.
+//	pending: count of runs currently in 'queued' or 'running'.
+//	failed: count of runs in 'failed', 'canceled', or 'cancelled'.
 func (d *DB) AreCheckRunsGreen(ctx context.Context, clID int64, patchsetNumber int) (green bool, total int, pending int, failed int, err error) {
 	runs, err := d.ListCheckRunsForPatchset(ctx, clID, patchsetNumber)
 	if err != nil {

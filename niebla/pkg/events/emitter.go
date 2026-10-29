@@ -228,4 +228,4 @@ type noopSinkAdapter struct{}
 
 func (n *noopSinkAdapter) Name() string                              { return "noop" }
 func (n *noopSinkAdapter) Send(ctx context.Context, evt Event) error { return nil }
-func (n *noopSinkAdapter) Close() error                             { return nil }
+func (n *noopSinkAdapter) Close() error                              { return nil }

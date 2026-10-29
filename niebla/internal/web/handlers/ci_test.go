@@ -197,4 +197,3 @@ func TestSubmitCL_CheckRunsGateInCotejo(t *testing.T) {
 		t.Fatalf("expected 303 See Other when check run is passed, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
-

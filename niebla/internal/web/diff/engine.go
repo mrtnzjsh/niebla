@@ -11,12 +11,12 @@ import (
 	"strings"
 	"sync"
 
-	"niebla/pkg/tree"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/sergi/go-diff/diffmatchpatch"
+	"niebla/pkg/tree"
 )
 
 // LineType classifies a diff line in the side-by-side view.

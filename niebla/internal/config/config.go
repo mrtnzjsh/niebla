@@ -196,7 +196,7 @@ type CritiqueConfig struct {
 	RequiredApprovals                 *int                `toml:"required_approvals,omitempty"`
 	AllowSubmitWithUnresolvedComments *bool               `toml:"allow_submit_with_unresolved_comments,omitempty"`
 	RequireGreenCheckRuns             *bool               `toml:"require_green_check_runs,omitempty"`
-	Auth                              CritiqueAuthConfig `toml:"auth"`
+	Auth                              CritiqueAuthConfig  `toml:"auth"`
 	Groups                            CritiqueGroupConfig `toml:"groups"`
 	Theme                             ThemeConfig         `toml:"theme"`
 }
@@ -231,7 +231,6 @@ func (c *CritiqueConfig) GetRequireGreenCheckRuns() bool {
 	}
 	return false
 }
-
 
 // ThemeConfig governs the UI visual appearance and Chroma syntax highlighting.
 type ThemeConfig struct {
@@ -444,4 +443,3 @@ func (a *CIAuthConfig) ResolvePassword() string {
 	}
 	return ""
 }
-

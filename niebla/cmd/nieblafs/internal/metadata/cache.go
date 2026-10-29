@@ -16,10 +16,10 @@ func NewMetadataCache() *MetadataCache {
 }
 
 type Metadata struct {
-	Name     string
-	Mode     uint32
-	ByteSize int64
-	BlobSHA256 string
+	Name        string
+	Mode        uint32
+	ByteSize    int64
+	BlobSHA256  string
 	SubTreeHash string
 }
 

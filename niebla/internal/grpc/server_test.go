@@ -13,8 +13,8 @@ import (
 	"niebla/internal/config"
 	"niebla/internal/db"
 	"niebla/pkg/cas"
-	"niebla/pkg/tree"
 	nieblav1 "niebla/pkg/proto/nieblav1"
+	"niebla/pkg/tree"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -147,9 +147,9 @@ func TestNieblaServiceEndToEnd(t *testing.T) {
 
 	// 2. Test CreateWorkspace
 	wsResp, err := client.CreateWorkspace(ctx, &nieblav1.CreateWorkspaceRequest{
-		Name:    "my-workspace",
-		Owner:   "eng-user",
-		BaseCl:  0, // Should resolve to head CL 1
+		Name:   "my-workspace",
+		Owner:  "eng-user",
+		BaseCl: 0, // Should resolve to head CL 1
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkspace failed: %v", err)
@@ -441,4 +441,3 @@ func TestNieblaServiceEndToEnd(t *testing.T) {
 func errorsIsEOF(err error) bool {
 	return err == io.EOF
 }
-

@@ -16,7 +16,7 @@ import (
 
 var (
 	demoCommentsMu    sync.RWMutex
-	demoCommentsStore = make(map[string][]db.Comment)
+	demoCommentsStore       = make(map[string][]db.Comment)
 	nextCommentID     int64 = 100
 )
 

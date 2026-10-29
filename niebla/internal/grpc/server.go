@@ -685,4 +685,3 @@ func (s *Server) SyncCL(ctx context.Context, req *nieblav1.SyncCLRequest) (*nieb
 func (s *Server) ReportCheckRun(ctx context.Context, run db.CheckRun) (*db.CheckRun, error) {
 	return s.db.UpsertCheckRun(ctx, run)
 }
-
