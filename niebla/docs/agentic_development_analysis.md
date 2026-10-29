@@ -207,9 +207,9 @@ flowchart TD
 - [ ] **P1: Complete FUSE Daemon Loop:** Finish read/lookup loops in [`cmd/nieblafs`](file:///home/matatan/Developer/niebla/niebla/cmd/nieblafs) for environments where FUSE is available.
 
 ### Phase 2: Enterprise Concurrency & Trunk Integrity
-- [ ] **P0: Trunk Submit Queue & Linear Revision Numbers** *(📋 Plan Created: [Commits 1.4–1.5](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L76-L88))* — Implement atomic 3-way merge on submit with sequential trunk revisions ($r1, r2, \dots$) and advisory locking.
+- [x] **P0: Trunk Submit Queue & Linear Revision Numbers** *(✅ Completed: [Commits 1.4–1.5](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L74-L85))* — Implement atomic 3-way merge on submit with sequential trunk revisions ($r1, r2, \dots$) and advisory locking.
 - [ ] **P1: Asynchronous Cascading Rebases:** Transition stack re-parenting to background queue with on-demand sync-through for child CLs.
-- [ ] **P2: CAS Binary Tree Manifests** *(📋 Plan Created: [Commits 1.2–1.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L66-L74))* — Migrate directory storage from row-per-entry `tree_nodes` to serialized binary/Protobuf manifests.
+- [x] **P2: CAS Binary Tree Manifests** *(✅ Completed: [Commits 1.2–1.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L65-L72))* — Migrate directory storage from row-per-entry `tree_nodes` to serialized binary/Protobuf manifests.
 - [ ] **P2: Cotejo Inbox Segregation:** Add separate inbox views for human reviews vs. agent-generated changelists.
 
 ### Phase 3: Future Updates (Submit Hooks & Review Agent Framework)

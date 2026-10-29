@@ -84,7 +84,7 @@ flowchart TD
   - **Conflicting Concurrent Submit Test:** 2 goroutines editing the same file -> 1 succeeds, 1 fails with `FailedPrecondition` and marks `needs_rebase = true`.
 
 ### Commit 1.6: `docs(skills): update niebla skill with trunk_revision and atomic 3-way submit semantics`
-- [ ] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to document linear `trunk_revision` ($r1, r2, \dots$) vs. `cl_id` and automatic 3-way trunk merges during `niebla submit`.
+- [x] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to document linear `trunk_revision` ($r1, r2, \dots$) vs. `cl_id` and automatic 3-way trunk merges during `niebla submit`.
 
 ---
 
