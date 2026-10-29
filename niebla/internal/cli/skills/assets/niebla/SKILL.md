@@ -15,28 +15,35 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 ## 1. Core Principles for AI Agents
 
 1. **Strictly No Git:** Do NOT use `git checkout`, `git add`, `git commit`, `git push`, or `git status`. All version control operations MUST be performed via `niebla`.
-2. **Virtual Workspace Mounts:** Workspaces live in `/niebla/workspaces/<name>`. Multiple workspaces run side-by-side concurrently without switching branches in-place.
-3. **Copy-on-Write (CoW) Scratch:** Edits made inside `/niebla/workspaces/<name>` are stored in the local scratch overlay (`/scratch/niebla/workspaces/<name>`).
-4. **Automatic Workspace Detection:** Running `niebla` commands inside a workspace directory automatically detects the active workspace via `$PWD`. When running from outside, specify `--workspace <name>`.
-5. **Code Review with Cotejo:** Code reviews and changelist inspections are conducted in Cotejo (`http://127.0.0.1:7331` or configured port), featuring side-by-side diffs, patchset history, and multi-line code block comments.
+2. **Virtual Workspace Mounts & `--no-fuse` Mode:** Workspaces live in `/niebla/workspaces/<name>`. Multiple workspaces run side-by-side concurrently without switching branches in-place. In unprivileged containers or environments without `/dev/fuse`, pass `--no-fuse` to materialize the workspace tree directly to disk.
+3. **Copy-on-Write (CoW) Scratch & `.nieblaignore`:** Edits made inside `/niebla/workspaces/<name>` are stored in the local scratch overlay (`/scratch/niebla/workspaces/<name>`). Place a `.nieblaignore` file in the workspace root to exclude build artifacts (`node_modules/`, `build/`, `*.o`, with `!negation` support) from `status`, `diff`, and `shelve`.
+4. **Machine-Readable `--json` Contracts:** AI agents should pass `--json` to `status`, `shelve`, `submit`, `sync`, `export`, and `workspace` commands for deterministic JSON output.
+5. **Automatic Workspace Detection:** Running `niebla` commands inside a workspace directory automatically detects the active workspace via `$PWD`. When running from outside, specify `--workspace <name>`.
+6. **Code Review with Cotejo:** Code reviews and changelist inspections are conducted in Cotejo (`http://127.0.0.1:7331` or configured port), featuring side-by-side diffs, patchset history, and multi-line code block comments.
 
 ---
 
 ## 2. Command Reference
 
-### Workspace Lifecycle
+### Workspace Lifecycle & Stateless Export
 
-* **Create a workspace:**
+* **Create a workspace (FUSE or FUSE-less):**
   ```bash
-  niebla workspace create <name> [--cl <base_cl>] [--mount-dir <path>]
+  niebla workspace create <name> [--cl <base_cl>] [--mount-dir <path>] [--no-fuse] [--json]
   ```
-  Creates a workspace on the server (bound to head CL by default or `--cl <id>`), provisions scratch and cache directories, and mounts the virtual filesystem at `/niebla/workspaces/<name>`.
+  Creates a workspace on the server (bound to head CL by default or `--cl <id>`). By default, mounts the `nieblafs` virtual filesystem at `/niebla/workspaces/<name>`. When `--no-fuse` is set, materializes the base CL Merkle tree directly into the mount directory without requiring `/dev/fuse`.
+
+* **Stateless tree materialization (`niebla export`):**
+  ```bash
+  niebla export [--cl <id>] [--patchset <n>] --dest <dir> [--cas-dir <path>] [--concurrency <n>] [--json]
+  ```
+  Materializes any changelist (or trunk head when `--cl` is omitted) directly into `--dest` using a concurrent worker pool (`pkg/materialize`). When `--cas-dir` points to a local CAS directory on the same filesystem, blobs are zero-copy hardlinked (`os.Link`) in milliseconds for ephemeral CI runners.
 
 * **List active workspaces:**
   ```bash
-  niebla workspace list
+  niebla workspace list [--json]
   ```
-  Displays a table of registered workspaces, base changelist revisions, mount paths, and status (`ACTIVE` / `STALE`).
+  Displays registered workspaces, base changelist revisions, mount paths, and status (`ACTIVE`, `ACTIVE (NO-FUSE)`, or `STALE`).
 
 * **Delete a workspace:**
   ```bash
@@ -46,22 +53,22 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 
 ---
 
-### Inspecting Changes
+### Inspecting Changes & `.nieblaignore`
 
 * **Check status:**
   ```bash
-  niebla status [--workspace <name>]
+  niebla status [--workspace <name>] [--json]
   ```
-  Scans the scratch overlay against the base Merkle tree:
-  * `[M]  <path>`: Modified file (exists in base tree, edited in scratch)
-  * `[A]  <path>`: Added file (newly created in scratch)
-  * `[D]  <path>`: Deleted file (marked with overlayfs whiteout or tombstone)
+  Scans the workspace against the base Merkle tree while respecting `.nieblaignore` rules (skipping ignored directories immediately via `filepath.SkipDir`):
+  * `[M]  <path>`: Modified file (exists in base tree with changed SHA-256 or executable mode)
+  * `[A]  <path>`: Added file (newly created in workspace)
+  * `[D]  <path>`: Deleted file (marked with overlayfs whiteout/tombstone in FUSE mode, or removed from disk in `--no-fuse` mode)
 
 * **View unified diff:**
   ```bash
   niebla diff [path] [--workspace <name>]
   ```
-  Compares modified/added/deleted scratch files against base CL blobs fetched from local CAS cache or the `niebla-server` via gRPC `ReadBlob`.
+  Compares modified/added/deleted workspace files against base CL blobs fetched from local CAS cache or the `niebla-server` via gRPC `ReadBlob`.
 
 ---
 
@@ -69,9 +76,9 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 
 * **Shelve pending changes:**
   ```bash
-  niebla shelve -m "<description>" [--reviewers "alice,bob,@backend"] [--on-cl <parent_cl>] [--cl <id>] [--new-cl] [--workspace <name>]
+  niebla shelve -m "<description>" [--reviewers "alice,bob,@backend"] [--on-cl <parent_cl>] [--cl <id>] [--new-cl] [--workspace <name>] [--json]
   ```
-  1. Uploads dirty files to server CAS via `UploadBlob(stream)`.
+  1. Uploads non-ignored dirty files and compact binary Merkle tree manifests (`pkg/tree`) to server CAS via `UploadBlob(stream)`.
   2. Constructs the updated Merkle tree hierarchy and recomputes hashes up to the root.
   3. Calls `ShelveCL` on `niebla-server` to create or update a shelved changelist:
      - If `--cl <id>` or workspace active CL is set, creates patchset $N+1$ on the existing changelist.
@@ -81,7 +88,7 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 
 * **Synchronize workspace with upstream changes:**
   ```bash
-  niebla sync [--workspace <name>] [--dry-run]
+  niebla sync [--workspace <name>] [--dry-run] [--json]
   ```
   Reconciles the local workspace's base tree with the server's latest rebased tree or trunk:
   * **Clean Sync:** If server auto-rebase succeeded without conflict, fast-forwards `root_tree_hash` and re-anchors `nieblafs` FUSE mount with zero file copy.
@@ -90,9 +97,11 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 
 * **Submit changelist to trunk:**
   ```bash
-  niebla submit [--cl <id>] [--workspace <name>] [--force]
+  niebla submit [--cl <id>] [--workspace <name>] [--force] [--json]
   ```
-  Atomically commits the changelist to trunk head:
+  Atomically commits the changelist to trunk head under a transaction-scoped PostgreSQL advisory lock (`pg_advisory_xact_lock`):
+  * **Monotonic Trunk Revisions (`trunk_revision`):** While `cl_id` is allocated when a CL is first shelved, `SubmitCL` assigns a strictly sequential `trunk_revision` ($r1, r2, r3, \dots$) in exact commit order so out-of-order CL submissions never invert trunk head.
+  * **Automatic 3-Way Trunk Merge:** If a CL's `parent_cl` lags behind the current `HeadCL`, `SubmitCL` automatically performs a server-side 3-way Merkle tree merge (`tree.ThreeWayTreeMerge`). Disjoint changes merge cleanly onto trunk head; overlapping file conflicts abort submission with `FailedPrecondition` (`needs_rebase = true`) so the author can run `niebla sync`.
   * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, and no pending rebase conflicts exist (`needs_rebase = false`).
   * **Bypass Guard:** Use `--force` to bypass unresolved comments or missing approvals when urgent trunk submission is required.
 

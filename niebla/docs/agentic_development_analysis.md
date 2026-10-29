@@ -200,10 +200,10 @@ flowchart TD
 > **Active Execution Plan:** Detailed implementation steps, composable package boundaries, and `testcontainers-go` verification suites for the foundational components below are tracked in [`docs/foundation_implementation_plan.md`](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md).
 
 ### Phase 1: Local Ergonomics & Core Robustness (Immediate Priority)
-- [ ] **P0: `.nieblaignore` Support** *(📋 Plan Created: [Commits 2.1–2.2](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L102-L109))* — Add composable `pkg/ignore` matcher and filter in [`ScanScratchChanges`](file:///home/matatan/Developer/niebla/niebla/internal/cli/status.go#L92) to prevent build artifact pollution.
+- [x] **P0: `.nieblaignore` Support** *(✅ Completed: [Commits 2.1–2.2](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L98-L105))* — Add composable `pkg/ignore` matcher and filter in [`ScanScratchChanges`](file:///home/matatan/Developer/niebla/niebla/internal/cli/status.go#L92) to prevent build artifact pollution.
 - [ ] **P0: FUSE Daemon Inode Control Socket:** Add Unix control socket to `nieblafs` to invalidate inode caches upon `niebla sync`.
-- [ ] **P1: Machine-Readable `--json` Contracts** *(📋 Plan Created: [Commit 2.5](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L121-L124))* — Add `--json` flag to `niebla status`, `diff`, `shelve`, `sync`, `export`, and `submit`.
-- [ ] **P1: FUSE-less Direct Materialization Mode** *(📋 Plan Created: [Commits 2.3–2.4](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L111-L119))* — Add `pkg/materialize`, `niebla export`, and `--no-fuse` checkout fallback for containerized agents, CI runners, and macOS human environments.
+- [x] **P1: Machine-Readable `--json` Contracts** *(✅ Completed: [Commit 2.5](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L115-L118))* — Add `--json` flag to `niebla status`, `diff`, `shelve`, `sync`, `export`, and `submit`.
+- [x] **P1: FUSE-less Direct Materialization Mode** *(✅ Completed: [Commits 2.3–2.4](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L106-L114))* — Add `pkg/materialize`, `niebla export`, and `--no-fuse` checkout fallback for containerized agents, CI runners, and macOS human environments.
 - [ ] **P1: Complete FUSE Daemon Loop:** Finish read/lookup loops in [`cmd/nieblafs`](file:///home/matatan/Developer/niebla/niebla/cmd/nieblafs) for environments where FUSE is available.
 
 ### Phase 2: Enterprise Concurrency & Trunk Integrity

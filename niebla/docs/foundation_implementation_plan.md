@@ -117,7 +117,7 @@ flowchart TD
 - [x] Add CLI JSON schema output tests in `internal/cli/json_output_test.go`.
 
 ### Commit 2.6: `docs(skills): update niebla skill with --no-fuse, export, .nieblaignore, and --json`
-- [ ] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to document `workspace create --no-fuse`, `niebla export`, `.nieblaignore`, and `--json` usage for AI agents.
+- [x] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to document `workspace create --no-fuse`, `niebla export`, `.nieblaignore`, and `--json` usage for AI agents.
 
 ---
 
