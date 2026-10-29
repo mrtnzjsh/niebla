@@ -144,8 +144,9 @@ flowchart TD
 
 
 ### Commit 3.4: `feat(ci): implement default local sandbox runner provider`
-- [ ] Implement `pkg/ci/providers/local` using `pkg/materialize` (`HardlinkCAS`) to materialize patchsets into `/tmp/niebla-ci/cl-<id>-ps-<n>/`, execute the configured command with timeout, capture logs to CAS, and report status via `StatusReporter`.
-- [ ] Add unit tests in `pkg/ci/providers/local/local_test.go`.
+- [x] Implement `pkg/ci/providers/local` using `pkg/materialize` (`HardlinkCAS`) to materialize patchsets into `/tmp/niebla-ci/cl-<id>-ps-<n>/`, execute the configured command with timeout, capture logs to CAS, and report status via `StatusReporter`.
+- [x] Add unit tests in `pkg/ci/providers/local/local_test.go`.
+
 
 ### Commit 3.5: `feat(ci): implement forgejo, github, and webhook remote runner providers`
 - [ ] Implement `pkg/ci/providers/forgejo` (workflow dispatch API), `pkg/ci/providers/github` (`repository_dispatch` / `workflow_dispatch` API), and `pkg/ci/providers/webhook` (CloudEvents + auth).
