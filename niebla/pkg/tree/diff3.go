@@ -171,7 +171,8 @@ func reconstructRegion(orig []string, chunks []editChunk, start, end int, fullMo
 	curr := start
 
 	for _, c := range chunks {
-		if c.oEnd <= start || c.oStart >= end {
+		// Include zero-width insertion chunks (c.oStart == start && c.oEnd == end)
+		if !(c.oStart == start && c.oEnd == end) && (c.oEnd <= start || c.oStart >= end) {
 			continue
 		}
 		// Copy unchanged prefix inside the region

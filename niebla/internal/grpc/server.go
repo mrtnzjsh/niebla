@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 
 	"niebla/internal/config"
 	"niebla/internal/db"
@@ -342,10 +343,89 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 		}
 	}
 
-	cl, err := s.db.SubmitCL(ctx, req.ClId)
+	var mergeConflictSummary string
+	cl, err := s.db.SubmitCL(ctx, req.ClId, func(mCtx context.Context, cl *db.Changelist, headCL *db.Changelist) ([]byte, error) {
+		var ancestorTreeHash []byte = tree.EmptyTreeHash
+		if cl.ParentCL != nil && *cl.ParentCL > 0 {
+			if *cl.ParentCL == headCL.CLID {
+				// Fast-path: parent is already current trunk head
+				return cl.RootTreeHash, nil
+			}
+			if parent, pErr := s.db.GetCL(mCtx, *cl.ParentCL); pErr == nil && parent != nil {
+				ancestorTreeHash = parent.RootTreeHash
+			}
+		}
+
+		if bytes.Equal(ancestorTreeHash, headCL.RootTreeHash) {
+			return cl.RootTreeHash, nil
+		}
+
+		fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
+			return s.db.GetTreeEntries(mCtx, treeHash)
+		}
+		readBlob := func(sha []byte) ([]byte, error) {
+			f, _, err := s.casStorage.OpenBlob(sha)
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+			return io.ReadAll(f)
+		}
+		writeBlob := func(data []byte) ([]byte, error) {
+			hashBytes, _, size, storagePath, err := s.casStorage.Put(bytes.NewReader(data))
+			if err != nil {
+				return nil, err
+			}
+			_ = s.db.InsertBlob(mCtx, hashBytes, size, storagePath)
+			return hashBytes, nil
+		}
+		writeTree := func(entries []tree.Entry) ([]byte, error) {
+			treeHash := tree.ComputeTreeHash(entries)
+			if err := s.db.InsertTreeNodes(mCtx, treeHash, entries); err != nil {
+				return nil, err
+			}
+			return treeHash, nil
+		}
+
+		mergedHash, conflicts, mergeErr := tree.ThreeWayTreeMerge(
+			mCtx,
+			ancestorTreeHash,
+			headCL.RootTreeHash,
+			cl.RootTreeHash,
+			fetchTree,
+			readBlob,
+			writeBlob,
+			writeTree,
+			fmt.Sprintf("TRUNK HEAD CL %d", headCL.CLID),
+			fmt.Sprintf("CL %d", cl.CLID),
+		)
+		if mergeErr != nil || len(conflicts) > 0 {
+			var sb strings.Builder
+			for _, c := range conflicts {
+				if c.ConflictHunks > 0 {
+					sb.WriteString(fmt.Sprintf("%s (%d conflict hunks); ", c.Path, c.ConflictHunks))
+				} else {
+					sb.WriteString(fmt.Sprintf("%s (%s); ", c.Path, c.Reason))
+				}
+			}
+			mergeConflictSummary = strings.TrimSuffix(sb.String(), "; ")
+			if mergeConflictSummary == "" && mergeErr != nil {
+				mergeConflictSummary = mergeErr.Error()
+			}
+			return nil, tree.ErrMergeConflict
+		}
+
+		return mergedHash, nil
+	})
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, status.Errorf(codes.NotFound, "changelist %d not found", req.ClId)
+		}
+		if errors.Is(err, tree.ErrMergeConflict) {
+			_ = s.db.MarkCLRebaseConflict(ctx, req.ClId, mergeConflictSummary)
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"cannot submit CL %d: merge conflict with trunk head (%s). Run 'niebla sync' to resolve",
+				req.ClId, mergeConflictSummary)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to submit changelist: %v", err)
 	}

@@ -78,8 +78,8 @@ flowchart TD
 - [x] Add `testcontainers-go` tests in `internal/db/db_test.go` verifying out-of-order CL ID submission (`CL 3` submitted before `CL 2`) assigns `trunk_revision` 2 and 3 in strict commit order.
 
 ### Commit 1.5: `feat(grpc): perform 3-way Merkle tree merge onto trunk head during SubmitCL`
-- [ ] Wire `tree.ThreeWayTreeMerge` into `Server.SubmitCL` in [`internal/grpc/server.go`](file:///home/matatan/Developer/niebla/niebla/internal/grpc/server.go#L296-L356) so submitting a CL whose `parent_cl` lags behind `HeadCL` automatically merges disjoint subtrees onto trunk head, or aborts with `codes.FailedPrecondition` (`needs_rebase = true`) on file conflict.
-- [ ] Add `internal/grpc/submit_concurrency_test.go` (using `testcontainers-go`):
+- [x] Wire `tree.ThreeWayTreeMerge` into `Server.SubmitCL` in [`internal/grpc/server.go`](file:///home/matatan/Developer/niebla/niebla/internal/grpc/server.go#L296-L356) so submitting a CL whose `parent_cl` lags behind `HeadCL` automatically merges disjoint subtrees onto trunk head, or aborts with `codes.FailedPrecondition` (`needs_rebase = true`) on file conflict.
+- [x] Add `internal/grpc/submit_concurrency_test.go` (using `testcontainers-go`):
   - **10-Goroutine Concurrent Submit Race Test:** 10 concurrent goroutines submitting disjoint CLs branched from CL 1 -> all 10 succeed as `r2..r11` with all 10 files present in the final head tree.
   - **Conflicting Concurrent Submit Test:** 2 goroutines editing the same file -> 1 succeeds, 1 fails with `FailedPrecondition` and marks `needs_rebase = true`.
 
