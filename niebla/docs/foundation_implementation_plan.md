@@ -163,4 +163,33 @@ flowchart TD
 - [x] Create [`~/.gemini/config/skills/niebla-config/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla-config/SKILL.md) documenting `~/.config/niebla/config.toml` (`[events]`, `[ci]`, `[resilience]`) and `niebla config validate`.
 - [x] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to cross-reference `niebla ci` commands and the `require_green_to_submit` guard.
 
+---
+
+## Component 4: FUSE Inode Control Socket & Virtual Filesystem Re-Anchoring
+**References:**
+- [Agentic Development Gap 2: FUSE Kernel Cache Staleness on Out-of-Band Sync](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L98-L105)
+- [Agentic Roadmap Phase 1: P0 Inode Control Socket & P1 FUSE Read/Lookup](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L204-L208)
+
+### Commit 4.1: `feat(nieblafs): add control socket server and IPC protocol for inode invalidation`
+- [x] Create standalone `pkg/nieblafs/control` with JSON-over-Unix-socket IPC protocol (`ping`, `reanchor`, `invalidate`, `status`).
+- [x] Extend `cmd/nieblafs/internal/metadata/cache.go` with cache purging, re-anchoring, and per-path invalidation.
+- [x] Add comprehensive unit tests in `pkg/nieblafs/control/control_test.go` and `cmd/nieblafs/internal/metadata/cache_test.go`.
+
+
+### Commit 4.2: `feat(cli): wire socket-based cache invalidation into niebla sync and workspace lifecycle`
+- [ ] Add `SocketPath` to `WorkspaceConfig` and pass `--socket` in `spawnNieblafs`.
+- [ ] Use socket `ping` in `pollMountActive` for sub-millisecond daemon readiness detection.
+- [ ] In `niebla sync`, send `reanchor` to the running `nieblafs` daemon to purge kernel/metadata caches upon tree rebase, and update materialized files directly in `--no-fuse` mode.
+- [ ] Add unit and CLI integration tests in `internal/cli/sync_test.go`.
+
+### Commit 4.3: `feat(nieblafs): complete FUSE mount, lookup, and read loops with CoW scratch overlay`
+- [ ] Wire `bazil.org/fuse/fs.Serve` and mount lifecycle in `cmd/nieblafs/main.go` with signal-safe unmount.
+- [ ] Complete `Root.Lookup` and `File.Read` resolving local CoW scratch files first with fallback to CAS blobs.
+- [ ] Add integration tests in `cmd/nieblafs/test/` verifying file lookup, read, and control socket re-anchoring.
+
+### Commit 4.4: `docs(skills): update niebla skill and roadmap checklists with FUSE control socket`
+- [ ] Update `docs/agentic_development_analysis.md` checklist items for Phase 1 P0 and P1.
+- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded skill documentation.
+
+
 
