@@ -17,6 +17,7 @@ import (
 // Resolver resolves group identifiers into individual usernames.
 type Resolver interface {
 	ResolveGroup(ctx context.Context, group string) ([]string, error)
+	GetUserGroups(ctx context.Context, username string) ([]string, error)
 	IsGroup(candidate string) bool
 }
 
@@ -45,6 +46,10 @@ func NewResolver(cfg config.CritiqueGroupConfig) Resolver {
 type DisabledResolver struct{}
 
 func (d *DisabledResolver) ResolveGroup(ctx context.Context, group string) ([]string, error) {
+	return nil, nil
+}
+
+func (d *DisabledResolver) GetUserGroups(ctx context.Context, username string) ([]string, error) {
 	return nil, nil
 }
 
@@ -87,6 +92,23 @@ func (s *StaticResolver) ResolveGroup(ctx context.Context, group string) ([]stri
 		return members, nil
 	}
 	return nil, nil
+}
+
+func (s *StaticResolver) GetUserGroups(ctx context.Context, username string) ([]string, error) {
+	if s.Groups == nil {
+		return nil, nil
+	}
+	uClean := strings.ToLower(strings.TrimSpace(username))
+	var userGroups []string
+	for grp, members := range s.Groups {
+		for _, m := range members {
+			if strings.ToLower(strings.TrimSpace(m)) == uClean {
+				userGroups = append(userGroups, grp)
+				break
+			}
+		}
+	}
+	return userGroups, nil
 }
 
 // APIResolver queries a remote HTTP API for group member expansion.
@@ -150,6 +172,10 @@ func (a *APIResolver) ResolveGroup(ctx context.Context, group string) ([]string,
 	}
 
 	return data.Members, nil
+}
+
+func (a *APIResolver) GetUserGroups(ctx context.Context, username string) ([]string, error) {
+	return nil, nil
 }
 
 // ExpandReviewers takes raw reviewer input strings (e.g. "alice, bob, @backend"),

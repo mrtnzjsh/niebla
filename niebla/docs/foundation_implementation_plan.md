@@ -205,9 +205,9 @@ flowchart TD
 - [x] Add unit tests for author pattern classification and review queries in `internal/config/` and `internal/db/`.
 
 ### Commit 5.2: `feat(web): partition Cotejo changelist inbox into segregated tabs`
-- [ ] Update `CLHandler.HandleIndex` to classify and filter changelists into `My Reviews`, `Out for Review`, `Agent / Automated`, and `Submitted / Trunk`.
-- [ ] Update `internal/web/views/cl_list.templ` with tab navigation bar, badge counts, agent indicators, and empty states.
-- [ ] Run `templ generate` and add HTTP handler tests in `internal/web/handlers/` verifying tab filtering and HTMX swaps.
+- [x] Update `CLHandler.HandleIndex` to classify and filter changelists into `My Reviews`, `Out for Review`, `Agent / Automated`, and `Submitted / Trunk`.
+- [x] Update `internal/web/views/cl_list.templ` with tab navigation bar, badge counts, agent indicators, and empty states.
+- [x] Run `templ generate` and add HTTP handler tests in `internal/web/handlers/` verifying tab filtering and HTMX swaps.
 
 ### Commit 5.3: `test(web): add testcontainers integration suite for Cotejo inbox segregation`
 - [ ] Add PostgreSQL testcontainer integration test in `internal/web/handlers/` validating end-to-end inbox segregation across human, reviewer group, and agent CLs.

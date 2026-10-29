@@ -2,75 +2,226 @@ package views
 
 import (
 	"fmt"
-	"niebla/internal/db"
 )
 
-templ CLList(cls []db.Changelist) {
+templ CLList(data InboxViewData) {
 	@Layout("Changelists") {
-		<div class="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
-			<!-- Header -->
-			<div class="flex items-center justify-between pb-6 border-b border-slate-800">
-				<div>
-					<h1 class="text-2xl font-bold text-white tracking-tight">Active Changelists</h1>
-					<p class="text-xs text-slate-400 mt-1">Review pending, shelved, and submitted CLs in Niebla.</p>
-				</div>
-				<div class="text-xs text-slate-500 font-mono">
-					{ fmt.Sprintf("%d total CL%s", len(cls), pluralS(len(cls))) }
-				</div>
-			</div>
+		<div class="flex-1 max-w-6xl w-full mx-auto px-6 py-8" id="inbox-container">
+			@InboxContent(data)
+		</div>
+	}
+}
 
-			<!-- Table -->
-			<div class="mt-6 rounded-xl border border-slate-800 bg-[#0d1424] overflow-hidden shadow-xl">
-				<table class="w-full text-left font-sans text-xs">
-					<thead class="bg-slate-900/90 text-slate-400 border-b border-slate-800 uppercase text-[11px] font-mono">
-						<tr>
-							<th class="w-24 px-4 py-3">CL ID</th>
-							<th class="px-4 py-3">Description</th>
-							<th class="w-36 px-4 py-3">Author</th>
-							<th class="w-28 px-4 py-3 text-center">Status</th>
-							<th class="w-40 px-4 py-3 text-right">Committed</th>
-						</tr>
-					</thead>
-					<tbody class="divide-y divide-slate-800/60 font-mono text-xs">
-						for _, cl := range cls {
-							<tr class="hover:bg-slate-800/50 transition">
-								<td class="px-4 py-3 font-bold">
-									<a href={ templ.SafeURL(fmt.Sprintf("/cl/%d", cl.CLID)) } class="text-sky-400 hover:text-sky-300">
-										{ fmt.Sprintf("CL %d", cl.CLID) }
-									</a>
-								</td>
-								<td class="px-4 py-3 font-sans font-medium text-slate-200">
+templ InboxContent(data InboxViewData) {
+	<!-- Header -->
+	<div class="flex items-center justify-between pb-6 border-b border-slate-800">
+		<div>
+			<h1 class="text-2xl font-bold text-white tracking-tight">Cotejo Review Inbox</h1>
+			<p class="text-xs text-slate-400 mt-1">
+				Logged in as <span class="font-mono text-sky-400 font-semibold">{ data.CurrentUserName }</span>. Segregated review queues protect human attention from automated agent noise.
+			</p>
+		</div>
+		<div class="text-xs text-slate-500 font-mono">
+			{ fmt.Sprintf("%d changelist%s displayed", len(data.Changelists), pluralS(len(data.Changelists))) }
+		</div>
+	</div>
+
+	<!-- Navigation Tabs -->
+	<div class="mt-6 flex items-center space-x-1 border-b border-slate-800 text-xs font-medium">
+		<a
+			href="/?tab=my-reviews"
+			hx-get="/?tab=my-reviews"
+			hx-target="#inbox-container"
+			hx-push-url="true"
+			class={ "flex items-center space-x-2 px-4 py-3 border-b-2 transition -mb-px",
+				templ.KV("border-sky-500 text-sky-400 font-semibold bg-sky-950/20", data.ActiveTab == "my-reviews"),
+				templ.KV("border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700", data.ActiveTab != "my-reviews") }
+		>
+			<span>My Review Queue</span>
+			if data.Counts.MyReviews > 0 {
+				<span class="px-1.5 py-0.5 rounded-full text-[10px] bg-sky-500/20 text-sky-300 font-mono">
+					{ fmt.Sprint(data.Counts.MyReviews) }
+				</span>
+			}
+		</a>
+
+		<a
+			href="/?tab=outgoing"
+			hx-get="/?tab=outgoing"
+			hx-target="#inbox-container"
+			hx-push-url="true"
+			class={ "flex items-center space-x-2 px-4 py-3 border-b-2 transition -mb-px",
+				templ.KV("border-sky-500 text-sky-400 font-semibold bg-sky-950/20", data.ActiveTab == "outgoing"),
+				templ.KV("border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700", data.ActiveTab != "outgoing") }
+		>
+			<span>Out for Review</span>
+			if data.Counts.Outgoing > 0 {
+				<span class="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
+					{ fmt.Sprint(data.Counts.Outgoing) }
+				</span>
+			}
+		</a>
+
+		<a
+			href="/?tab=agents"
+			hx-get="/?tab=agents"
+			hx-target="#inbox-container"
+			hx-push-url="true"
+			class={ "flex items-center space-x-2 px-4 py-3 border-b-2 transition -mb-px",
+				templ.KV("border-indigo-500 text-indigo-400 font-semibold bg-indigo-950/20", data.ActiveTab == "agents"),
+				templ.KV("border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700", data.ActiveTab != "agents") }
+		>
+			<span class="flex items-center space-x-1.5">
+				<span>🤖</span>
+				<span>Agent / Automated</span>
+			</span>
+			if data.Counts.Agents > 0 {
+				<span class="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-500/20 text-indigo-300 font-mono">
+					{ fmt.Sprint(data.Counts.Agents) }
+				</span>
+			}
+		</a>
+
+		<a
+			href="/?tab=submitted"
+			hx-get="/?tab=submitted"
+			hx-target="#inbox-container"
+			hx-push-url="true"
+			class={ "flex items-center space-x-2 px-4 py-3 border-b-2 transition -mb-px",
+				templ.KV("border-sky-500 text-sky-400 font-semibold bg-sky-950/20", data.ActiveTab == "submitted"),
+				templ.KV("border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700", data.ActiveTab != "submitted") }
+		>
+			<span>Submitted / Trunk</span>
+			if data.Counts.Submitted > 0 {
+				<span class="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-800 text-slate-400 font-mono">
+					{ fmt.Sprint(data.Counts.Submitted) }
+				</span>
+			}
+		</a>
+
+		<a
+			href="/?tab=all"
+			hx-get="/?tab=all"
+			hx-target="#inbox-container"
+			hx-push-url="true"
+			class={ "flex items-center space-x-2 px-4 py-3 border-b-2 transition -mb-px",
+				templ.KV("border-sky-500 text-sky-400 font-semibold bg-sky-950/20", data.ActiveTab == "all"),
+				templ.KV("border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700", data.ActiveTab != "all") }
+		>
+			<span>All</span>
+			<span class="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-800 text-slate-400 font-mono">
+				{ fmt.Sprint(data.Counts.All) }
+			</span>
+		</a>
+	</div>
+
+	<!-- Table / Empty State -->
+	if len(data.Changelists) == 0 {
+		<div class="mt-6 rounded-xl border border-slate-800 bg-[#0d1424] p-12 text-center shadow-xl">
+			<div class="text-3xl mb-3">
+				switch data.ActiveTab {
+					case "my-reviews":
+						<span>🎉</span>
+					case "outgoing":
+						<span>📝</span>
+					case "agents":
+						<span>🤖</span>
+					default:
+						<span>📭</span>
+				}
+			</div>
+			<h3 class="text-base font-semibold text-slate-200">
+				switch data.ActiveTab {
+					case "my-reviews":
+						<span>Your review queue is clear!</span>
+					case "outgoing":
+						<span>No changelists out for review</span>
+					case "agents":
+						<span>No automated agent changelists active</span>
+					case "submitted":
+						<span>No submitted changelists recorded</span>
+					default:
+						<span>No changelists found</span>
+				}
+			</h3>
+			<p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+				switch data.ActiveTab {
+					case "my-reviews":
+						<span>You have no pending code reviews assigned to you or your groups.</span>
+					case "outgoing":
+						<span>You don't have any active changelists. Run <code class="text-slate-400">niebla shelve</code> to create one.</span>
+					case "agents":
+						<span>Automated agent runs, dependency bots, and linter proposals will appear here without flooding your primary queue.</span>
+					default:
+						<span>No changelists match the selected view filter.</span>
+				}
+			</p>
+		</div>
+	} else {
+		<div class="mt-6 rounded-xl border border-slate-800 bg-[#0d1424] overflow-hidden shadow-xl">
+			<table class="w-full text-left font-sans text-xs">
+				<thead class="bg-slate-900/90 text-slate-400 border-b border-slate-800 uppercase text-[11px] font-mono">
+					<tr>
+						<th class="w-24 px-4 py-3">CL ID</th>
+						<th class="px-4 py-3">Description</th>
+						<th class="w-48 px-4 py-3">Author</th>
+						<th class="w-28 px-4 py-3 text-center">Status</th>
+						<th class="w-40 px-4 py-3 text-right">Committed</th>
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-800/60 font-mono text-xs">
+					for _, cl := range data.Changelists {
+						<tr class="hover:bg-slate-800/50 transition">
+							<td class="px-4 py-3 font-bold">
+								<a href={ templ.SafeURL(fmt.Sprintf("/cl/%d", cl.CLID)) } class="text-sky-400 hover:text-sky-300">
+									{ fmt.Sprintf("CL %d", cl.CLID) }
+								</a>
+							</td>
+							<td class="px-4 py-3 font-sans font-medium text-slate-200">
+								<div class="flex items-center space-x-2">
+									if cl.IsAgent {
+										<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 shrink-0">
+											🤖 Agent
+										</span>
+									}
+									if cl.IsReviewer {
+										<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-950 text-sky-300 border border-sky-800 shrink-0">
+											Assigned
+										</span>
+									}
 									<a href={ templ.SafeURL(fmt.Sprintf("/cl/%d", cl.CLID)) } class="hover:text-sky-400 transition line-clamp-1">
 										{ cl.Description }
 									</a>
-								</td>
-								<td class="px-4 py-3 text-slate-400">
-									{ cl.Author }
-								</td>
-								<td class="px-4 py-3 text-center">
-									switch cl.Status {
-										case "submitted":
-											<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-950 text-sky-400 border border-sky-800">
-												Submitted
-											</span>
-										case "shelved":
-											<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-950 text-indigo-400 border border-indigo-800">
-												Shelved
-											</span>
-										default:
-											<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-950 text-amber-400 border border-amber-800">
-												Pending
-											</span>
-									}
-								</td>
-								<td class="px-4 py-3 text-right text-slate-500 text-[11px]">
-									{ cl.CommittedAt.Format("Jan 02, 15:04") }
-								</td>
-							</tr>
-						}
-					</tbody>
-				</table>
-			</div>
+								</div>
+							</td>
+							<td class="px-4 py-3 text-slate-400">
+								<div class="flex items-center space-x-1.5">
+									<span class="truncate">{ cl.Author }</span>
+								</div>
+							</td>
+							<td class="px-4 py-3 text-center">
+								switch cl.Status {
+									case "submitted":
+										<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-950 text-sky-400 border border-sky-800">
+											Submitted
+										</span>
+									case "shelved":
+										<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-950 text-indigo-400 border border-indigo-800">
+											Shelved
+										</span>
+									default:
+										<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-950 text-amber-400 border border-amber-800">
+											Pending
+										</span>
+								}
+							</td>
+							<td class="px-4 py-3 text-right text-slate-500 text-[11px]">
+								{ cl.CommittedAt.Format("Jan 02, 15:04") }
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
 		</div>
 	}
 }

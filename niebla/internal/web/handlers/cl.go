@@ -130,15 +130,19 @@ func (h *CLHandler) resolveReviewer(r *http.Request) string {
 	return auth.CurrentOSUser()
 }
 
-// HandleIndex lists changelists or redirects to latest changelist.
-// GET /
+// HandleIndex lists changelists partitioned into segregated inbox queues.
+// GET / and GET /cls
 func (h *CLHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
+	currentUser := h.resolveReviewer(r)
+
+	var allCLs []db.Changelist
+	assignedCLIDs := make(map[int64]bool)
+
 	if h.db == nil {
-		currentUser := auth.CurrentOSUser()
-		demoCLs := []db.Changelist{
+		allCLs = []db.Changelist{
 			{
 				CLID:        1,
-				Author:      fmt.Sprintf("%s@corp", currentUser),
+				Author:      "alice@corp",
 				Description: "feat(critique): implement fast server-authoritative code review web UI and Myers diff engine",
 				Status:      "shelved",
 				CommittedAt: time.Now().Add(-2 * time.Hour),
@@ -147,23 +151,145 @@ func (h *CLHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 				CLID:        2,
 				Author:      "developer@corp",
 				Description: "cas: optimize chunk streaming and LRU tree node caching",
+				Status:      "shelved",
+				CommittedAt: time.Now().Add(-5 * time.Hour),
+			},
+			{
+				CLID:        3,
+				Author:      "agent/linter-bot",
+				Description: "fix: apply automated gofmt and lint repairs across repository",
+				Status:      "shelved",
+				CommittedAt: time.Now().Add(-1 * time.Hour),
+			},
+			{
+				CLID:        4,
+				Author:      "developer@corp",
+				Description: "resilience: add native ZFS snapshot streaming driver",
 				Status:      "submitted",
 				CommittedAt: time.Now().Add(-24 * time.Hour),
 			},
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = views.CLList(demoCLs).Render(r.Context(), w)
-		return
+
+		demoReviewersMu.RLock()
+		for clID, revs := range demoReviewersStore {
+			for _, rev := range revs {
+				if strings.EqualFold(rev.Reviewer, currentUser) || strings.EqualFold(rev.Reviewer, "@"+currentUser) {
+					assignedCLIDs[clID] = true
+				}
+			}
+		}
+		demoReviewersMu.RUnlock()
+		if len(assignedCLIDs) == 0 {
+			assignedCLIDs[2] = true
+		}
+	} else {
+		cls, err := h.db.ListCLs(r.Context(), 100)
+		if err != nil {
+			log.Printf("error listing changelists: %v", err)
+		}
+		allCLs = cls
+
+		var userGroups []string
+		if h.groups != nil {
+			groups, _ := h.groups.GetUserGroups(r.Context(), currentUser)
+			userGroups = groups
+		}
+		assigned, err := h.db.GetAssignedCLIDsForUser(r.Context(), currentUser, userGroups)
+		if err != nil {
+			log.Printf("error querying assigned CLs for %s: %v", currentUser, err)
+		} else {
+			assignedCLIDs = assigned
+		}
 	}
 
-	cls, err := h.db.ListCLs(r.Context(), 50)
-	if err != nil {
-		log.Printf("error listing changelists: %v", err)
+	// Classify all changelists and compute partition counts
+	var myReviews, outgoing, agents, submitted, all []views.CLRowData
+	counts := views.InboxCounts{
+		All: len(allCLs),
+	}
+
+	isAgentAuthor := func(author string) bool {
+		if h.config != nil {
+			return h.config.Critique.IsAgentAuthor(author)
+		}
+		return config.MatchAgentAuthor(author, config.DefaultAgentAuthorPatterns)
+	}
+
+	for _, cl := range allCLs {
+		isAgent := isAgentAuthor(cl.Author)
+		cleanAuthor := strings.TrimSpace(cl.Author)
+		isAuthor := strings.EqualFold(cleanAuthor, currentUser) ||
+			strings.HasPrefix(strings.ToLower(cleanAuthor), strings.ToLower(currentUser)+"@")
+		isAssigned := assignedCLIDs[cl.CLID]
+
+		row := views.CLRowData{
+			Changelist: cl,
+			IsAgent:    isAgent,
+			IsReviewer: isAssigned,
+		}
+		all = append(all, row)
+
+		if cl.Status == "submitted" {
+			counts.Submitted++
+			submitted = append(submitted, row)
+		} else {
+			if isAgent {
+				counts.Agents++
+				agents = append(agents, row)
+			} else if isAuthor {
+				counts.Outgoing++
+				outgoing = append(outgoing, row)
+			} else if isAssigned || len(assignedCLIDs) == 0 {
+				counts.MyReviews++
+				myReviews = append(myReviews, row)
+			}
+		}
+	}
+
+	// Determine active tab
+	tab := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tab")))
+	if tab == "" {
+		if counts.MyReviews > 0 {
+			tab = "my-reviews"
+		} else if counts.Outgoing > 0 {
+			tab = "outgoing"
+		} else if counts.Agents > 0 {
+			tab = "agents"
+		} else {
+			tab = "all"
+		}
+	}
+
+	var activeRows []views.CLRowData
+	switch tab {
+	case "my-reviews":
+		activeRows = myReviews
+	case "outgoing":
+		activeRows = outgoing
+	case "agents":
+		activeRows = agents
+	case "submitted":
+		activeRows = submitted
+	case "all":
+		activeRows = all
+	default:
+		tab = "all"
+		activeRows = all
+	}
+
+	inboxData := views.InboxViewData{
+		ActiveTab:       tab,
+		Counts:          counts,
+		Changelists:     activeRows,
+		CurrentUserName: currentUser,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.CLList(cls)
-	_ = component.Render(r.Context(), w)
+	if r.Header.Get("HX-Request") == "true" {
+		_ = views.InboxContent(inboxData).Render(r.Context(), w)
+		return
+	}
+	_ = views.CLList(inboxData).Render(r.Context(), w)
 }
 
 // HandleCLView renders the overview and diff for a changelist.
