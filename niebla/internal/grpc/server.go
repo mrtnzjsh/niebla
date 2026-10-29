@@ -73,6 +73,31 @@ func (s *Server) SetToolchainConfig(cfg *config.Config) {
 	s.toolchainConfig = cfg
 }
 
+// getTreeEntries queries tree entries from PostgreSQL, falling back to CAS manifest blobs if uploaded by CLI shelve.
+func (s *Server) getTreeEntries(ctx context.Context, treeHash []byte) ([]tree.Entry, error) {
+	dbEntries, err := s.db.GetTreeEntries(ctx, treeHash)
+	if err != nil {
+		return nil, err
+	}
+	if len(dbEntries) > 0 {
+		return dbEntries, nil
+	}
+	if s.casStorage != nil && s.casStorage.Exists(treeHash) {
+		f, _, openErr := s.casStorage.OpenBlob(treeHash)
+		if openErr == nil {
+			data, readErr := io.ReadAll(f)
+			_ = f.Close()
+			if readErr == nil {
+				if entries, uErr := tree.UnmarshalManifest(data); uErr == nil && len(entries) > 0 {
+					_ = s.db.InsertTreeNodes(ctx, treeHash, entries)
+					return entries, nil
+				}
+			}
+		}
+	}
+	return dbEntries, nil
+}
+
 // GetTree returns all directory entries for a given tree hash, utilizing an LRU cache.
 func (s *Server) GetTree(ctx context.Context, req *nieblav1.GetTreeRequest) (*nieblav1.GetTreeResponse, error) {
 	if len(req.TreeHash) == 0 || bytes.Equal(req.TreeHash, tree.EmptyTreeHash) {
@@ -86,8 +111,8 @@ func (s *Server) GetTree(ctx context.Context, req *nieblav1.GetTreeRequest) (*ni
 		return &nieblav1.GetTreeResponse{Entries: cachedEntries}, nil
 	}
 
-	// Cache miss: fetch from PostgreSQL
-	dbEntries, err := s.db.GetTreeEntries(ctx, req.TreeHash)
+	// Cache miss: fetch from PostgreSQL (or CAS manifest fallback)
+	dbEntries, err := s.getTreeEntries(ctx, req.TreeHash)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to query tree: %v", err)
 	}
@@ -117,16 +142,18 @@ func (s *Server) GetNode(ctx context.Context, req *nieblav1.GetNodeRequest) (*ni
 		return nil, status.Errorf(codes.NotFound, "node %q not found in parent tree %s", req.Name, cacheKey)
 	}
 
-	// Query from PostgreSQL
-	entry, err := s.db.GetNodeEntry(ctx, req.ParentTreeHash, req.Name)
+	// Query from PostgreSQL (or CAS manifest fallback)
+	entries, err := s.getTreeEntries(ctx, req.ParentTreeHash)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "node %q not found in parent tree %s", req.Name, cacheKey)
-		}
 		return nil, status.Errorf(codes.Internal, "failed to query node: %v", err)
 	}
+	for _, e := range entries {
+		if e.Name == req.Name {
+			return e.ToProto(), nil
+		}
+	}
 
-	return entry.ToProto(), nil
+	return nil, status.Errorf(codes.NotFound, "node %q not found in parent tree %s", req.Name, cacheKey)
 }
 
 // ReadBlob streams content chunks directly from partitioned CAS storage to gRPC.
@@ -361,7 +388,7 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 		}
 
 		fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
-			return s.db.GetTreeEntries(mCtx, treeHash)
+			return s.getTreeEntries(mCtx, treeHash)
 		}
 		readBlob := func(sha []byte) ([]byte, error) {
 			f, _, err := s.casStorage.OpenBlob(sha)

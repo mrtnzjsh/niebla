@@ -17,6 +17,7 @@ import (
 
 	"niebla/internal/cli/config"
 	"niebla/internal/cli/skills"
+	"niebla/pkg/materialize"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"github.com/spf13/cobra"
@@ -41,6 +42,7 @@ func NewWorkspaceCmd(rootFlags *RootFlags) *cobra.Command {
 func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 	var baseCL int64
 	var mountDir string
+	var noFuse bool
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -61,7 +63,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			// 1. Call niebla-server CreateWorkspace
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
 
 			conn, client, err := DialGRPC(ctx, serverAddr)
@@ -110,20 +112,30 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 				return fmt.Errorf("failed to create mount directory %s: %w", resolvedMountDir, err)
 			}
 
-			// Check /dev/fuse accessibility
-			checkDevFuse()
-
-			// 3. Spawn nieblafs daemon in background
 			var daemonPID int
-			nieblafsBin, err := findNieblafsBinary()
-			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: nieblafs binary not found in PATH or next to niebla; FUSE daemon not started.\n")
+			if noFuse {
+				// Direct FUSE-less materialization into resolvedMountDir
+				scratchDir = resolvedMountDir
+				fetchTree := makeTreeFetcher(ctx, client)
+				fetchBlob := makeBlobFetcher(client, append([]string{cacheDir}, defaultBlobCacheDirs()...))
+				if _, err := materialize.MaterializeTree(ctx, resp.RootTreeHash, resolvedMountDir, fetchTree, fetchBlob, materialize.Options{}); err != nil {
+					return fmt.Errorf("failed to materialize workspace %q in --no-fuse mode: %w", name, err)
+				}
 			} else {
-				pid, err := spawnNieblafs(nieblafsBin, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr)
+				// Check /dev/fuse accessibility
+				checkDevFuse()
+
+				// 3. Spawn nieblafs daemon in background
+				nieblafsBin, err := findNieblafsBinary()
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to spawn nieblafs daemon: %v\n", err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: nieblafs binary not found in PATH or next to niebla; FUSE daemon not started.\n")
 				} else {
-					daemonPID = pid
+					pid, err := spawnNieblafs(nieblafsBin, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr)
+					if err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to spawn nieblafs daemon: %v\n", err)
+					} else {
+						daemonPID = pid
+					}
 				}
 			}
 
@@ -136,6 +148,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 				MountDir:     resolvedMountDir,
 				ScratchDir:   scratchDir,
 				PID:          daemonPID,
+				NoFuse:       noFuse,
 			}
 
 			if err := mgr.Save(wsConfig); err != nil {
@@ -159,7 +172,9 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "  Tree Hash : %s\n", rootTreeHashHex)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Mount Dir : %s\n", resolvedMountDir)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Scratch   : %s\n", scratchDir)
-			if daemonPID > 0 {
+			if noFuse {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Mode      : NO-FUSE (direct materialization)\n")
+			} else if daemonPID > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Daemon PID: %d\n", daemonPID)
 			}
 
@@ -169,6 +184,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 
 	cmd.Flags().Int64Var(&baseCL, "cl", 0, "Base Changelist ID to branch workspace from (0 = trunk head)")
 	cmd.Flags().StringVar(&mountDir, "mount-dir", "", "Custom mount directory (defaults to /niebla/workspaces/<name>)")
+	cmd.Flags().BoolVar(&noFuse, "no-fuse", false, "Materialize workspace directly to disk without mounting FUSE")
 
 	return cmd
 }
@@ -472,6 +488,15 @@ func unmountWorkspace(mountDir string) error {
 }
 
 func checkWorkspaceStatus(ws *config.WorkspaceConfig) string {
+	if ws.NoFuse {
+		if ws.MountDir != "" {
+			if info, err := os.Stat(ws.MountDir); err == nil && info.IsDir() {
+				return "ACTIVE (NO-FUSE)"
+			}
+		}
+		return "STALE"
+	}
+
 	alive := ws.PID > 0 && isProcessAlive(ws.PID)
 	mounted := isMountPoint(ws.MountDir)
 

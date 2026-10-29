@@ -28,6 +28,7 @@ type WorkspaceConfig struct {
 	ScratchDir   string `json:"scratch_dir"`
 	PID          int    `json:"pid"`
 	ActiveCL     int64  `json:"active_cl,omitempty"`
+	NoFuse       bool   `json:"no_fuse,omitempty"`
 }
 
 // Manager handles reading, writing, and querying workspace configs.

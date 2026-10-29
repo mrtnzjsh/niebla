@@ -108,9 +108,9 @@ flowchart TD
 - [x] Add unit tests in `pkg/materialize/materialize_test.go` testing both hardlink mode (inode sharing from local CAS cache) and standard writable file copy mode with POSIX permissions (`0644` / `0755`).
 
 ### Commit 2.4: `feat(cli): add 'niebla export' and 'workspace create --no-fuse'`
-- [ ] Add `niebla export --cl <id> [--patchset <n>] --dest <dir>` in `internal/cli/export.go` backed by `pkg/materialize`.
-- [ ] Add `--no-fuse` flag to `niebla workspace create` in `internal/cli/workspace.go` for FUSE-less container/macOS checkouts.
-- [ ] Add `testcontainers-go` integration test in `internal/cli/export_integration_test.go` verifying end-to-end workspace creation, `.nieblaignore` filtering on shelve, and `niebla export` byte-for-byte verification.
+- [x] Add `niebla export --cl <id> [--patchset <n>] --dest <dir>` in `internal/cli/export.go` backed by `pkg/materialize`.
+- [x] Add `--no-fuse` flag to `niebla workspace create` in `internal/cli/workspace.go` for FUSE-less container/macOS checkouts.
+- [x] Add `testcontainers-go` integration test in `internal/cli/export_integration_test.go` verifying end-to-end workspace creation, `.nieblaignore` filtering on shelve, and `niebla export` byte-for-byte verification.
 
 ### Commit 2.5: `feat(cli): add global --json flag and machine-readable output contracts`
 - [ ] Add global `--json` flag to `RootFlags` in `internal/cli/root.go` and structured JSON output envelopes for `status`, `shelve`, `submit`, `sync`, and `export`.

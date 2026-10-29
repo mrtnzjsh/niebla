@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -76,8 +78,7 @@ func NewStatusCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			fetchTree := makeTreeFetcher(ctx, client)
-			matcher := loadWorkspaceMatcher(ws)
-			changes, err := ScanScratchChanges(ws.ScratchDir, rootTreeHash, fetchTree, matcher)
+			changes, err := ScanWorkspaceChanges(ws, rootTreeHash, fetchTree)
 			if err != nil {
 				return fmt.Errorf("failed to scan workspace changes: %w", err)
 			}
@@ -106,6 +107,70 @@ func loadWorkspaceMatcher(ws *config.WorkspaceConfig) ignore.Matcher {
 		}
 	}
 	return ignore.NewMatcher()
+}
+
+// ScanWorkspaceChanges scans workspace changes, including missing base files for --no-fuse workspaces.
+func ScanWorkspaceChanges(ws *config.WorkspaceConfig, rootTreeHash []byte, fetchTree tree.FetchTreeFunc) ([]FileChange, error) {
+	matcher := loadWorkspaceMatcher(ws)
+	changes, err := ScanScratchChanges(ws.ScratchDir, rootTreeHash, fetchTree, matcher)
+	if err != nil {
+		return nil, err
+	}
+	if ws == nil || !ws.NoFuse || len(rootTreeHash) == 0 || bytes.Equal(rootTreeHash, tree.EmptyTreeHash) {
+		return changes, nil
+	}
+
+	seen := make(map[string]bool, len(changes))
+	for _, c := range changes {
+		seen[c.Path] = true
+	}
+
+	var walkBase func(treeHash []byte, prefix string) error
+	walkBase = func(treeHash []byte, prefix string) error {
+		if len(treeHash) == 0 || bytes.Equal(treeHash, tree.EmptyTreeHash) {
+			return nil
+		}
+		entries, err := fetchTree(treeHash)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			relPath := entry.Name
+			if prefix != "" {
+				relPath = prefix + "/" + entry.Name
+			}
+			if matcher != nil && matcher.Match(relPath, entry.IsDir()) {
+				continue
+			}
+			if entry.IsDir() {
+				if err := walkBase(entry.SubTreeHash, relPath); err != nil {
+					return err
+				}
+			} else if !seen[relPath] {
+				diskPath := filepath.Join(ws.ScratchDir, filepath.FromSlash(relPath))
+				if _, statErr := os.Stat(diskPath); os.IsNotExist(statErr) {
+					entryCopy := entry
+					changes = append(changes, FileChange{
+						Path:      relPath,
+						Type:      ChangeDeleted,
+						DiskPath:  diskPath,
+						BaseEntry: &entryCopy,
+					})
+					seen[relPath] = true
+				}
+			}
+		}
+		return nil
+	}
+
+	if err := walkBase(rootTreeHash, ""); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(changes, func(i, j int) bool {
+		return changes[i].Path < changes[j].Path
+	})
+	return changes, nil
 }
 
 // ScanScratchChanges inspects scratchDir and compares against rootTreeHash to identify M, A, D files.
@@ -204,6 +269,16 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 		// Regular file in scratch: check if it exists in base tree
 		baseEntry, resolveErr := tree.ResolvePath(rootTreeHash, rel, fetchTree)
 		if resolveErr == nil && baseEntry != nil && !baseEntry.IsDir() {
+			if len(baseEntry.BlobSHA256) == 32 {
+				if data, readErr := os.ReadFile(path); readErr == nil {
+					sum := sha256.Sum256(data)
+					diskExec := (info.Mode() & 0111) != 0
+					baseExec := (baseEntry.Mode & 0111) != 0
+					if bytes.Equal(sum[:], baseEntry.BlobSHA256) && diskExec == baseExec {
+						return nil
+					}
+				}
+			}
 			changeMap[rel] = FileChange{
 				Path:      rel,
 				Type:      ChangeModified,

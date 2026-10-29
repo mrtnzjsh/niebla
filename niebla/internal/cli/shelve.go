@@ -75,7 +75,7 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			fetchTree := makeTreeFetcher(ctx, client)
-			changes, err := ScanScratchChanges(ws.ScratchDir, rootTreeHash, fetchTree, loadWorkspaceMatcher(ws))
+			changes, err := ScanWorkspaceChanges(ws, rootTreeHash, fetchTree)
 			if err != nil {
 				return fmt.Errorf("failed to scan workspace changes: %w", err)
 			}
@@ -98,8 +98,16 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 				uploads[change.Path] = blobInfo
 			}
 
-			// 2. Recompute the Merkle tree hierarchy up to the root
-			newRootTreeHash, err := BuildUpdatedTree(rootTreeHash, changes, uploads, fetchTree)
+			// 2. Recompute the Merkle tree hierarchy up to the root and persist new tree manifests
+			writeTree := func(treeHash []byte, entries []tree.Entry) error {
+				manifest, err := tree.MarshalManifest(entries)
+				if err != nil {
+					return err
+				}
+				_, _, err = uploadBytesToCAS(ctx, client, manifest)
+				return err
+			}
+			newRootTreeHash, err := BuildUpdatedTree(rootTreeHash, changes, uploads, fetchTree, writeTree)
 			if err != nil {
 				return fmt.Errorf("failed to compute updated Merkle tree: %w", err)
 			}
@@ -166,6 +174,31 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 	return cmd
 }
 
+func uploadBytesToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, data []byte) ([]byte, uint64, error) {
+	stream, err := client.UploadBlob(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to open UploadBlob stream: %w", err)
+	}
+
+	chunkSize := cas.DefaultChunkSize
+	for offset := 0; offset < len(data); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		if err := stream.Send(&nieblav1.UploadBlobRequest{Data: data[offset:end]}); err != nil {
+			return nil, 0, fmt.Errorf("failed to send blob chunk: %w", err)
+		}
+	}
+
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to finish UploadBlob: %w", err)
+	}
+
+	return resp.Sha256, resp.Size, nil
+}
+
 func uploadFileToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, diskPath string) (uploadedBlob, error) {
 	data, err := os.ReadFile(diskPath)
 	if err != nil {
@@ -182,30 +215,14 @@ func uploadFileToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, d
 		fileMode = 0100755
 	}
 
-	stream, err := client.UploadBlob(ctx)
+	sha, size, err := uploadBytesToCAS(ctx, client, data)
 	if err != nil {
-		return uploadedBlob{}, fmt.Errorf("failed to open UploadBlob stream: %w", err)
-	}
-
-	chunkSize := cas.DefaultChunkSize
-	for offset := 0; offset < len(data); offset += chunkSize {
-		end := offset + chunkSize
-		if end > len(data) {
-			end = len(data)
-		}
-		if err := stream.Send(&nieblav1.UploadBlobRequest{Data: data[offset:end]}); err != nil {
-			return uploadedBlob{}, fmt.Errorf("failed to send blob chunk: %w", err)
-		}
-	}
-
-	resp, err := stream.CloseAndRecv()
-	if err != nil {
-		return uploadedBlob{}, fmt.Errorf("failed to finish UploadBlob: %w", err)
+		return uploadedBlob{}, err
 	}
 
 	return uploadedBlob{
-		SHA:  resp.Sha256,
-		Size: resp.Size,
+		SHA:  sha,
+		Size: size,
 		Mode: fileMode,
 	}, nil
 }
@@ -223,7 +240,13 @@ func newDirNode() *dirNode {
 }
 
 // BuildUpdatedTree incorporates dirty changes and uploaded blobs into the Merkle tree hierarchy.
-func BuildUpdatedTree(baseRootTreeHash []byte, changes []FileChange, uploads map[string]uploadedBlob, fetchTree tree.FetchTreeFunc) ([]byte, error) {
+func BuildUpdatedTree(
+	baseRootTreeHash []byte,
+	changes []FileChange,
+	uploads map[string]uploadedBlob,
+	fetchTree tree.FetchTreeFunc,
+	writeTrees ...func(treeHash []byte, entries []tree.Entry) error,
+) ([]byte, error) {
 	rootNode := newDirNode()
 
 	for _, c := range changes {
@@ -252,10 +275,20 @@ func BuildUpdatedTree(baseRootTreeHash []byte, changes []FileChange, uploads map
 		}
 	}
 
-	return recursivelyUpdateTree(baseRootTreeHash, rootNode, fetchTree)
+	var writeTree func(treeHash []byte, entries []tree.Entry) error
+	if len(writeTrees) > 0 {
+		writeTree = writeTrees[0]
+	}
+
+	return recursivelyUpdateTree(baseRootTreeHash, rootNode, fetchTree, writeTree)
 }
 
-func recursivelyUpdateTree(currentTreeHash []byte, mod *dirNode, fetchTree tree.FetchTreeFunc) ([]byte, error) {
+func recursivelyUpdateTree(
+	currentTreeHash []byte,
+	mod *dirNode,
+	fetchTree tree.FetchTreeFunc,
+	writeTree func(treeHash []byte, entries []tree.Entry) error,
+) ([]byte, error) {
 	entryMap := make(map[string]tree.Entry)
 
 	// 1. Fetch base entries if tree is not empty
@@ -287,7 +320,7 @@ func recursivelyUpdateTree(currentTreeHash []byte, mod *dirNode, fetchTree tree.
 			subBaseHash = tree.EmptyTreeHash
 		}
 
-		newSubHash, err := recursivelyUpdateTree(subBaseHash, subMod, fetchTree)
+		newSubHash, err := recursivelyUpdateTree(subBaseHash, subMod, fetchTree, writeTree)
 		if err != nil {
 			return nil, err
 		}
@@ -314,7 +347,13 @@ func recursivelyUpdateTree(currentTreeHash []byte, mod *dirNode, fetchTree tree.
 	}
 
 	tree.SortEntries(entries)
-	return tree.ComputeTreeHash(entries), nil
+	treeHash := tree.ComputeTreeHash(entries)
+	if writeTree != nil {
+		if err := writeTree(treeHash, entries); err != nil {
+			return nil, fmt.Errorf("failed to persist tree manifest %x: %w", treeHash, err)
+		}
+	}
+	return treeHash, nil
 }
 
 func computeSHA256(b []byte) []byte {
