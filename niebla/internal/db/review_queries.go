@@ -723,6 +723,41 @@ func (d *DB) CountUnresolvedComments(ctx context.Context, clID int64) (int, erro
 	return count, nil
 }
 
+// GetAssignedCLIDsForUser returns a set of changelist IDs where the user or any of their groups is assigned as a reviewer.
+func (d *DB) GetAssignedCLIDsForUser(ctx context.Context, username string, groupNames []string) (map[int64]bool, error) {
+	targets := []string{username}
+	for _, g := range groupNames {
+		g = strings.TrimSpace(g)
+		if g != "" {
+			if !strings.HasPrefix(g, "@") {
+				targets = append(targets, "@"+g)
+			}
+			targets = append(targets, g)
+		}
+	}
+
+	query := `
+		SELECT DISTINCT cl_id
+		FROM cl_reviewers
+		WHERE reviewer = ANY($1);
+	`
+	rows, err := d.pool.Query(ctx, query, targets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query assigned CLs: %w", err)
+	}
+	defer rows.Close()
+
+	clIDs := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		clIDs[id] = true
+	}
+	return clIDs, rows.Err()
+}
+
 // CountApprovals returns the number of reviewers who have granted an approval ("lgtm" or "approved") on a changelist.
 func (d *DB) CountApprovals(ctx context.Context, clID int64) (int, error) {
 	query := `

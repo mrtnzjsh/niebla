@@ -192,4 +192,30 @@ flowchart TD
 - [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded skill documentation.
 
 
+---
+
+## Component 5: Cotejo Review Inbox Segregation & Agent Activity Streaming (Phase 2 P2)
+**References:**
+- [Agentic Analysis §2.4: Code Review Workflow & Protecting the Human Review Inbox](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L170-L180)
+- [Agentic Roadmap Phase 2: P2 Cotejo Inbox Segregation](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L213)
+
+### Commit 5.1: `feat(config,db): add agent author classification and reviewer CL query`
+- [x] Add `AgentAuthorPatterns []string` to `CritiqueConfig` in `internal/config/config.go` with defaults (`agent/*`, `bot/*`, `*[bot]`, `*@agent*`, `ci/*`, `system`) and helper `IsAgentAuthor(author string) bool`.
+- [x] Add `GetAssignedCLIDsForUser(ctx context.Context, username string, groupNames []string) (map[int64]bool, error)` in `internal/db/review_queries.go`.
+- [x] Add unit tests for author pattern classification and review queries in `internal/config/` and `internal/db/`.
+
+### Commit 5.2: `feat(web): partition Cotejo changelist inbox into segregated tabs`
+- [ ] Update `CLHandler.HandleIndex` to classify and filter changelists into `My Reviews`, `Out for Review`, `Agent / Automated`, and `Submitted / Trunk`.
+- [ ] Update `internal/web/views/cl_list.templ` with tab navigation bar, badge counts, agent indicators, and empty states.
+- [ ] Run `templ generate` and add HTTP handler tests in `internal/web/handlers/` verifying tab filtering and HTMX swaps.
+
+### Commit 5.3: `test(web): add testcontainers integration suite for Cotejo inbox segregation`
+- [ ] Add PostgreSQL testcontainer integration test in `internal/web/handlers/` validating end-to-end inbox segregation across human, reviewer group, and agent CLs.
+
+### Commit 5.4: `docs(skills): update niebla skill and roadmap checklists with Cotejo inbox segregation`
+- [ ] Update `docs/agentic_development_analysis.md` marking Phase 2 P2 Cotejo Inbox Segregation as complete.
+- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting Cotejo inbox tabs.
+
+
+
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -196,9 +197,77 @@ type CritiqueConfig struct {
 	RequiredApprovals                 *int                `toml:"required_approvals,omitempty"`
 	AllowSubmitWithUnresolvedComments *bool               `toml:"allow_submit_with_unresolved_comments,omitempty"`
 	RequireGreenCheckRuns             *bool               `toml:"require_green_check_runs,omitempty"`
+	AgentAuthorPatterns               []string            `toml:"agent_author_patterns,omitempty"`
 	Auth                              CritiqueAuthConfig  `toml:"auth"`
 	Groups                            CritiqueGroupConfig `toml:"groups"`
 	Theme                             ThemeConfig         `toml:"theme"`
+}
+
+// DefaultAgentAuthorPatterns defines the default author patterns classified as automated agents.
+var DefaultAgentAuthorPatterns = []string{
+	"agent/*",
+	"bot/*",
+	"*[bot]",
+	"*@agent*",
+	"ci/*",
+	"system",
+}
+
+// GetAgentAuthorPatterns returns the configured agent author patterns or defaults.
+func (c *CritiqueConfig) GetAgentAuthorPatterns() []string {
+	if len(c.AgentAuthorPatterns) > 0 {
+		return c.AgentAuthorPatterns
+	}
+	return DefaultAgentAuthorPatterns
+}
+
+// IsAgentAuthor returns whether the given author name matches agent author patterns.
+func (c *CritiqueConfig) IsAgentAuthor(author string) bool {
+	return MatchAgentAuthor(author, c.GetAgentAuthorPatterns())
+}
+
+// MatchAgentAuthor tests author against a list of agent patterns (supporting prefixes like 'agent/*',
+// suffixes like '*[bot]', wildcards like '*@agent*', or exact names).
+func MatchAgentAuthor(author string, patterns []string) bool {
+	authorLower := strings.ToLower(strings.TrimSpace(author))
+	if authorLower == "" {
+		return false
+	}
+	for _, p := range patterns {
+		pLower := strings.ToLower(strings.TrimSpace(p))
+		if pLower == "" {
+			continue
+		}
+		if pLower == authorLower {
+			return true
+		}
+		if strings.HasSuffix(pLower, "/*") {
+			prefix := strings.TrimSuffix(pLower, "*") // "agent/"
+			if strings.HasPrefix(authorLower, prefix) {
+				return true
+			}
+		}
+		if strings.HasPrefix(pLower, "*") && strings.HasSuffix(pLower, "*") {
+			substr := strings.Trim(pLower, "*")
+			if strings.Contains(authorLower, substr) {
+				return true
+			}
+		} else if strings.HasPrefix(pLower, "*") {
+			suffix := strings.TrimPrefix(pLower, "*")
+			if strings.HasSuffix(authorLower, suffix) {
+				return true
+			}
+		} else if strings.HasSuffix(pLower, "*") {
+			prefix := strings.TrimSuffix(pLower, "*")
+			if strings.HasPrefix(authorLower, prefix) {
+				return true
+			}
+		}
+		if matched, err := filepath.Match(pLower, authorLower); err == nil && matched {
+			return true
+		}
+	}
+	return false
 }
 
 // GetRequiredApprovals returns the configured required approvals count,
@@ -276,10 +345,11 @@ func DefaultConfig() *Config {
 			CacheDir:  "$HOME/.cache/niebla/blobs",
 		},
 		Critique: CritiqueConfig{
-			Host:            "0.0.0.0",
-			Port:            8080,
-			ProxyPort:       7331,
-			DefaultReviewer: "$USER",
+			Host:                "0.0.0.0",
+			Port:                8080,
+			ProxyPort:           7331,
+			DefaultReviewer:     "$USER",
+			AgentAuthorPatterns: DefaultAgentAuthorPatterns,
 			Auth: CritiqueAuthConfig{
 				Mode:        "local",
 				DefaultUser: "$USER",
