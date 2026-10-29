@@ -63,8 +63,8 @@ flowchart TD
 - [x] Add unit tests in `pkg/cas/cas_test.go` verifying `Commit()` returns relative paths and blobs remain readable after relocating `baseDir`.
 
 ### Commit 1.2: `feat(tree): add deterministic binary manifest serialization`
-- [ ] Add `MarshalManifest(entries []Entry) ([]byte, error)` and `UnmarshalManifest(data []byte) ([]Entry, error)` in [`pkg/tree/tree.go`](file:///home/matatan/Developer/niebla/niebla/pkg/tree/tree.go).
-- [ ] Add unit tests in `pkg/tree/tree_test.go` verifying deterministic round-trip serialization on empty, single-entry, and 1,000-entry directory trees.
+- [x] Add `MarshalManifest(entries []Entry) ([]byte, error)` and `UnmarshalManifest(data []byte) ([]Entry, error)` in [`pkg/tree/tree.go`](file:///home/matatan/Developer/niebla/niebla/pkg/tree/tree.go).
+- [x] Add unit tests in `pkg/tree/tree_test.go` verifying deterministic round-trip serialization on empty, single-entry, and 1,000-entry directory trees.
 
 ### Commit 1.3: `feat(db): replace row-per-entry tree_nodes with compact trees manifest table`
 - [ ] Replace `tree_nodes` in [`internal/db/migrations/0001_init.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0001_init.sql) with `trees (tree_hash BYTEA PRIMARY KEY, manifest BYTEA NOT NULL, entry_count INT NOT NULL, created_at TIMESTAMPTZ DEFAULT now())`.

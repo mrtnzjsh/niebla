@@ -74,6 +74,18 @@ func ComputeTreeHash(entries []Entry) []byte {
 		return append([]byte(nil), EmptyTreeHash...)
 	}
 
+	manifest, _ := MarshalManifest(entries)
+	h := sha256.Sum256(manifest)
+	return h[:]
+}
+
+// MarshalManifest serializes directory entries into a deterministic, sorted binary manifest.
+// Notice that SHA256(MarshalManifest(entries)) == ComputeTreeHash(entries).
+func MarshalManifest(entries []Entry) ([]byte, error) {
+	if len(entries) == 0 {
+		return []byte{}, nil
+	}
+
 	// Create a copy and sort deterministically by name
 	sorted := make([]Entry, len(entries))
 	copy(sorted, entries)
@@ -81,8 +93,12 @@ func ComputeTreeHash(entries []Entry) []byte {
 
 	var buf bytes.Buffer
 	for _, e := range sorted {
-		// 1. Name: uint16 length + utf-8 bytes
 		nameBytes := []byte(e.Name)
+		if len(nameBytes) > 0xffff {
+			return nil, fmt.Errorf("entry name %q exceeds maximum uint16 length", e.Name)
+		}
+
+		// 1. Name: uint16 length + utf-8 bytes
 		_ = binary.Write(&buf, binary.BigEndian, uint16(len(nameBytes)))
 		buf.Write(nameBytes)
 
@@ -107,8 +123,70 @@ func ComputeTreeHash(entries []Entry) []byte {
 		}
 	}
 
-	h := sha256.Sum256(buf.Bytes())
-	return h[:]
+	return buf.Bytes(), nil
+}
+
+// UnmarshalManifest deserializes a binary directory manifest into sorted Entry structs.
+func UnmarshalManifest(data []byte) ([]Entry, error) {
+	if len(data) == 0 {
+		return []Entry{}, nil
+	}
+
+	r := bytes.NewReader(data)
+	var entries []Entry
+	var zeroHash [32]byte
+
+	for r.Len() > 0 {
+		var nameLen uint16
+		if err := binary.Read(r, binary.BigEndian, &nameLen); err != nil {
+			return nil, fmt.Errorf("corrupt manifest: failed to read entry name length: %w", err)
+		}
+
+		if r.Len() < int(nameLen)+4+8+32+32 {
+			return nil, fmt.Errorf("corrupt manifest: truncated entry payload (need %d bytes, have %d)", int(nameLen)+76, r.Len())
+		}
+
+		nameBytes := make([]byte, nameLen)
+		if _, err := r.Read(nameBytes); err != nil {
+			return nil, fmt.Errorf("corrupt manifest: failed to read entry name: %w", err)
+		}
+
+		var mode uint32
+		if err := binary.Read(r, binary.BigEndian, &mode); err != nil {
+			return nil, fmt.Errorf("corrupt manifest: failed to read mode: %w", err)
+		}
+
+		var size uint64
+		if err := binary.Read(r, binary.BigEndian, &size); err != nil {
+			return nil, fmt.Errorf("corrupt manifest: failed to read size: %w", err)
+		}
+
+		blobHash := make([]byte, 32)
+		if _, err := r.Read(blobHash); err != nil {
+			return nil, fmt.Errorf("corrupt manifest: failed to read blob hash: %w", err)
+		}
+		if bytes.Equal(blobHash, zeroHash[:]) {
+			blobHash = nil
+		}
+
+		subTreeHash := make([]byte, 32)
+		if _, err := r.Read(subTreeHash); err != nil {
+			return nil, fmt.Errorf("corrupt manifest: failed to read subtree hash: %w", err)
+		}
+		if bytes.Equal(subTreeHash, zeroHash[:]) {
+			subTreeHash = nil
+		}
+
+		entries = append(entries, Entry{
+			Name:        string(nameBytes),
+			Mode:        mode,
+			Size:        size,
+			BlobSHA256:  blobHash,
+			SubTreeHash: subTreeHash,
+		})
+	}
+
+	return entries, nil
 }
 
 // FindEntry performs a binary search for an entry with the given name in sorted entries.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"testing"
 )
 
@@ -105,5 +106,89 @@ func TestResolvePath(t *testing.T) {
 	roundTrip := FromProto(protoNode)
 	if roundTrip.Name != nested.Name || roundTrip.Size != nested.Size {
 		t.Errorf("roundtrip proto conversion failed")
+	}
+}
+
+func TestMarshalUnmarshalManifest(t *testing.T) {
+	// 1. Empty manifest
+	emptyData, err := MarshalManifest(nil)
+	if err != nil {
+		t.Fatalf("MarshalManifest(nil) failed: %v", err)
+	}
+	if len(emptyData) != 0 {
+		t.Errorf("expected empty slice for empty manifest, got %d bytes", len(emptyData))
+	}
+	emptyEntries, err := UnmarshalManifest(emptyData)
+	if err != nil || len(emptyEntries) != 0 {
+		t.Fatalf("UnmarshalManifest(empty) failed: %v, len=%d", err, len(emptyEntries))
+	}
+
+	// 2. Single and mixed file/dir entries
+	blobHash := sha256.Sum256([]byte("file content"))
+	subHash := sha256.Sum256([]byte("subtree content"))
+	mixed := []Entry{
+		{Name: "z_dir", Mode: 0040755, Size: 0, SubTreeHash: subHash[:]},
+		{Name: "a_file.go", Mode: 0100644, Size: 1234, BlobSHA256: blobHash[:]},
+	}
+
+	manifestBytes, err := MarshalManifest(mixed)
+	if err != nil {
+		t.Fatalf("MarshalManifest(mixed) failed: %v", err)
+	}
+
+	// Verify SHA256(manifestBytes) matches ComputeTreeHash(mixed)
+	manifestHash := sha256.Sum256(manifestBytes)
+	if !bytes.Equal(manifestHash[:], ComputeTreeHash(mixed)) {
+		t.Errorf("manifest SHA-256 does not match ComputeTreeHash")
+	}
+
+	decoded, err := UnmarshalManifest(manifestBytes)
+	if err != nil {
+		t.Fatalf("UnmarshalManifest(mixed) failed: %v", err)
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(decoded))
+	}
+	// Should be sorted lexicographically
+	if decoded[0].Name != "a_file.go" || decoded[0].Size != 1234 || !bytes.Equal(decoded[0].BlobSHA256, blobHash[:]) || decoded[0].SubTreeHash != nil {
+		t.Errorf("unexpected decoded[0]: %+v", decoded[0])
+	}
+	if decoded[1].Name != "z_dir" || !decoded[1].IsDir() || !bytes.Equal(decoded[1].SubTreeHash, subHash[:]) || decoded[1].BlobSHA256 != nil {
+		t.Errorf("unexpected decoded[1]: %+v", decoded[1])
+	}
+
+	// 3. Large 1,000-entry directory tree round-trip
+	large := make([]Entry, 1000)
+	for i := 0; i < 1000; i++ {
+		h := sha256.Sum256([]byte(fmt.Sprintf("blob-%d", i)))
+		large[i] = Entry{
+			Name:       fmt.Sprintf("file_%04d.txt", 999-i), // intentionally reverse-sorted
+			Mode:       0100644,
+			Size:       uint64(i * 10),
+			BlobSHA256: h[:],
+		}
+	}
+
+	largeManifest, err := MarshalManifest(large)
+	if err != nil {
+		t.Fatalf("MarshalManifest(1000) failed: %v", err)
+	}
+	largeDecoded, err := UnmarshalManifest(largeManifest)
+	if err != nil {
+		t.Fatalf("UnmarshalManifest(1000) failed: %v", err)
+	}
+	if len(largeDecoded) != 1000 {
+		t.Fatalf("expected 1000 decoded entries, got %d", len(largeDecoded))
+	}
+	if largeDecoded[0].Name != "file_0000.txt" || largeDecoded[999].Name != "file_0999.txt" {
+		t.Errorf("expected sorted 1000 entries, got first=%s last=%s", largeDecoded[0].Name, largeDecoded[999].Name)
+	}
+	if !bytes.Equal(ComputeTreeHash(large), ComputeTreeHash(largeDecoded)) {
+		t.Errorf("tree hash mismatch after 1000-entry round-trip")
+	}
+
+	// 4. Truncated / corrupt manifest error handling
+	if _, err := UnmarshalManifest(manifestBytes[:5]); err == nil {
+		t.Errorf("expected error for truncated manifest")
 	}
 }
