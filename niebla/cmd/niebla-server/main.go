@@ -13,9 +13,12 @@ import (
 	"syscall"
 	"time"
 
+	"niebla/internal/config"
 	"niebla/internal/db"
+	internalevents "niebla/internal/events"
 	internalgrpc "niebla/internal/grpc"
 	"niebla/pkg/cas"
+	pkgevents "niebla/pkg/events"
 
 	"google.golang.org/grpc"
 )
@@ -73,6 +76,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create NieblaService server: %v", err)
 	}
+
+	var emitter pkgevents.Emitter
+	if cfg, err := config.Load(); err == nil {
+		repoServer.SetToolchainConfig(cfg)
+		if em, err := internalevents.NewEmitterFromConfig(&cfg.Events); err == nil {
+			emitter = em
+			repoServer.SetEmitter(em)
+		}
+	}
+	if emitter != nil {
+		defer emitter.Close()
+	}
+
 	repoServer.Register(grpcServer)
 
 	// 4. Start network listener

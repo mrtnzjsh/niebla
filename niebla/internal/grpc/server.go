@@ -12,9 +12,11 @@ import (
 
 	"niebla/internal/config"
 	"niebla/internal/db"
+	internalevents "niebla/internal/events"
 	"niebla/pkg/cas"
-	"niebla/pkg/tree"
+	pkgevents "niebla/pkg/events"
 	nieblav1 "niebla/pkg/proto/nieblav1"
+	"niebla/pkg/tree"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/grpc"
@@ -35,6 +37,7 @@ type Server struct {
 	casStorage      *cas.Storage
 	treeCache       *lru.Cache[string, []*nieblav1.NodeEntry]
 	toolchainConfig *config.Config
+	emitter         pkgevents.Emitter
 }
 
 // NewServer creates a new instance of the NieblaService gRPC server.
@@ -55,11 +58,19 @@ func NewServer(database *db.DB, casStorage *cas.Storage, cacheSize int, configs 
 		toolchainCfg = loaded
 	}
 
+	var emitter pkgevents.Emitter = pkgevents.NewNoopEmitter()
+	if toolchainCfg != nil && toolchainCfg.Events.Enabled {
+		if em, err := internalevents.NewEmitterFromConfig(&toolchainCfg.Events); err == nil {
+			emitter = em
+		}
+	}
+
 	return &Server{
 		db:              database,
 		casStorage:      casStorage,
 		treeCache:       cache,
 		toolchainConfig: toolchainCfg,
+		emitter:         emitter,
 	}, nil
 }
 
@@ -71,6 +82,15 @@ func (s *Server) Register(grpcServer *grpc.Server) {
 // SetToolchainConfig updates the active toolchain configuration for review and submit guards.
 func (s *Server) SetToolchainConfig(cfg *config.Config) {
 	s.toolchainConfig = cfg
+}
+
+// SetEmitter updates the CloudEvents emitter instance.
+func (s *Server) SetEmitter(emitter pkgevents.Emitter) {
+	if emitter == nil {
+		s.emitter = pkgevents.NewNoopEmitter()
+		return
+	}
+	s.emitter = emitter
 }
 
 // getTreeEntries queries tree entries from PostgreSQL, falling back to CAS manifest blobs if uploaded by CLI shelve.
@@ -274,6 +294,9 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 	var clID int64
 	var oldRootTree []byte
 
+	patchsetNumber := 1
+	var parentCLID int64 = req.ParentCl
+	description := req.Description
 	if req.ClId > 0 {
 		existingCL, err := s.db.GetCL(ctx, req.ClId)
 		if err != nil {
@@ -281,11 +304,18 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 		}
 		clID = req.ClId
 		oldRootTree = existingCL.RootTreeHash
+		if existingCL.ParentCL != nil {
+			parentCLID = *existingCL.ParentCL
+		}
+		if description == "" {
+			description = existingCL.Description
+		}
 
 		nextPS, err := s.db.GetNextPatchsetNumber(ctx, clID)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to get next patchset number: %v", err)
 		}
+		patchsetNumber = nextPS
 
 		if err := s.db.CreatePatchset(ctx, clID, nextPS, req.RootTreeHash); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create patchset %d: %v", nextPS, err)
@@ -315,6 +345,23 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 	// Trigger cascading rebase for any downstream shelved changelists
 	if len(oldRootTree) > 0 && !bytes.Equal(oldRootTree, req.RootTreeHash) {
 		_, _ = s.CascadeStackRebase(ctx, clID, oldRootTree, req.RootTreeHash)
+	}
+
+	if s.emitter != nil {
+		s.emitter.Emit(ctx, pkgevents.New(
+			pkgevents.TypeCLCreated,
+			"niebla-server",
+			fmt.Sprintf("cl/%d", clID),
+			pkgevents.CLCreatedPayload{
+				CLID:           fmt.Sprintf("%d", clID),
+				Author:         req.Author,
+				Description:    description,
+				RootTreeHash:   hex.EncodeToString(req.RootTreeHash),
+				ParentCLID:     fmt.Sprintf("%d", parentCLID),
+				PatchsetNumber: patchsetNumber,
+				Reviewers:      req.Reviewers,
+			},
+		))
 	}
 
 	return &nieblav1.ShelveCLResponse{ClId: clID}, nil
@@ -455,6 +502,24 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 				req.ClId, mergeConflictSummary)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to submit changelist: %v", err)
+	}
+
+	if s.emitter != nil {
+		var trunkRev int64
+		if cl.TrunkRevision != nil {
+			trunkRev = *cl.TrunkRevision
+		}
+		s.emitter.Emit(ctx, pkgevents.New(
+			pkgevents.TypeCLSubmitted,
+			"niebla-server",
+			fmt.Sprintf("cl/%d", cl.CLID),
+			pkgevents.CLSubmittedPayload{
+				CLID:          fmt.Sprintf("%d", cl.CLID),
+				Author:        cl.Author,
+				TrunkRevision: trunkRev,
+				RootTreeHash:  hex.EncodeToString(cl.RootTreeHash),
+			},
+		))
 	}
 
 	return &nieblav1.SubmitCLResponse{

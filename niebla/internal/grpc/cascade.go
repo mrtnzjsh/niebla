@@ -3,11 +3,13 @@ package grpc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"strings"
 
+	pkgevents "niebla/pkg/events"
 	"niebla/pkg/tree"
 )
 
@@ -32,7 +34,7 @@ func (s *Server) CascadeStackRebase(
 	}
 
 	fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
-		return s.db.GetTreeEntries(ctx, treeHash)
+		return s.getTreeEntries(ctx, treeHash)
 	}
 
 	readBlob := func(sha []byte) ([]byte, error) {
@@ -96,6 +98,25 @@ func (s *Server) CascadeStackRebase(
 			log.Printf("[CascadeRebase] CL %d has rebase conflict with parent %d: %s", child.CLID, parentCLID, summary)
 			_ = s.db.MarkCLRebaseConflict(ctx, child.CLID, summary)
 			_ = s.db.RecordRebaseEvent(ctx, child.CLID, parentCLID, child.BasePatchsetNumber, 0, "conflict", summary)
+
+			if s.emitter != nil {
+				conflictedPaths := make([]string, len(conflicts))
+				for i, c := range conflicts {
+					conflictedPaths[i] = c.Path
+				}
+				s.emitter.Emit(ctx, pkgevents.New(
+					pkgevents.TypeCLRebaseConflict,
+					"niebla-server",
+					fmt.Sprintf("cl/%d", child.CLID),
+					pkgevents.CLRebaseConflictPayload{
+						CLID:            fmt.Sprintf("%d", child.CLID),
+						ParentCLID:      fmt.Sprintf("%d", parentCLID),
+						ConflictedFiles: conflictedPaths,
+						Summary:         summary,
+					},
+				))
+			}
+
 			// Halt recursion down this branch until author resolves the conflict
 			continue
 		}
@@ -119,6 +140,20 @@ func (s *Server) CascadeStackRebase(
 
 		_ = s.db.ClearCLRebaseConflict(ctx, child.CLID)
 		_ = s.db.RecordRebaseEvent(ctx, child.CLID, parentCLID, child.BasePatchsetNumber, nextPS, "clean", "Auto-rebased successfully")
+
+		if s.emitter != nil {
+			s.emitter.Emit(ctx, pkgevents.New(
+				pkgevents.TypeCLRebased,
+				"niebla-server",
+				fmt.Sprintf("cl/%d", child.CLID),
+				pkgevents.CLRebasedPayload{
+					CLID:            fmt.Sprintf("%d", child.CLID),
+					ParentCLID:      fmt.Sprintf("%d", parentCLID),
+					NewRootTreeHash: hex.EncodeToString(mergedHash),
+					PatchsetNumber:  nextPS,
+				},
+			))
+		}
 
 		rebased = append(rebased, child.CLID)
 		log.Printf("[CascadeRebase] Successfully auto-rebased CL %d (Patchset %d) onto parent %d", child.CLID, nextPS, parentCLID)

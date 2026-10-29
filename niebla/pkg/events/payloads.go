@@ -1,5 +1,17 @@
 package events
 
+// CLCreatedPayload contains data for niebla.cl.created events.
+type CLCreatedPayload struct {
+	CLID           string   `json:"cl_id"`
+	Author         string   `json:"author"`
+	Description    string   `json:"description,omitempty"`
+	RootTreeHash   string   `json:"root_tree_hash"`
+	ParentCLID     string   `json:"parent_cl_id,omitempty"`
+	PatchsetNumber int      `json:"patchset_number"`
+	Reviewers      []string `json:"reviewers,omitempty"`
+	URL            string   `json:"url,omitempty"`
+}
+
 // ReviewersAssignedPayload contains data for niebla.cl.reviewers_assigned events.
 type ReviewersAssignedPayload struct {
 	CLID        string   `json:"cl_id"`
@@ -40,6 +52,8 @@ type ApprovalUpdatedPayload struct {
 type CLSubmittedPayload struct {
 	CLID          string `json:"cl_id"`
 	Author        string `json:"author"`
+	TrunkRevision int64  `json:"trunk_revision,omitempty"`
+	RootTreeHash  string `json:"root_tree_hash,omitempty"`
 	URL           string `json:"url,omitempty"`
 	Justification string `json:"justification,omitempty"`
 }

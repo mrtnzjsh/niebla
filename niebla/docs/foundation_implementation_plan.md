@@ -127,9 +127,9 @@ flowchart TD
 - [Distributed Analysis §3: Composable CI Runner Orchestration (`niebla-ci`)](file:///home/matatan/Developer/niebla/niebla/docs/distributed_architecture_analysis.md#L188-L337)
 
 ### Commit 3.1: `feat(grpc): wire CloudEvents emitter into niebla-server`
-- [ ] Inject `pkgevents.Emitter` into [`internal/grpc/server.go`](file:///home/matatan/Developer/niebla/niebla/internal/grpc/server.go) (`Server.SetEmitter`) and [`cmd/niebla-server/main.go`](file:///home/matatan/Developer/niebla/niebla/cmd/niebla-server/main.go).
-- [ ] Emit standardized CloudEvents on `ShelveCL` (`niebla.cl.created`), `SubmitCL` (`niebla.cl.submitted`), and `CascadeStackRebase` (`niebla.cl.rebased` / `niebla.cl.rebase_conflict`).
-- [ ] Add unit/integration tests in `internal/grpc/events_test.go` asserting events are emitted on gRPC calls.
+- [x] Inject `pkgevents.Emitter` into [`internal/grpc/server.go`](file:///home/matatan/Developer/niebla/niebla/internal/grpc/server.go) (`Server.SetEmitter`) and [`cmd/niebla-server/main.go`](file:///home/matatan/Developer/niebla/niebla/cmd/niebla-server/main.go).
+- [x] Emit standardized CloudEvents on `ShelveCL` (`niebla.cl.created`), `SubmitCL` (`niebla.cl.submitted`), and `CascadeStackRebase` (`niebla.cl.rebased` / `niebla.cl.rebase_conflict`).
+- [x] Add unit/integration tests in `internal/grpc/events_test.go` asserting events are emitted on gRPC calls.
 
 ### Commit 3.2: `feat(db,web): add cl_check_runs table, Check Runs API, and submit gate`
 - [ ] Add `cl_check_runs` table to [`internal/db/migrations/0002_critique.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0002_critique.sql) and DB queries (`UpsertCheckRun`, `ListCheckRunsForPatchset`, `AreCheckRunsGreen`).
