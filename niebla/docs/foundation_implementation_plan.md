@@ -104,8 +104,8 @@ flowchart TD
 - [x] Add unit/integration tests in `internal/cli/status_test.go` verifying ignored directories and files are excluded from status and shelve scans.
 
 ### Commit 2.3: `feat(materialize): add standalone concurrent tree materializer with CAS hardlink fast-path`
-- [ ] Create standalone package `pkg/materialize` (`MaterializeTree` accepting `tree.FetchTreeFunc`, `BlobFetcher`, and `Options{Concurrency, HardlinkCAS, Filter}`).
-- [ ] Add unit tests in `pkg/materialize/materialize_test.go` testing both hardlink mode (inode sharing from local CAS cache) and standard writable file copy mode with POSIX permissions (`0644` / `0755`).
+- [x] Create standalone package `pkg/materialize` (`MaterializeTree` accepting `tree.FetchTreeFunc`, `BlobFetcher`, and `Options{Concurrency, HardlinkCAS, Filter}`).
+- [x] Add unit tests in `pkg/materialize/materialize_test.go` testing both hardlink mode (inode sharing from local CAS cache) and standard writable file copy mode with POSIX permissions (`0644` / `0755`).
 
 ### Commit 2.4: `feat(cli): add 'niebla export' and 'workspace create --no-fuse'`
 - [ ] Add `niebla export --cl <id> [--patchset <n>] --dest <dir>` in `internal/cli/export.go` backed by `pkg/materialize`.
