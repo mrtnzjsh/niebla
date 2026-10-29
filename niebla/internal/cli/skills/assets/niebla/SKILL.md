@@ -231,12 +231,28 @@ Cotejo tracks the review status of each file in a changelist on a **per-reviewer
    - Defaults dynamically to the active OS username (`$USER`), configured via `[critique.auth]` in `~/.config/niebla/config.toml`.
    - Emulate or test different reviewers by passing `?reviewer=<username>` in any Cotejo URL.
 
+### Review Inbox Segregation & Agent Queues
+
+To prevent review fatigue and protect human attention from high-volume agent swarms, Cotejo automatically partitions the review inbox (`/` and `/cls`) into segregated tabs:
+
+* **`My Review Queue` (`?tab=my-reviews`):**
+  Changelists explicitly assigned to the authenticated user or one of their enterprise groups (`@team`) as reviewers. Only this queue triggers high-priority review attention.
+* **`Out for Review` (`?tab=outgoing`):**
+  Pending changelists authored by the authenticated user awaiting review or submit approval.
+* **`Agent / Automated` (`?tab=agents`):**
+  Automated background agent tasks, linter suggestions, dependency bot updates, and CI branch tasks (matching `agent_author_patterns` such as `agent/*`, `bot/*`, `*[bot]`, `*@agent*`, `ci/*`, `system`). Agent CLs are marked with a `🤖 Agent` badge and segregated from the primary human review queue.
+* **`Submitted / Trunk` (`?tab=submitted`):**
+  Changelists merged cleanly into trunk revisions.
+* **`All` (`?tab=all`):**
+  Unfiltered stream of all changelists across the repository.
+
 ### Programmatic HTMX / REST API
 
 Agents interacting with Cotejo via HTTP can utilize the following endpoints:
 
 | Method | Endpoint | Parameters | Description |
 | :--- | :--- | :--- | :--- |
+| `GET` | `/cls` | `tab=my-reviews\|outgoing\|agents\|submitted\|all&reviewer={user}` | Segregated review inbox; returns partial content when `HX-Request: true`. |
 | `GET` | `/cl/{id}` | `file={path}&ps={ps}&base_ps={base}&reviewer={user}` | Full review interface; auto-marks selected file reviewed and displays active reviewer's drafts. |
 | `GET` | `/cl/{id}/comment-box` | `file={path}&line={start}&end_line={end}&side={side}&ps={ps}` | Fetches inline comment thread container. |
 | `POST` | `/cl/{id}/comments` | `file_path, line_number, end_line_number, side, author, body` | Creates single or multi-line comment as an unposted draft (`is_draft=true`). |

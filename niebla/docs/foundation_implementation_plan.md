@@ -213,8 +213,8 @@ flowchart TD
 - [x] Add PostgreSQL testcontainer integration test in `internal/web/handlers/` validating end-to-end inbox segregation across human, reviewer group, and agent CLs.
 
 ### Commit 5.4: `docs(skills): update niebla skill and roadmap checklists with Cotejo inbox segregation`
-- [ ] Update `docs/agentic_development_analysis.md` marking Phase 2 P2 Cotejo Inbox Segregation as complete.
-- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting Cotejo inbox tabs.
+- [x] Update `docs/agentic_development_analysis.md` marking Phase 2 P2 Cotejo Inbox Segregation as complete.
+- [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting Cotejo inbox tabs.
 
 
 
