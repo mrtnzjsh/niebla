@@ -31,3 +31,20 @@ CREATE TABLE IF NOT EXISTS cl_approvals (
     updated_at TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (cl_id, reviewer)
 );
+
+CREATE TABLE IF NOT EXISTS cl_check_runs (
+    id BIGSERIAL PRIMARY KEY,
+    cl_id BIGINT NOT NULL REFERENCES changelists(cl_id) ON DELETE CASCADE,
+    patchset_number INT NOT NULL,
+    runner_name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'passed', 'failed', 'canceled', 'cancelled', 'skipped')),
+    external_url TEXT,
+    log_blob_sha256 BYTEA REFERENCES blobs(sha256) ON DELETE SET NULL,
+    started_at TIMESTAMPTZ DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(cl_id, patchset_number, runner_name)
+);
+CREATE INDEX IF NOT EXISTS idx_check_runs_cl_ps ON cl_check_runs(cl_id, patchset_number);
+

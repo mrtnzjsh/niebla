@@ -132,9 +132,10 @@ flowchart TD
 - [x] Add unit/integration tests in `internal/grpc/events_test.go` asserting events are emitted on gRPC calls.
 
 ### Commit 3.2: `feat(db,web): add cl_check_runs table, Check Runs API, and submit gate`
-- [ ] Add `cl_check_runs` table to [`internal/db/migrations/0002_critique.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0002_critique.sql) and DB queries (`UpsertCheckRun`, `ListCheckRunsForPatchset`, `AreCheckRunsGreen`).
-- [ ] Expose provider-agnostic check status endpoints (`ReportCheckRun` gRPC RPC and `POST /api/v1/ci/status` in Cotejo) and optional `require_green_to_submit` guard in `SubmitCL`.
-- [ ] Add `testcontainers-go` DB and handler tests for check run state transitions (`queued` -> `running` -> `passed`/`failed`) and submit gating.
+- [x] Add `cl_check_runs` table to [`internal/db/migrations/0002_critique.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0002_critique.sql) and DB queries (`UpsertCheckRun`, `ListCheckRunsForPatchset`, `AreCheckRunsGreen`).
+- [x] Expose provider-agnostic check status endpoints (`ReportCheckRun` gRPC RPC and `POST /api/v1/ci/status` in Cotejo) and optional `require_green_to_submit` guard in `SubmitCL`.
+- [x] Add `testcontainers-go` DB and handler tests for check run state transitions (`queued` -> `running` -> `passed`/`failed`) and submit gating.
+
 
 ### Commit 3.3: `feat(ci): add [ci] config schema, Provider interfaces, and Auth RoundTripper`
 - [ ] Extend [`internal/config/config.go`](file:///home/matatan/Developer/niebla/niebla/internal/config/config.go) and validation rules with `CIConfig`, `CIRunnerConfig`, and `CIAuthConfig`.

@@ -57,6 +57,10 @@ func ResetDemoStoresForTest() {
 	demoCLStatusMu.Lock()
 	demoCLStatusStore = make(map[int64]string)
 	demoCLStatusMu.Unlock()
+
+	demoCheckRunsMu.Lock()
+	demoCheckRunsStore = make(map[string][]db.CheckRun)
+	demoCheckRunsMu.Unlock()
 }
 
 // CLHandler handles changelist reviews, patchset switching, diff views, and reviewer verdicts.
@@ -486,6 +490,56 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("CL %d: approval requirement overridden by %q with justification: %q", clID, h.resolveReviewer(r), justification)
 	}
+
+	requireGreen := false
+	if h.config != nil {
+		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
+	}
+	if requireGreen {
+		var green bool
+		var total, pending, failed int
+		var psNum int = 1
+		if h.db != nil {
+			ctx := r.Context()
+			latestPS, err := h.db.GetLatestPatchsetNumber(ctx, clID)
+			if err == nil {
+				psNum = latestPS
+				green, total, pending, failed, _ = h.db.AreCheckRunsGreen(ctx, clID, latestPS)
+			}
+		} else {
+			demoCheckRunsMu.RLock()
+			key := fmt.Sprintf("%d:%d", clID, 1)
+			runs := demoCheckRunsStore[key]
+			demoCheckRunsMu.RUnlock()
+			total = len(runs)
+			for _, r := range runs {
+				switch r.Status {
+				case "queued", "running":
+					pending++
+				case "failed", "canceled", "cancelled":
+					failed++
+				case "passed", "skipped":
+				default:
+					failed++
+				}
+			}
+			green = (total > 0 && pending == 0 && failed == 0)
+		}
+
+		if !green {
+			if justification == "" {
+				if total == 0 {
+					http.Error(w, fmt.Sprintf("CL %d requires green CI check runs before submission (found 0 check runs for patchset %d)", clID, psNum), http.StatusBadRequest)
+					return
+				}
+				http.Error(w, fmt.Sprintf("CL %d requires green CI check runs before submission (%d pending, %d failed out of %d total for patchset %d)", clID, pending, failed, total, psNum), http.StatusBadRequest)
+				return
+			}
+			log.Printf("CL %d: CI green check runs requirement overridden by %q with justification: %q", clID, h.resolveReviewer(r), justification)
+		}
+	}
+
+
 
 	if h.db != nil {
 		if _, err := h.db.SubmitCL(r.Context(), clID); err != nil {

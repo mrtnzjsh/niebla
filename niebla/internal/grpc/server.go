@@ -415,6 +415,32 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 					req.ClId, requiredApprovals, approvals)
 			}
 		}
+
+		// 3. Guard: Check CI check runs if policy requires green check runs
+		requireGreen := false
+		if s.toolchainConfig != nil {
+			requireGreen = s.toolchainConfig.Critique.GetRequireGreenCheckRuns()
+		}
+		if requireGreen {
+			latestPS, err := s.db.GetLatestPatchsetNumber(ctx, req.ClId)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to get latest patchset for CL %d: %v", req.ClId, err)
+			}
+			green, total, pending, failed, err := s.db.AreCheckRunsGreen(ctx, req.ClId, latestPS)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to check CI check runs: %v", err)
+			}
+			if !green {
+				if total == 0 {
+					return nil, status.Errorf(codes.FailedPrecondition,
+						"cannot submit CL %d: no CI check runs found for patchset %d (policy requires green check runs)",
+						req.ClId, latestPS)
+				}
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"cannot submit CL %d: CI check runs not passing for patchset %d (%d pending/running, %d failed out of %d total)",
+					req.ClId, latestPS, pending, failed, total)
+			}
+		}
 	}
 
 	var mergeConflictSummary string
@@ -654,3 +680,9 @@ func (s *Server) SyncCL(ctx context.Context, req *nieblav1.SyncCLRequest) (*nieb
 		PatchsetNumber:        wsResp.PatchsetNumber,
 	}, nil
 }
+
+// ReportCheckRun records or updates a check run status for a changelist patchset.
+func (s *Server) ReportCheckRun(ctx context.Context, run db.CheckRun) (*db.CheckRun, error) {
+	return s.db.UpsertCheckRun(ctx, run)
+}
+

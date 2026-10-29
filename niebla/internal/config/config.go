@@ -191,6 +191,7 @@ type CritiqueConfig struct {
 	DefaultReviewer                   string              `toml:"default_reviewer"`
 	RequiredApprovals                 *int                `toml:"required_approvals,omitempty"`
 	AllowSubmitWithUnresolvedComments *bool               `toml:"allow_submit_with_unresolved_comments,omitempty"`
+	RequireGreenCheckRuns             *bool               `toml:"require_green_check_runs,omitempty"`
 	Auth                              CritiqueAuthConfig `toml:"auth"`
 	Groups                            CritiqueGroupConfig `toml:"groups"`
 	Theme                             ThemeConfig         `toml:"theme"`
@@ -217,6 +218,16 @@ func (c *CritiqueConfig) GetAllowSubmitWithUnresolvedComments() bool {
 	}
 	return false
 }
+
+// GetRequireGreenCheckRuns returns whether CLs require green CI check runs before submission.
+// Defaults to false unless explicitly configured.
+func (c *CritiqueConfig) GetRequireGreenCheckRuns() bool {
+	if c.RequireGreenCheckRuns != nil {
+		return *c.RequireGreenCheckRuns
+	}
+	return false
+}
+
 
 // ThemeConfig governs the UI visual appearance and Chroma syntax highlighting.
 type ThemeConfig struct {

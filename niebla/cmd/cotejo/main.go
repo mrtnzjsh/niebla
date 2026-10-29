@@ -144,6 +144,7 @@ func main() {
 	clHandler.SetDependencies(cfg, groupResolver)
 	commentsHandler := handlers.NewCommentsHandler(database, authResolver)
 	rawHandler := handlers.NewRawHandler(database, casStorage)
+	ciHandler := handlers.NewCIHandler(database)
 
 	// 4. Set up HTTP routing (Go 1.22+ ServeMux with method and pattern matching)
 	mux := http.NewServeMux()
@@ -179,6 +180,11 @@ func main() {
 	mux.HandleFunc("POST /cl/{id}/comments", commentsHandler.HandleCreateComment)
 	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/resolve", commentsHandler.HandleResolveComment)
 	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/discard", commentsHandler.HandleDiscardComment)
+
+	// CI Check Runs API
+	mux.HandleFunc("POST /api/v1/ci/status", ciHandler.HandlePostCheckRunStatus)
+	mux.HandleFunc("GET /api/v1/ci/status", ciHandler.HandleGetCheckRuns)
+	mux.HandleFunc("GET /cl/{id}/checks", ciHandler.HandleGetCheckRuns)
 
 	// Raw blobs
 	mux.HandleFunc("GET /cl/{id}/raw", rawHandler.ServeRawBlob)
