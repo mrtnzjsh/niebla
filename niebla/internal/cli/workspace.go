@@ -18,6 +18,7 @@ import (
 	"niebla/internal/cli/config"
 	"niebla/internal/cli/skills"
 	"niebla/pkg/materialize"
+	"niebla/pkg/nieblafs/control"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"github.com/spf13/cobra"
@@ -113,6 +114,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			var daemonPID int
+			var socketPath string
 			if noFuse {
 				// Direct FUSE-less materialization into resolvedMountDir
 				scratchDir = resolvedMountDir
@@ -125,12 +127,14 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 				// Check /dev/fuse accessibility
 				checkDevFuse()
 
+				socketPath = filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
+
 				// 3. Spawn nieblafs daemon in background
 				nieblafsBin, err := findNieblafsBinary()
 				if err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: nieblafs binary not found in PATH or next to niebla; FUSE daemon not started.\n")
 				} else {
-					pid, err := spawnNieblafs(nieblafsBin, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr)
+					pid, err := spawnNieblafs(nieblafsBin, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr, socketPath)
 					if err != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to spawn nieblafs daemon: %v\n", err)
 					} else {
@@ -149,6 +153,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 				ScratchDir:   scratchDir,
 				PID:          daemonPID,
 				NoFuse:       noFuse,
+				SocketPath:   socketPath,
 			}
 
 			if err := mgr.Save(wsConfig); err != nil {
@@ -157,7 +162,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 
 			// 5. Poll for mount activation if nieblafs was spawned
 			if daemonPID > 0 {
-				pollMountActive(cmd.OutOrStdout(), daemonPID, resolvedMountDir, scratchDir)
+				pollMountActive(cmd.OutOrStdout(), daemonPID, resolvedMountDir, socketPath, scratchDir)
 			}
 
 			// Opportunistically ensure agent harness spokes are linked for any installed harnesses
@@ -281,7 +286,10 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 				terminateProcess(ws.PID)
 			}
 
-			// 3. Remove scratch directory
+			// 3. Remove scratch directory and control socket
+			if ws.SocketPath != "" {
+				_ = os.Remove(ws.SocketPath)
+			}
 			if ws.ScratchDir != "" {
 				_ = os.RemoveAll(ws.ScratchDir)
 				// Clean up parent directory if empty
@@ -375,7 +383,7 @@ func findNieblafsBinary() (string, error) {
 	return exec.LookPath("nieblafs")
 }
 
-func spawnNieblafs(nieblafsBin, mountDir, scratchDir, cacheDir, treeHash, serverAddr string) (int, error) {
+func spawnNieblafs(nieblafsBin, mountDir, scratchDir, cacheDir, treeHash, serverAddr, socketPath string) (int, error) {
 	logDir := filepath.Dir(scratchDir)
 	logPath := filepath.Join(logDir, "nieblafs.log")
 
@@ -384,13 +392,18 @@ func spawnNieblafs(nieblafsBin, mountDir, scratchDir, cacheDir, treeHash, server
 		return 0, fmt.Errorf("failed to create nieblafs log file %s: %w", logPath, err)
 	}
 
-	cmd := exec.Command(nieblafsBin,
+	args := []string{
 		"--mount", mountDir,
 		"--scratch", scratchDir,
 		"--cache", cacheDir,
 		"--tree-hash", treeHash,
 		"--server", serverAddr,
-	)
+	}
+	if socketPath != "" {
+		args = append(args, "--socket", socketPath)
+	}
+
+	cmd := exec.Command(nieblafsBin, args...)
 
 	// Detach process cleanly from CLI session
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -409,7 +422,7 @@ func spawnNieblafs(nieblafsBin, mountDir, scratchDir, cacheDir, treeHash, server
 	return cmd.Process.Pid, nil
 }
 
-func pollMountActive(out io.Writer, pid int, mountDir, scratchDir string) {
+func pollMountActive(out io.Writer, pid int, mountDir, socketPath, scratchDir string) {
 	deadline := time.Now().Add(3 * time.Second)
 	logPath := filepath.Join(filepath.Dir(scratchDir), "nieblafs.log")
 
@@ -421,12 +434,22 @@ func pollMountActive(out io.Writer, pid int, mountDir, scratchDir string) {
 			return
 		}
 
-		// 2. Check if mounted
+		// 2. Check if control socket responds (fast deterministic readiness)
+		if socketPath != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			if err := control.NewClient(socketPath).Ping(ctx); err == nil {
+				cancel()
+				return
+			}
+			cancel()
+		}
+
+		// 3. Check if mounted
 		if isMountPoint(mountDir) {
 			return
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

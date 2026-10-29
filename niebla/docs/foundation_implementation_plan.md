@@ -177,10 +177,10 @@ flowchart TD
 
 
 ### Commit 4.2: `feat(cli): wire socket-based cache invalidation into niebla sync and workspace lifecycle`
-- [ ] Add `SocketPath` to `WorkspaceConfig` and pass `--socket` in `spawnNieblafs`.
-- [ ] Use socket `ping` in `pollMountActive` for sub-millisecond daemon readiness detection.
-- [ ] In `niebla sync`, send `reanchor` to the running `nieblafs` daemon to purge kernel/metadata caches upon tree rebase, and update materialized files directly in `--no-fuse` mode.
-- [ ] Add unit and CLI integration tests in `internal/cli/sync_test.go`.
+- [x] Add `SocketPath` to `WorkspaceConfig` and pass `--socket` in `spawnNieblafs`.
+- [x] Use socket `ping` in `pollMountActive` for sub-millisecond daemon readiness detection.
+- [x] In `niebla sync`, send `reanchor` to the running `nieblafs` daemon to purge kernel/metadata caches upon tree rebase, and update materialized files directly in `--no-fuse` mode.
+- [x] Add unit and CLI integration tests in `internal/cli/sync_test.go`.
 
 ### Commit 4.3: `feat(nieblafs): complete FUSE mount, lookup, and read loops with CoW scratch overlay`
 - [ ] Wire `bazil.org/fuse/fs.Serve` and mount lifecycle in `cmd/nieblafs/main.go` with signal-safe unmount.

@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"niebla/internal/cli/config"
+	"niebla/pkg/materialize"
+	"niebla/pkg/nieblafs/control"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"github.com/spf13/cobra"
@@ -25,6 +28,7 @@ type SyncOutput struct {
 	NeedsRebase     bool   `json:"needs_rebase"`
 	ConflictDetails string `json:"conflict_details,omitempty"`
 	DryRun          bool   `json:"dry_run"`
+	ControlPurged   int    `json:"control_purged,omitempty"`
 }
 
 // NewSyncCmd constructs the 'sync' command for reconciling local workspaces with upstream trees.
@@ -137,6 +141,33 @@ func NewSyncCmd(rootFlags *RootFlags) *cobra.Command {
 				return nil
 			}
 
+			var controlPurged int
+			if ws.NoFuse {
+				// Direct FUSE-less materialization into MountDir
+				fetchTree := makeTreeFetcher(ctx, client)
+				fetchBlob := makeBlobFetcher(client, append([]string{filepath.Join(filepath.Dir(ws.ScratchDir), "cache")}, defaultBlobCacheDirs()...))
+				if _, err := materialize.MaterializeTree(ctx, resp.RootTreeHash, ws.MountDir, fetchTree, fetchBlob, materialize.Options{}); err != nil {
+					return fmt.Errorf("failed to materialize updated tree into %s: %w", ws.MountDir, err)
+				}
+			} else {
+				// Virtual FUSE workspace: re-anchor daemon via control socket if running
+				sockPath := ws.SocketPath
+				if sockPath == "" && ws.ScratchDir != "" {
+					sockPath = filepath.Join(filepath.Dir(ws.ScratchDir), "nieblafs.sock")
+				}
+				if sockPath != "" {
+					if _, err := os.Stat(sockPath); err == nil {
+						cClient := control.NewClient(sockPath)
+						cResp, err := cClient.Reanchor(ctx, newTreeHex, resp.ClId)
+						if err != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to re-anchor nieblafs daemon via control socket: %v\n", err)
+						} else {
+							controlPurged = cResp.PurgedEntries
+						}
+					}
+				}
+			}
+
 			ws.RootTreeHash = newTreeHex
 			if err := mgr.Save(ws); err != nil {
 				return fmt.Errorf("failed to save updated workspace metadata: %w", err)
@@ -153,11 +184,17 @@ func NewSyncCmd(rootFlags *RootFlags) *cobra.Command {
 					UpToDate:        true,
 					NeedsRebase:     false,
 					DryRun:          false,
+					ControlPurged:   controlPurged,
 				})
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "✓ Successfully synced workspace %q with CL %d (Patchset %d).\n", ws.Name, resp.ClId, resp.PatchsetNumber)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Base tree updated: %s -> %s\n", oldTreeHex, newTreeHex)
+			if controlPurged > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Virtual filesystem re-anchored (%d cached inodes invalidated).\n", controlPurged)
+			} else if ws.NoFuse {
+				fmt.Fprintln(cmd.OutOrStdout(), "  Direct filesystem materialization updated.")
+			}
 			return nil
 		},
 	}
