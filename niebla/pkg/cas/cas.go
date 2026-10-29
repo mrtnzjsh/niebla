@@ -49,15 +49,38 @@ func (s *Storage) BaseDir() string {
 	return s.baseDir
 }
 
-// BlobPath returns the partitioned file path for a given SHA-256 hex string:
-// ${BLOB_STORAGE_PATH}/ab/cd/abcdef...
-func (s *Storage) BlobPath(sha256Hex string) (string, error) {
+// RelativeBlobPath returns the portable relative partitioned key for a given SHA-256 hex string:
+// ab/cd/abcdef...
+func RelativeBlobPath(sha256Hex string) (string, error) {
 	if len(sha256Hex) < 4 {
 		return "", fmt.Errorf("invalid sha256 hex string %q: too short", sha256Hex)
 	}
 	part1 := sha256Hex[0:2]
 	part2 := sha256Hex[2:4]
-	return filepath.Join(s.baseDir, part1, part2, sha256Hex), nil
+	return filepath.ToSlash(filepath.Join(part1, part2, sha256Hex)), nil
+}
+
+// ResolveStoragePath resolves a portable relative storage key (or legacy absolute path)
+// against the Storage baseDir.
+func (s *Storage) ResolveStoragePath(storageKey string) string {
+	if storageKey == "" {
+		return ""
+	}
+	fromSlash := filepath.FromSlash(storageKey)
+	if filepath.IsAbs(fromSlash) {
+		return fromSlash
+	}
+	return filepath.Join(s.baseDir, fromSlash)
+}
+
+// BlobPath returns the partitioned file path for a given SHA-256 hex string:
+// ${BLOB_STORAGE_PATH}/ab/cd/abcdef...
+func (s *Storage) BlobPath(sha256Hex string) (string, error) {
+	rel, err := RelativeBlobPath(sha256Hex)
+	if err != nil {
+		return "", err
+	}
+	return s.ResolveStoragePath(rel), nil
 }
 
 // Exists checks if the blob with the given sha256 exists in storage.
@@ -195,7 +218,7 @@ func (w *BlobWriter) Write(p []byte) (int, error) {
 }
 
 // Commit finalizes the blob, atomically moves it to its hash-partitioned path,
-// and returns the raw SHA-256 hash bytes, hex hash string, and total byte size.
+// and returns the raw SHA-256 hash bytes, hex hash string, total byte size, and portable relative storage key.
 func (w *BlobWriter) Commit() (hashBytes []byte, hexHash string, size int64, storagePath string, err error) {
 	if w.closed {
 		return nil, "", 0, "", errors.New("BlobWriter is already closed")
@@ -218,11 +241,12 @@ func (w *BlobWriter) Commit() (hashBytes []byte, hexHash string, size int64, sto
 	hexHash = hex.EncodeToString(hashBytes)
 	size = w.bytesWritten
 
-	targetPath, err := w.storage.BlobPath(hexHash)
+	relKey, err := RelativeBlobPath(hexHash)
 	if err != nil {
 		_ = os.Remove(tmpName)
 		return nil, "", 0, "", err
 	}
+	targetPath := w.storage.ResolveStoragePath(relKey)
 
 	targetDir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -236,7 +260,7 @@ func (w *BlobWriter) Commit() (hashBytes []byte, hexHash string, size int64, sto
 		return nil, "", 0, "", fmt.Errorf("failed to atomically rename blob to %s: %w", targetPath, err)
 	}
 
-	return hashBytes, hexHash, size, targetPath, nil
+	return hashBytes, hexHash, size, relKey, nil
 }
 
 // Abort cancels the write and cleans up the temporary file.
