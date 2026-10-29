@@ -72,10 +72,10 @@ flowchart TD
 - [x] Verify existing and updated tree queries pass in `internal/db/db_test.go` via `testcontainers-go` (`postgres:16-alpine`).
 
 ### Commit 1.4: `feat(db): add sequential trunk_revision and pg_advisory_xact_lock to SubmitCL`
-- [ ] Update `changelists` in [`internal/db/migrations/0001_init.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0001_init.sql) with `trunk_revision BIGINT UNIQUE`, `trunk_revision_seq`, and seed CL 1 with `trunk_revision = 1`.
-- [ ] Update `GetHeadCL` in [`internal/db/queries.go`](file:///home/matatan/Developer/niebla/niebla/internal/db/queries.go#L196-L225) to order by `ORDER BY trunk_revision DESC LIMIT 1`.
-- [ ] Guard `SubmitCL` in [`internal/db/queries.go`](file:///home/matatan/Developer/niebla/niebla/internal/db/queries.go#L278) with `SELECT pg_advisory_xact_lock(0x4e494542)` and accept an optional `TrunkMergeFunc` callback to compute the merged root tree hash before assigning `nextval('trunk_revision_seq')`.
-- [ ] Add `testcontainers-go` tests in `internal/db/db_test.go` verifying out-of-order CL ID submission (`CL 3` submitted before `CL 2`) assigns `trunk_revision` 2 and 3 in strict commit order.
+- [x] Update `changelists` in [`internal/db/migrations/0001_init.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0001_init.sql) with `trunk_revision BIGINT UNIQUE`, `trunk_revision_seq`, and seed CL 1 with `trunk_revision = 1`.
+- [x] Update `GetHeadCL` in [`internal/db/queries.go`](file:///home/matatan/Developer/niebla/niebla/internal/db/queries.go#L196-L225) to order by `ORDER BY trunk_revision DESC LIMIT 1`.
+- [x] Guard `SubmitCL` in [`internal/db/queries.go`](file:///home/matatan/Developer/niebla/niebla/internal/db/queries.go#L278) with `SELECT pg_advisory_xact_lock(0x4e494542)` and accept an optional `TrunkMergeFunc` callback to compute the merged root tree hash before assigning `nextval('trunk_revision_seq')`.
+- [x] Add `testcontainers-go` tests in `internal/db/db_test.go` verifying out-of-order CL ID submission (`CL 3` submitted before `CL 2`) assigns `trunk_revision` 2 and 3 in strict commit order.
 
 ### Commit 1.5: `feat(grpc): perform 3-way Merkle tree merge onto trunk head during SubmitCL`
 - [ ] Wire `tree.ThreeWayTreeMerge` into `Server.SubmitCL` in [`internal/grpc/server.go`](file:///home/matatan/Developer/niebla/niebla/internal/grpc/server.go#L296-L356) so submitting a CL whose `parent_cl` lags behind `HeadCL` automatically merges disjoint subtrees onto trunk head, or aborts with `codes.FailedPrecondition` (`needs_rebase = true`) on file conflict.

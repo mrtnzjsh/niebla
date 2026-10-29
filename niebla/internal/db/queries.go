@@ -13,6 +13,14 @@ import (
 // ErrNotFound is returned when a requested record is not found in the database.
 var ErrNotFound = errors.New("record not found")
 
+// TrunkCommitAdvisoryLockID is the PostgreSQL transaction-scoped advisory lock key ('NIEB')
+// used to serialize concurrent trunk submissions.
+const TrunkCommitAdvisoryLockID int64 = 0x4e494542
+
+// TrunkMergeFunc computes the 3-way merged Merkle root tree hash when a changelist's
+// parent lags behind the current trunk head CL during submission.
+type TrunkMergeFunc func(ctx context.Context, cl *Changelist, headCL *Changelist) (mergedRootTreeHash []byte, err error)
+
 // BlobRecord represents an entry in the blobs table.
 type BlobRecord struct {
 	SHA256      []byte
@@ -29,6 +37,7 @@ type Changelist struct {
 	RootTreeHash          []byte
 	ParentCL              *int64
 	Status                string
+	TrunkRevision         *int64
 	CommittedAt           time.Time
 	NeedsRebase           bool
 	RebaseConflictDetails *string
@@ -138,14 +147,14 @@ func (d *DB) InsertTreeNodes(ctx context.Context, treeHash []byte, entries []tre
 	return nil
 }
 
-// GetHeadCL retrieves the latest committed (status = 'submitted') changelist.
+// GetHeadCL retrieves the latest committed (status = 'submitted') changelist ordered by sequential trunk_revision.
 func (d *DB) GetHeadCL(ctx context.Context) (*Changelist, error) {
 	query := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
 		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		WHERE status = 'submitted'
-		ORDER BY cl_id DESC
+		ORDER BY trunk_revision DESC NULLS LAST, cl_id DESC
 		LIMIT 1;
 	`
 	var cl Changelist
@@ -156,6 +165,7 @@ func (d *DB) GetHeadCL(ctx context.Context) (*Changelist, error) {
 		&cl.RootTreeHash,
 		&cl.ParentCL,
 		&cl.Status,
+		&cl.TrunkRevision,
 		&cl.CommittedAt,
 		&cl.NeedsRebase,
 		&cl.RebaseConflictDetails,
@@ -173,7 +183,7 @@ func (d *DB) GetHeadCL(ctx context.Context) (*Changelist, error) {
 // GetCL retrieves a changelist by ID.
 func (d *DB) GetCL(ctx context.Context, clID int64) (*Changelist, error) {
 	query := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
 		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		WHERE cl_id = $1;
@@ -186,6 +196,7 @@ func (d *DB) GetCL(ctx context.Context, clID int64) (*Changelist, error) {
 		&cl.RootTreeHash,
 		&cl.ParentCL,
 		&cl.Status,
+		&cl.TrunkRevision,
 		&cl.CommittedAt,
 		&cl.NeedsRebase,
 		&cl.RebaseConflictDetails,
@@ -220,17 +231,24 @@ func (d *DB) CreateShelvedCL(ctx context.Context, author, description string, ro
 	return clID, nil
 }
 
-// SubmitCL atomically updates a changelist status to 'submitted' in a transaction.
-func (d *DB) SubmitCL(ctx context.Context, clID int64) (*Changelist, error) {
+// SubmitCL atomically updates a changelist status to 'submitted' in a serialized transaction,
+// acquiring a PostgreSQL transaction-scoped advisory lock, executing an optional TrunkMergeFunc
+// when the changelist's parent lags behind the current trunk head, and allocating a monotonic trunk_revision.
+func (d *DB) SubmitCL(ctx context.Context, clID int64, mergeFns ...TrunkMergeFunc) (*Changelist, error) {
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start submit transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	// Lock the row for update
+	// 1. Acquire exclusive transaction-scoped trunk commit lock so concurrent distributed submits serialize cleanly
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", TrunkCommitAdvisoryLockID); err != nil {
+		return nil, fmt.Errorf("failed to acquire trunk serialization lock: %w", err)
+	}
+
+	// 2. Lock the target CL row for update
 	selectQuery := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
 		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		WHERE cl_id = $1
@@ -244,6 +262,7 @@ func (d *DB) SubmitCL(ctx context.Context, clID int64) (*Changelist, error) {
 		&cl.RootTreeHash,
 		&cl.ParentCL,
 		&cl.Status,
+		&cl.TrunkRevision,
 		&cl.CommittedAt,
 		&cl.NeedsRebase,
 		&cl.RebaseConflictDetails,
@@ -262,14 +281,65 @@ func (d *DB) SubmitCL(ctx context.Context, clID int64) (*Changelist, error) {
 		return &cl, nil
 	}
 
+	// 3. Query current trunk head inside the serialized lock
+	headQuery := `
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
+		       needs_rebase, rebase_conflict_details, base_patchset_number
+		FROM changelists
+		WHERE status = 'submitted'
+		ORDER BY trunk_revision DESC NULLS LAST, cl_id DESC
+		LIMIT 1;
+	`
+	var headCL Changelist
+	headErr := tx.QueryRow(ctx, headQuery).Scan(
+		&headCL.CLID,
+		&headCL.Author,
+		&headCL.Description,
+		&headCL.RootTreeHash,
+		&headCL.ParentCL,
+		&headCL.Status,
+		&headCL.TrunkRevision,
+		&headCL.CommittedAt,
+		&headCL.NeedsRebase,
+		&headCL.RebaseConflictDetails,
+		&headCL.BasePatchsetNumber,
+	)
+
+	finalTreeHash := cl.RootTreeHash
+	var newParentCL *int64 = cl.ParentCL
+
+	if headErr == nil {
+		// If a TrunkMergeFunc is provided and headCL differs from cl's parent, run 3-way merge
+		if len(mergeFns) > 0 && mergeFns[0] != nil {
+			mergedHash, mErr := mergeFns[0](ctx, &cl, &headCL)
+			if mErr != nil {
+				return nil, mErr
+			}
+			if len(mergedHash) > 0 {
+				finalTreeHash = mergedHash
+			}
+		}
+		headID := headCL.CLID
+		newParentCL = &headID
+	} else if !errors.Is(headErr, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("failed to query head CL during submit: %w", headErr)
+	}
+
 	updateQuery := `
 		UPDATE changelists
-		SET status = 'submitted', committed_at = now()
+		SET status = 'submitted',
+		    trunk_revision = nextval('trunk_revision_seq'),
+		    root_tree_hash = $2,
+		    parent_cl = $3,
+		    committed_at = now(),
+		    needs_rebase = false,
+		    rebase_conflict_details = NULL
 		WHERE cl_id = $1
-		RETURNING committed_at;
+		RETURNING trunk_revision, committed_at;
 	`
+	var trunkRev int64
 	var committedAt time.Time
-	err = tx.QueryRow(ctx, updateQuery, clID).Scan(&committedAt)
+	err = tx.QueryRow(ctx, updateQuery, clID, finalTreeHash, newParentCL).Scan(&trunkRev, &committedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update CL status: %w", err)
 	}
@@ -279,7 +349,12 @@ func (d *DB) SubmitCL(ctx context.Context, clID int64) (*Changelist, error) {
 	}
 
 	cl.Status = "submitted"
+	cl.TrunkRevision = &trunkRev
+	cl.RootTreeHash = finalTreeHash
+	cl.ParentCL = newParentCL
 	cl.CommittedAt = committedAt
+	cl.NeedsRebase = false
+	cl.RebaseConflictDetails = nil
 	return &cl, nil
 }
 
@@ -347,7 +422,7 @@ func (d *DB) GetWorkspace(ctx context.Context, id string) (*Workspace, error) {
 // GetShelvedChildren retrieves all changelists in 'shelved' status that declare parentCL as their parent.
 func (d *DB) GetShelvedChildren(ctx context.Context, parentCL int64) ([]Changelist, error) {
 	query := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
 		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		WHERE parent_cl = $1 AND status = 'shelved'
@@ -369,6 +444,7 @@ func (d *DB) GetShelvedChildren(ctx context.Context, parentCL int64) ([]Changeli
 			&cl.RootTreeHash,
 			&cl.ParentCL,
 			&cl.Status,
+			&cl.TrunkRevision,
 			&cl.CommittedAt,
 			&cl.NeedsRebase,
 			&cl.RebaseConflictDetails,

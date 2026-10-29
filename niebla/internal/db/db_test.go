@@ -72,6 +72,9 @@ func TestDatabaseOperationsWithTestcontainer(t *testing.T) {
 	if headCL.CLID != 1 {
 		t.Errorf("expected head CLID 1, got %d", headCL.CLID)
 	}
+	if headCL.TrunkRevision == nil || *headCL.TrunkRevision != 1 {
+		t.Errorf("expected seeded head CL trunk_revision = 1, got %v", headCL.TrunkRevision)
+	}
 	if headCL.Status != "submitted" {
 		t.Errorf("expected head status 'submitted', got %q", headCL.Status)
 	}
@@ -203,6 +206,9 @@ func TestDatabaseOperationsWithTestcontainer(t *testing.T) {
 	if submittedCL.Status != "submitted" {
 		t.Errorf("expected status 'submitted', got %q", submittedCL.Status)
 	}
+	if submittedCL.TrunkRevision == nil || *submittedCL.TrunkRevision != 2 {
+		t.Errorf("expected trunk_revision = 2 on submitted CL, got %v", submittedCL.TrunkRevision)
+	}
 
 	// Now head should be the newly submitted CL
 	newHead, err := database.GetHeadCL(ctx)
@@ -217,6 +223,46 @@ func TestDatabaseOperationsWithTestcontainer(t *testing.T) {
 	idemCL, err := database.SubmitCL(ctx, shelvedCLID)
 	if err != nil || idemCL.Status != "submitted" {
 		t.Errorf("idempotent submit failed: %v", err)
+	}
+
+	// 4b. Validate Out-of-Order CL Submission (Higher CL ID submitted BEFORE Lower CL ID)
+	// Shelve CL A (e.g. CL 3) and CL B (e.g. CL 4)
+	clLowerID, err := database.CreateShelvedCL(ctx, "dev1@corp", "Lower CL ID submitted second", testTreeHash, newHead.CLID)
+	if err != nil {
+		t.Fatalf("CreateShelvedCL (lower) failed: %v", err)
+	}
+	clHigherID, err := database.CreateShelvedCL(ctx, "dev2@corp", "Higher CL ID submitted first", testTreeHash, newHead.CLID)
+	if err != nil {
+		t.Fatalf("CreateShelvedCL (higher) failed: %v", err)
+	}
+	if clHigherID <= clLowerID {
+		t.Fatalf("expected clHigherID (%d) > clLowerID (%d)", clHigherID, clLowerID)
+	}
+
+	// Submit the higher CL ID first -> gets trunk_revision 3
+	subHigher, err := database.SubmitCL(ctx, clHigherID)
+	if err != nil {
+		t.Fatalf("SubmitCL(clHigherID) failed: %v", err)
+	}
+	if subHigher.TrunkRevision == nil || *subHigher.TrunkRevision != 3 {
+		t.Errorf("expected trunk_revision = 3 for higher CL submitted first, got %v", subHigher.TrunkRevision)
+	}
+
+	// Now submit the lower CL ID second -> gets trunk_revision 4 and becomes the true Head CL!
+	subLower, err := database.SubmitCL(ctx, clLowerID)
+	if err != nil {
+		t.Fatalf("SubmitCL(clLowerID) failed: %v", err)
+	}
+	if subLower.TrunkRevision == nil || *subLower.TrunkRevision != 4 {
+		t.Errorf("expected trunk_revision = 4 for lower CL submitted second, got %v", subLower.TrunkRevision)
+	}
+
+	newHead, err = database.GetHeadCL(ctx)
+	if err != nil {
+		t.Fatalf("GetHeadCL after out-of-order submit failed: %v", err)
+	}
+	if newHead.CLID != clLowerID {
+		t.Errorf("expected GetHeadCL to return most recently submitted CL %d (rev 4), got CL %d", clLowerID, newHead.CLID)
 	}
 
 	// 5. Validate Workspace Operations

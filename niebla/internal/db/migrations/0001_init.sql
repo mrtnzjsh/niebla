@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS trees (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE SEQUENCE IF NOT EXISTS trunk_revision_seq START WITH 1;
+
 CREATE TABLE IF NOT EXISTS changelists (
     cl_id BIGSERIAL PRIMARY KEY,
     author TEXT NOT NULL,
@@ -19,6 +21,7 @@ CREATE TABLE IF NOT EXISTS changelists (
     root_tree_hash BYTEA NOT NULL,
     parent_cl BIGINT REFERENCES changelists(cl_id),
     status TEXT NOT NULL CHECK (status IN ('pending', 'shelved', 'submitted')),
+    trunk_revision BIGINT UNIQUE,
     committed_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -31,8 +34,9 @@ CREATE TABLE IF NOT EXISTS workspaces (
 );
 
 -- Seed initial empty root CL if database is empty
-INSERT INTO changelists (cl_id, author, description, root_tree_hash, status)
-VALUES (1, 'system', 'Depot root initialized', '\xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'submitted')
+INSERT INTO changelists (cl_id, author, description, root_tree_hash, status, trunk_revision)
+VALUES (1, 'system', 'Depot root initialized', '\xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'submitted', 1)
 ON CONFLICT DO NOTHING;
 
 SELECT setval(pg_get_serial_sequence('changelists', 'cl_id'), COALESCE((SELECT MAX(cl_id) FROM changelists), 1));
+SELECT setval('trunk_revision_seq', COALESCE((SELECT MAX(trunk_revision) FROM changelists), 1));

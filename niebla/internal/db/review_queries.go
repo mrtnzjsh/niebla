@@ -540,7 +540,7 @@ func (d *DB) ListCLs(ctx context.Context, limit int) ([]Changelist, error) {
 		limit = 50
 	}
 	query := `
-		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, committed_at,
+		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
 		       needs_rebase, rebase_conflict_details, base_patchset_number
 		FROM changelists
 		ORDER BY cl_id DESC
@@ -562,6 +562,7 @@ func (d *DB) ListCLs(ctx context.Context, limit int) ([]Changelist, error) {
 			&cl.RootTreeHash,
 			&cl.ParentCL,
 			&cl.Status,
+			&cl.TrunkRevision,
 			&cl.CommittedAt,
 			&cl.NeedsRebase,
 			&cl.RebaseConflictDetails,
