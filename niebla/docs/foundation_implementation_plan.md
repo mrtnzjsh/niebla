@@ -96,8 +96,8 @@ flowchart TD
 - [Distributed Analysis §3.1: Stateless Materialization Contract (`niebla export`)](file:///home/matatan/Developer/niebla/niebla/docs/distributed_architecture_analysis.md#L239-L240)
 
 ### Commit 2.1: `feat(ignore): add standalone composable .nieblaignore matcher package`
-- [ ] Create `pkg/ignore` (`Matcher` interface) with zero internal dependencies, supporting comments (`#`), directory rules (`build/`), globs (`*.o`, `node_modules`), anchored paths (`/dist`), negation (`!important.log`), and built-in exclusion of `.niebla/`.
-- [ ] Add comprehensive table-driven unit tests in `pkg/ignore/ignore_test.go`.
+- [x] Create `pkg/ignore` (`Matcher` interface) with zero internal dependencies, supporting comments (`#`), directory rules (`build/`), globs (`*.o`, `node_modules`), anchored paths (`/dist`), negation (`!important.log`), and built-in exclusion of `.niebla/`.
+- [x] Add comprehensive table-driven unit tests in `pkg/ignore/ignore_test.go`.
 
 ### Commit 2.2: `feat(cli): integrate .nieblaignore filtering into ScanScratchChanges`
 - [ ] Wire `ignore.Matcher` into [`ScanScratchChanges`](file:///home/matatan/Developer/niebla/niebla/internal/cli/status.go#L92) so ignored directories return `filepath.SkipDir` immediately without making gRPC `ResolvePath` calls or uploading build artifacts during `shelve`.
