@@ -553,6 +553,99 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// 10. CI runner subsystem validation
+	if cfg.CI.Enabled {
+		if cfg.CI.DefaultRunner != "" && len(cfg.CI.Runners) > 0 {
+			if _, exists := cfg.CI.Runners[cfg.CI.DefaultRunner]; !exists {
+				errs = append(errs, ValidationError{
+					Field:   "ci.default_runner",
+					Value:   cfg.CI.DefaultRunner,
+					Message: fmt.Sprintf("default_runner %q not found in runners table", cfg.CI.DefaultRunner),
+					Hint:    "Ensure [ci.runners.<name>] matches the default_runner value or declare the runner.",
+				})
+			}
+		}
+
+		for name, r := range cfg.CI.Runners {
+			provider := strings.ToLower(strings.TrimSpace(r.Provider))
+			if provider == "" {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("ci.runners.%s.provider", name),
+					Value:   "",
+					Message: "provider cannot be empty",
+					Hint:    "Set provider to 'local', 'forgejo', 'github', or 'webhook'.",
+				})
+			} else if provider != "local" && provider != "forgejo" && provider != "github" && provider != "webhook" {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("ci.runners.%s.provider", name),
+					Value:   r.Provider,
+					Message: fmt.Sprintf("unsupported CI provider %q", r.Provider),
+					Hint:    "Supported CI providers: 'local', 'forgejo', 'github', or 'webhook'.",
+				})
+			}
+
+			if provider == "forgejo" || provider == "github" || provider == "webhook" {
+				ep := strings.TrimSpace(r.Endpoint)
+				if ep == "" || (!strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://")) {
+					errs = append(errs, ValidationError{
+						Field:   fmt.Sprintf("ci.runners.%s.endpoint", name),
+						Value:   ep,
+						Message: "endpoint must begin with http:// or https://",
+						Hint:    "Specify the HTTP/REST webhook or dispatch endpoint URL.",
+					})
+				}
+			}
+
+			if r.Auth.Mode != "" {
+				authMode := strings.ToLower(strings.TrimSpace(r.Auth.Mode))
+				validAuthModes := map[string]bool{
+					"none": true, "bearer": true, "token": true, "basic": true, "header": true, "hmac": true,
+				}
+				if !validAuthModes[authMode] {
+					errs = append(errs, ValidationError{
+						Field:   fmt.Sprintf("ci.runners.%s.auth.mode", name),
+						Value:   r.Auth.Mode,
+						Message: fmt.Sprintf("unsupported auth mode %q", r.Auth.Mode),
+						Hint:    "Supported auth modes: 'none', 'bearer', 'token', 'basic', 'header', 'hmac'.",
+					})
+				}
+
+				if (authMode == "bearer" || authMode == "token") && r.Auth.Token == "" && r.Auth.TokenEnv == "" && r.Auth.KeyFile == "" {
+					errs = append(errs, ValidationError{
+						Field:   fmt.Sprintf("ci.runners.%s.auth", name),
+						Value:   "",
+						Message: fmt.Sprintf("auth mode %q requires token, token_env, or key_file", authMode),
+						Hint:    "Set 'token = \"...\"' or 'token_env = \"ENV_VAR\"' or 'key_file = \"...\"'.",
+					})
+				}
+				if authMode == "basic" && r.Auth.Username == "" {
+					errs = append(errs, ValidationError{
+						Field:   fmt.Sprintf("ci.runners.%s.auth.username", name),
+						Value:   "",
+						Message: "basic auth requires username",
+						Hint:    "Set username for basic authentication.",
+					})
+				}
+				if authMode == "header" && strings.TrimSpace(r.Auth.HeaderName) == "" {
+					errs = append(errs, ValidationError{
+						Field:   fmt.Sprintf("ci.runners.%s.auth.header_name", name),
+						Value:   "",
+						Message: "header auth requires header_name",
+						Hint:    "Set header_name (e.g. 'X-Api-Key').",
+					})
+				}
+				if authMode == "hmac" && r.Auth.Secret == "" && r.Auth.SecretEnv == "" {
+					errs = append(errs, ValidationError{
+						Field:   fmt.Sprintf("ci.runners.%s.auth", name),
+						Value:   "",
+						Message: "hmac auth requires secret or secret_env",
+						Hint:    "Set secret or secret_env to configure HMAC signing key.",
+					})
+				}
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return errs
 	}

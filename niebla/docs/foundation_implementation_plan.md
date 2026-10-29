@@ -138,9 +138,10 @@ flowchart TD
 
 
 ### Commit 3.3: `feat(ci): add [ci] config schema, Provider interfaces, and Auth RoundTripper`
-- [ ] Extend [`internal/config/config.go`](file:///home/matatan/Developer/niebla/niebla/internal/config/config.go) and validation rules with `CIConfig`, `CIRunnerConfig`, and `CIAuthConfig`.
-- [ ] Create `pkg/ci` core interfaces (`Provider`, `StatusReporter`, `Dispatcher`) and `pkg/ci/auth` composable `http.RoundTripper` (`bearer`, `token`, `basic`, `header`, `hmac`).
-- [ ] Add unit tests in `pkg/ci/auth/auth_test.go` and `internal/config/config_test.go`.
+- [x] Extend [`internal/config/config.go`](file:///home/matatan/Developer/niebla/niebla/internal/config/config.go) and validation rules with `CIConfig`, `CIRunnerConfig`, and `CIAuthConfig`.
+- [x] Create `pkg/ci` core interfaces (`Provider`, `StatusReporter`, `Dispatcher`) and `pkg/ci/auth` composable `http.RoundTripper` (`bearer`, `token`, `basic`, `header`, `hmac`).
+- [x] Add unit tests in `pkg/ci/auth/auth_test.go` and `internal/config/config_test.go`.
+
 
 ### Commit 3.4: `feat(ci): implement default local sandbox runner provider`
 - [ ] Implement `pkg/ci/providers/local` using `pkg/materialize` (`HardlinkCAS`) to materialize patchsets into `/tmp/niebla-ci/cl-<id>-ps-<n>/`, execute the configured command with timeout, capture logs to CAS, and report status via `StatusReporter`.

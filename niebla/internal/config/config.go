@@ -1,16 +1,20 @@
 package config
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // Config represents the unified toolchain configuration stored in ~/.config/niebla/config.toml.
 type Config struct {
-	Version  int            `toml:"version"`
-	Core     CoreConfig     `toml:"core"`
-	Server   ServerConfig   `toml:"server"`
-	FS       FSConfig       `toml:"fs"`
+	Version    int              `toml:"version"`
+	Core       CoreConfig       `toml:"core"`
+	Server     ServerConfig     `toml:"server"`
+	FS         FSConfig         `toml:"fs"`
 	Critique   CritiqueConfig   `toml:"critique"`
 	Events     EventsConfig     `toml:"events"`
 	Resilience ResilienceConfig `toml:"resilience"`
+	CI         CIConfig         `toml:"ci"`
 }
 
 // CoreConfig holds settings shared across toolchain components.
@@ -344,5 +348,100 @@ func DefaultConfig() *Config {
 				SnapshotOnSubmit: true,
 			},
 		},
+		CI: CIConfig{
+			Enabled:              false,
+			DefaultRunner:        "local",
+			RequireGreenToSubmit: false,
+			Runners: map[string]CIRunnerConfig{
+				"local": {
+					Provider:       "local",
+					WorkDir:        "/tmp/niebla-ci",
+					Command:        []string{"go", "test", "./..."},
+					TimeoutSeconds: 300,
+					Concurrency:    2,
+				},
+			},
+		},
 	}
 }
+
+// CIConfig specifies automated CI runner orchestration settings.
+type CIConfig struct {
+	Enabled              bool                      `toml:"enabled"`
+	DefaultRunner        string                    `toml:"default_runner"`          // e.g. "local"
+	RequireGreenToSubmit bool                      `toml:"require_green_to_submit"` // Gates SubmitCL on green check runs
+	ServerURL            string                    `toml:"server_url,omitempty"`    // Base URL for runner callbacks (e.g. http://localhost:8080)
+	Runners              map[string]CIRunnerConfig `toml:"runners"`
+}
+
+// CIRunnerConfig defines a single declarative CI runner target.
+type CIRunnerConfig struct {
+	Provider       string       `toml:"provider"` // "local", "forgejo", "github", "webhook"
+	WorkDir        string       `toml:"work_dir,omitempty"`
+	Command        []string     `toml:"command,omitempty"`
+	TimeoutSeconds int          `toml:"timeout_seconds,omitempty"`
+	Concurrency    int          `toml:"concurrency,omitempty"`
+	Endpoint       string       `toml:"endpoint,omitempty"`
+	Ref            string       `toml:"ref,omitempty"`
+	EventType      string       `toml:"event_type,omitempty"`
+	Auth           CIAuthConfig `toml:"auth,omitempty"`
+}
+
+// CIAuthConfig specifies credentials and signing for remote runner dispatch.
+type CIAuthConfig struct {
+	Mode        string `toml:"mode"` // "bearer", "token", "basic", "header", "hmac", or "none"
+	Token       string `toml:"token,omitempty"`
+	TokenEnv    string `toml:"token_env,omitempty"`
+	KeyFile     string `toml:"key_file,omitempty"`
+	Username    string `toml:"username,omitempty"`
+	Password    string `toml:"password,omitempty"`
+	PasswordEnv string `toml:"password_env,omitempty"`
+	HeaderName  string `toml:"header_name,omitempty"`
+	Secret      string `toml:"secret,omitempty"`
+	SecretEnv   string `toml:"secret_env,omitempty"`
+}
+
+// ResolveToken returns the API/bearer token from Token, TokenEnv, or KeyFile.
+func (a *CIAuthConfig) ResolveToken() string {
+	if a.Token != "" {
+		return a.Token
+	}
+	if a.TokenEnv != "" {
+		if val := os.Getenv(a.TokenEnv); val != "" {
+			return val
+		}
+	}
+	if a.KeyFile != "" {
+		if data, err := os.ReadFile(a.KeyFile); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return ""
+}
+
+// ResolveSecret returns the webhook HMAC secret from Secret or SecretEnv.
+func (a *CIAuthConfig) ResolveSecret() []byte {
+	if a.Secret != "" {
+		return []byte(a.Secret)
+	}
+	if a.SecretEnv != "" {
+		if val := os.Getenv(a.SecretEnv); val != "" {
+			return []byte(val)
+		}
+	}
+	return nil
+}
+
+// ResolvePassword returns the basic auth password from Password or PasswordEnv.
+func (a *CIAuthConfig) ResolvePassword() string {
+	if a.Password != "" {
+		return a.Password
+	}
+	if a.PasswordEnv != "" {
+		if val := os.Getenv(a.PasswordEnv); val != "" {
+			return val
+		}
+	}
+	return ""
+}
+

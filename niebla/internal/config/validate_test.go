@@ -431,6 +431,68 @@ func TestValidateResilienceConfig(t *testing.T) {
 	}
 }
 
+func TestCIValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.CI.Enabled = true
+
+	// 1. Default runner should be valid out of the box
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected default CI config to pass validation, got: %v", err)
+	}
+
+	// 2. Default runner pointing to missing runner
+	cfg.CI.DefaultRunner = "missing-runner"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "not found in runners table") {
+		t.Errorf("expected error for missing default runner, got: %v", err)
+	}
+	cfg.CI.DefaultRunner = "local"
+
+	// 3. Runner with unsupported provider
+	cfg.CI.Runners["bad-provider"] = CIRunnerConfig{
+		Provider: "jenkins-pipeline",
+	}
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "unsupported CI provider") {
+		t.Errorf("expected error for unsupported CI provider, got: %v", err)
+	}
+	delete(cfg.CI.Runners, "bad-provider")
+
+	// 4. Remote runner with invalid endpoint
+	cfg.CI.Runners["forgejo-ci"] = CIRunnerConfig{
+		Provider: "forgejo",
+		Endpoint: "not-a-url",
+	}
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "endpoint must begin with http:// or https://") {
+		t.Errorf("expected error for invalid endpoint URL, got: %v", err)
+	}
+
+	// 5. Remote runner with bearer auth missing token
+	cfg.CI.Runners["forgejo-ci"] = CIRunnerConfig{
+		Provider: "forgejo",
+		Endpoint: "https://git.example.com/api/v1/repos/org/repo/actions/workflows/1/dispatches",
+		Auth: CIAuthConfig{
+			Mode: "bearer",
+		},
+	}
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "requires token, token_env, or key_file") {
+		t.Errorf("expected error for bearer auth without token, got: %v", err)
+	}
+
+	// 6. Valid remote runner with token_env
+	cfg.CI.Runners["forgejo-ci"] = CIRunnerConfig{
+		Provider: "forgejo",
+		Endpoint: "https://git.example.com/api/v1/repos/org/repo/actions/workflows/1/dispatches",
+		Ref:      "main",
+		Auth: CIAuthConfig{
+			Mode:     "bearer",
+			TokenEnv: "FORGEJO_TOKEN",
+		},
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected valid forgejo runner config to pass, got: %v", err)
+	}
+}
+
+
 
 
 
