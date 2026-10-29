@@ -61,3 +61,26 @@ func TestMetadataCache_Operations(t *testing.T) {
 		t.Fatalf("expected CLID 15, got %d", cache.CLID())
 	}
 }
+
+func TestMetadataCache_ListDir(t *testing.T) {
+	cache := NewMetadataCache()
+	cache.Set("README.md", Metadata{Name: "README.md"})
+	cache.Set("src/main.go", Metadata{Name: "main.go"})
+	cache.Set("src/util.go", Metadata{Name: "util.go"})
+	cache.Set("src/sub/deep.go", Metadata{Name: "deep.go"})
+
+	rootEntries := cache.ListDir("")
+	if len(rootEntries) != 1 || rootEntries[0].Name != "README.md" {
+		t.Errorf("expected 1 root entry (README.md), got %v", rootEntries)
+	}
+
+	srcEntries := cache.ListDir("src")
+	if len(srcEntries) != 2 {
+		t.Errorf("expected 2 src entries, got %d", len(srcEntries))
+	}
+
+	subEntries := cache.ListDir("src/sub")
+	if len(subEntries) != 1 || subEntries[0].Name != "deep.go" {
+		t.Errorf("expected 1 sub entry (deep.go), got %v", subEntries)
+	}
+}

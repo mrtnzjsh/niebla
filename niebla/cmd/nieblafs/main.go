@@ -9,6 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"bazil.org/fuse"
+	fusefs "bazil.org/fuse/fs"
+	"niebla/cmd/nieblafs/internal/fs"
 	"niebla/cmd/nieblafs/internal/metadata"
 	"niebla/pkg/nieblafs/control"
 )
@@ -77,14 +80,38 @@ func main() {
 		}
 	}
 
+	var fuseConn *fuse.Conn
+	if *mountPoint != "" {
+		c, err := fuse.Mount(
+			*mountPoint,
+			fuse.FSName("nieblafs"),
+			fuse.Subtype("nieblafs"),
+		)
+		if err != nil {
+			log.Printf("warning: FUSE mount failed on %s: %v", *mountPoint, err)
+		} else {
+			fuseConn = c
+			fsInstance := fs.NewFS(*scratchDir, *cacheDir, metaCache)
+			go func() {
+				if err := fusefs.Serve(fuseConn, fsInstance); err != nil {
+					log.Printf("fusefs.Serve terminated: %v", err)
+				}
+			}()
+		}
+	}
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Ready signal for caller
 	fmt.Println("nieblafs ready")
 
+	<-sigChan
+	log.Println("NieblaFS shutting down gracefully...")
+	if fuseConn != nil {
+		_ = fuseConn.Close()
+	}
 	if *mountPoint != "" {
-		<-sigChan
-		log.Println("NieblaFS unmounted and shutting down gracefully.")
+		_ = fuse.Unmount(*mountPoint)
 	}
 }

@@ -98,6 +98,37 @@ func (mc *MetadataCache) SetCLID(id int64) {
 	mc.clID = id
 }
 
+// ListDir returns all direct children metadata in the specified relative directory path.
+func (mc *MetadataCache) ListDir(dir string) []Metadata {
+	mc.mutex.RLock()
+	defer mc.mutex.RUnlock()
+
+	cleanDir := dir
+	if cleanDir == "." || cleanDir == "/" {
+		cleanDir = ""
+	}
+
+	var results []Metadata
+	for p, meta := range mc.cache {
+		parent := ""
+		idx := -1
+		for i := len(p) - 1; i >= 0; i-- {
+			if p[i] == '/' {
+				idx = i
+				break
+			}
+		}
+		if idx != -1 {
+			parent = p[:idx]
+		}
+
+		if parent == cleanDir {
+			results = append(results, meta)
+		}
+	}
+	return results
+}
+
 // Reanchor updates the root tree hash and CLID while purging all cached inode metadata.
 func (mc *MetadataCache) Reanchor(newRootTreeHash string, clID int64) int {
 	mc.mutex.Lock()

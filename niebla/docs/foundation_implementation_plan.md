@@ -183,9 +183,9 @@ flowchart TD
 - [x] Add unit and CLI integration tests in `internal/cli/sync_test.go`.
 
 ### Commit 4.3: `feat(nieblafs): complete FUSE mount, lookup, and read loops with CoW scratch overlay`
-- [ ] Wire `bazil.org/fuse/fs.Serve` and mount lifecycle in `cmd/nieblafs/main.go` with signal-safe unmount.
-- [ ] Complete `Root.Lookup` and `File.Read` resolving local CoW scratch files first with fallback to CAS blobs.
-- [ ] Add integration tests in `cmd/nieblafs/test/` verifying file lookup, read, and control socket re-anchoring.
+- [x] Wire `bazil.org/fuse/fs.Serve` and mount lifecycle in `cmd/nieblafs/main.go` with signal-safe unmount.
+- [x] Complete `Root.Lookup` and `File.Read` resolving local CoW scratch files first with fallback to CAS blobs.
+- [x] Add integration tests in `cmd/nieblafs/test/` verifying file lookup, read, and control socket re-anchoring.
 
 ### Commit 4.4: `docs(skills): update niebla skill and roadmap checklists with FUSE control socket`
 - [ ] Update `docs/agentic_development_analysis.md` checklist items for Phase 1 P0 and P1.
