@@ -1,21 +1,16 @@
 CREATE TABLE IF NOT EXISTS blobs (
     sha256 BYTEA PRIMARY KEY,
     byte_size BIGINT NOT NULL,
-    storage_path TEXT NOT NULL,
+    storage_path TEXT NOT NULL, -- Portable relative sharded key (e.g. ab/cd/<sha256>)
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS tree_nodes (
-    id BIGSERIAL PRIMARY KEY,
-    tree_hash BYTEA NOT NULL,
-    name TEXT NOT NULL,
-    mode INT NOT NULL,
-    size BIGINT NOT NULL DEFAULT 0,
-    blob_sha256 BYTEA REFERENCES blobs(sha256),
-    sub_tree_hash BYTEA
+CREATE TABLE IF NOT EXISTS trees (
+    tree_hash BYTEA PRIMARY KEY,
+    manifest BYTEA NOT NULL,
+    entry_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_tree_hash ON tree_nodes(tree_hash);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tree_entry ON tree_nodes(tree_hash, name);
 
 CREATE TABLE IF NOT EXISTS changelists (
     cl_id BIGSERIAL PRIMARY KEY,

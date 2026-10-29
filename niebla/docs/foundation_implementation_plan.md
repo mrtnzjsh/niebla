@@ -67,9 +67,9 @@ flowchart TD
 - [x] Add unit tests in `pkg/tree/tree_test.go` verifying deterministic round-trip serialization on empty, single-entry, and 1,000-entry directory trees.
 
 ### Commit 1.3: `feat(db): replace row-per-entry tree_nodes with compact trees manifest table`
-- [ ] Replace `tree_nodes` in [`internal/db/migrations/0001_init.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0001_init.sql) with `trees (tree_hash BYTEA PRIMARY KEY, manifest BYTEA NOT NULL, entry_count INT NOT NULL, created_at TIMESTAMPTZ DEFAULT now())`.
-- [ ] Update `InsertTreeNodes`, `GetTreeEntries`, and `GetNodeEntry` in [`internal/db/queries.go`](file:///home/matatan/Developer/niebla/niebla/internal/db/queries.go) to read/write serialized manifests with zero signature changes.
-- [ ] Verify existing and updated tree queries pass in `internal/db/db_test.go` via `testcontainers-go` (`postgres:16-alpine`).
+- [x] Replace `tree_nodes` in [`internal/db/migrations/0001_init.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0001_init.sql) with `trees (tree_hash BYTEA PRIMARY KEY, manifest BYTEA NOT NULL, entry_count INT NOT NULL, created_at TIMESTAMPTZ DEFAULT now())`.
+- [x] Update `InsertTreeNodes`, `GetTreeEntries`, and `GetNodeEntry` in [`internal/db/queries.go`](file:///home/matatan/Developer/niebla/niebla/internal/db/queries.go) to read/write serialized manifests with zero signature changes.
+- [x] Verify existing and updated tree queries pass in `internal/db/db_test.go` via `testcontainers-go` (`postgres:16-alpine`).
 
 ### Commit 1.4: `feat(db): add sequential trunk_revision and pg_advisory_xact_lock to SubmitCL`
 - [ ] Update `changelists` in [`internal/db/migrations/0001_init.sql`](file:///home/matatan/Developer/niebla/niebla/internal/db/migrations/0001_init.sql) with `trunk_revision BIGINT UNIQUE`, `trunk_revision_seq`, and seed CL 1 with `trunk_revision = 1`.

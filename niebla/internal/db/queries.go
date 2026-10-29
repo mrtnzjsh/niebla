@@ -84,110 +84,56 @@ func (d *DB) GetBlob(ctx context.Context, sha256 []byte) (*BlobRecord, error) {
 // GetTreeEntries retrieves all direct child entries for a given tree hash.
 func (d *DB) GetTreeEntries(ctx context.Context, treeHash []byte) ([]tree.Entry, error) {
 	query := `
-		SELECT name, mode, size, blob_sha256, sub_tree_hash
-		FROM tree_nodes
-		WHERE tree_hash = $1
-		ORDER BY name ASC;
+		SELECT manifest
+		FROM trees
+		WHERE tree_hash = $1;
 	`
-	rows, err := d.pool.Query(ctx, query, treeHash)
+	var manifest []byte
+	err := d.pool.QueryRow(ctx, query, treeHash).Scan(&manifest)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query tree nodes: %w", err)
-	}
-	defer rows.Close()
-
-	var entries []tree.Entry
-	for rows.Next() {
-		var (
-			e           tree.Entry
-			mode        int
-			size        int64
-			blobSHA     []byte
-			subTreeHash []byte
-		)
-		if err := rows.Scan(&e.Name, &mode, &size, &blobSHA, &subTreeHash); err != nil {
-			return nil, fmt.Errorf("failed to scan tree node: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []tree.Entry{}, nil
 		}
-		e.Mode = uint32(mode)
-		e.Size = uint64(size)
-		e.BlobSHA256 = blobSHA
-		e.SubTreeHash = subTreeHash
-		entries = append(entries, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows error while querying tree nodes: %w", err)
+		return nil, fmt.Errorf("failed to query tree manifest: %w", err)
 	}
 
+	entries, err := tree.UnmarshalManifest(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal tree manifest: %w", err)
+	}
 	return entries, nil
 }
 
 // GetNodeEntry retrieves a specific child node by name within a parent tree.
 func (d *DB) GetNodeEntry(ctx context.Context, parentTreeHash []byte, name string) (*tree.Entry, error) {
-	query := `
-		SELECT name, mode, size, blob_sha256, sub_tree_hash
-		FROM tree_nodes
-		WHERE tree_hash = $1 AND name = $2;
-	`
-	var (
-		e           tree.Entry
-		mode        int
-		size        int64
-		blobSHA     []byte
-		subTreeHash []byte
-	)
-	err := d.pool.QueryRow(ctx, query, parentTreeHash, name).Scan(
-		&e.Name,
-		&mode,
-		&size,
-		&blobSHA,
-		&subTreeHash,
-	)
+	entries, err := d.GetTreeEntries(ctx, parentTreeHash)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
 		return nil, fmt.Errorf("failed to query tree node %q: %w", name, err)
 	}
-	e.Mode = uint32(mode)
-	e.Size = uint64(size)
-	e.BlobSHA256 = blobSHA
-	e.SubTreeHash = subTreeHash
-	return &e, nil
+	if entry, ok := tree.FindEntry(entries, name); ok {
+		return entry, nil
+	}
+	return nil, ErrNotFound
 }
 
-// InsertTreeNodes persists multiple tree node entries under a tree hash.
+// InsertTreeNodes persists multiple tree node entries under a tree hash as a compact manifest.
 func (d *DB) InsertTreeNodes(ctx context.Context, treeHash []byte, entries []tree.Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
 
-	tx, err := d.pool.Begin(ctx)
+	manifest, err := tree.MarshalManifest(entries)
 	if err != nil {
-		return fmt.Errorf("failed to start transaction: %w", err)
+		return fmt.Errorf("failed to marshal tree manifest: %w", err)
 	}
-	defer tx.Rollback(ctx)
 
 	query := `
-		INSERT INTO tree_nodes (tree_hash, name, mode, size, blob_sha256, sub_tree_hash)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (tree_hash, name) DO NOTHING;
+		INSERT INTO trees (tree_hash, manifest, entry_count)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (tree_hash) DO NOTHING;
 	`
-	for _, e := range entries {
-		var blobSHA interface{} = e.BlobSHA256
-		if len(e.BlobSHA256) == 0 {
-			blobSHA = nil
-		}
-		var subTree interface{} = e.SubTreeHash
-		if len(e.SubTreeHash) == 0 {
-			subTree = nil
-		}
-
-		if _, err := tx.Exec(ctx, query, treeHash, e.Name, int(e.Mode), int64(e.Size), blobSHA, subTree); err != nil {
-			return fmt.Errorf("failed to insert tree node %q: %w", e.Name, err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit tree nodes: %w", err)
+	if _, err := d.pool.Exec(ctx, query, treeHash, manifest, len(entries)); err != nil {
+		return fmt.Errorf("failed to insert tree manifest: %w", err)
 	}
 	return nil
 }
