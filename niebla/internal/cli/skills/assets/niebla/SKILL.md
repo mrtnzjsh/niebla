@@ -102,8 +102,23 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
   Atomically commits the changelist to trunk head under a transaction-scoped PostgreSQL advisory lock (`pg_advisory_xact_lock`):
   * **Monotonic Trunk Revisions (`trunk_revision`):** While `cl_id` is allocated when a CL is first shelved, `SubmitCL` assigns a strictly sequential `trunk_revision` ($r1, r2, r3, \dots$) in exact commit order so out-of-order CL submissions never invert trunk head.
   * **Automatic 3-Way Trunk Merge:** If a CL's `parent_cl` lags behind the current `HeadCL`, `SubmitCL` automatically performs a server-side 3-way Merkle tree merge (`tree.ThreeWayTreeMerge`). Disjoint changes merge cleanly onto trunk head; overlapping file conflicts abort submission with `FailedPrecondition` (`needs_rebase = true`) so the author can run `niebla sync`.
-  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, and no pending rebase conflicts exist (`needs_rebase = false`).
-  * **Bypass Guard:** Use `--force` to bypass unresolved comments or missing approvals when urgent trunk submission is required.
+  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, CI check runs are green when `require_green_to_submit = true`, and no pending rebase conflicts exist (`needs_rebase = false`).
+  * **Bypass Guard:** Use `--force` to bypass unresolved comments, missing approvals, or failed check runs when urgent trunk submission is required.
+
+### CI Runner Execution & Reporting (`niebla ci`)
+
+* **Wrap & execute a test/build command:**
+  ```bash
+  niebla ci exec --cl <id> [--patchset <n>] --runner <name> [--server-url <url>] [--json] -- <command> [args...]
+  ```
+  Runs any build or test command in local or remote container environments, automatically posting `status = "running"`, streaming logs, uploading the log blob to CAS, and reporting `passed` or `failed` back to Cotejo upon completion.
+
+* **Report check status manually:**
+  ```bash
+  niebla ci report --cl <id> [--patchset <n>] --runner <name> --status <status> [--url <url>] [--log-file <path>] [--json]
+  ```
+  Reports check run state directly (`queued`, `running`, `passed`, `failed`, `canceled`, `skipped`).
+
 
 ---
 
@@ -291,3 +306,11 @@ Niebla includes an enterprise-grade, completely decoupled resilience and replica
   ```bash
   niebla backup prune --keep 7 --target zfs
   ```
+
+---
+
+## 7. Related Skills
+
+* [niebla-ci](file:///home/matatan/.gemini/config/skills/niebla-ci/SKILL.md): Continuous integration runner configuration (`[ci.runners.<name>]`), workflow authoring (`niebla export` + `niebla ci exec`), and check run troubleshooting.
+* [niebla-config](file:///home/matatan/.gemini/config/skills/niebla-config/SKILL.md): Configuration schema reference (`~/.config/niebla/config.toml`), theming presets, and fast-fail validation.
+

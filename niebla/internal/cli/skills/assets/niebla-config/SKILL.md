@@ -156,6 +156,47 @@ auto_backup = false
 interval_minutes = 60
 retention_count = 14
 prune_cadence_hours = 24
+
+[events]
+enabled = false
+# Standard CloudEvents event bus sinks: "log", "webhook", "exec", "memory"
+sinks = ["log"]
+
+[events.webhook]
+url = "https://events.corp.internal/niebla"
+secret_env = "NIEBLA_EVENT_SECRET"
+
+[events.exec]
+command = ["/usr/local/bin/on-cl-event.sh"]
+
+[ci]
+enabled = false
+default_runner = "local"
+require_green_to_submit = false # When true, gates SubmitCL on passing CI runs
+server_url = "http://127.0.0.1:7331"
+
+[ci.runners.local]
+provider = "local"
+work_dir = "/tmp/niebla-ci"
+command = ["go", "test", "./..."]
+timeout_seconds = 300
+concurrency = 4
+
+[ci.runners.forgejo-linux]
+provider = "forgejo"
+endpoint = "https://git.corp.internal/api/v1/repos/org/monorepo/actions/workflows/ci.yml/dispatches"
+ref = "main"
+[ci.runners.forgejo-linux.auth]
+mode = "token"
+token_env = "FORGEJO_TOKEN"
+
+[ci.runners.github-ci]
+provider = "github"
+endpoint = "https://api.github.com/repos/org/monorepo/dispatches"
+event_type = "niebla_presubmit"
+[ci.runners.github-ci.auth]
+mode = "bearer"
+token_env = "GITHUB_PAT"
 ```
 
 ---

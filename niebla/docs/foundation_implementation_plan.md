@@ -159,7 +159,8 @@ flowchart TD
 
 
 ### Commit 3.7: `docs(skills): create niebla-ci and niebla-config skills and update niebla skill`
-- [ ] Create [`~/.gemini/config/skills/niebla-ci/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla-ci/SKILL.md) covering `[ci.runners.<name>]`, auth configuration, GitHub/Forgejo workflow authoring with `niebla export` + `niebla ci exec`, and check run troubleshooting.
-- [ ] Create [`~/.gemini/config/skills/niebla-config/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla-config/SKILL.md) documenting `~/.config/niebla/config.toml` (`[events]`, `[ci]`, `[resilience]`) and `niebla config validate`.
-- [ ] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to cross-reference `niebla ci` commands and the `require_green_to_submit` guard.
+- [x] Create [`~/.gemini/config/skills/niebla-ci/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla-ci/SKILL.md) covering `[ci.runners.<name>]`, auth configuration, GitHub/Forgejo workflow authoring with `niebla export` + `niebla ci exec`, and check run troubleshooting.
+- [x] Create [`~/.gemini/config/skills/niebla-config/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla-config/SKILL.md) documenting `~/.config/niebla/config.toml` (`[events]`, `[ci]`, `[resilience]`) and `niebla config validate`.
+- [x] Update [`~/.gemini/config/skills/niebla/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla/SKILL.md) to cross-reference `niebla ci` commands and the `require_green_to_submit` guard.
+
 
