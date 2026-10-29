@@ -154,8 +154,9 @@ flowchart TD
 
 
 ### Commit 3.6: `feat(cli): add 'niebla ci exec' and 'niebla ci report' commands`
-- [ ] Add `niebla ci exec` and `niebla ci report` in `internal/cli/ci.go` so remote runners can wrap any build command and automatically report `running` -> `passed`/`failed` + log blobs back to the server.
-- [ ] Add end-to-end integration test (`pkg/ci/ci_integration_test.go` with `testcontainers-go`) testing the full lifecycle from `niebla shelve` -> event dispatch -> runner execution -> check run status -> `niebla submit`.
+- [x] Add `niebla ci exec` and `niebla ci report` in `internal/cli/ci.go` so remote runners can wrap any build command and automatically report `running` -> `passed`/`failed` + log blobs back to the server.
+- [x] Add end-to-end integration test (`pkg/ci/ci_integration_test.go` with `testcontainers-go`) testing the full lifecycle from `niebla shelve` -> event dispatch -> runner execution -> check run status -> `niebla submit`.
+
 
 ### Commit 3.7: `docs(skills): create niebla-ci and niebla-config skills and update niebla skill`
 - [ ] Create [`~/.gemini/config/skills/niebla-ci/SKILL.md`](file:///home/matatan/.gemini/config/skills/niebla-ci/SKILL.md) covering `[ci.runners.<name>]`, auth configuration, GitHub/Forgejo workflow authoring with `niebla export` + `niebla ci exec`, and check run troubleshooting.
