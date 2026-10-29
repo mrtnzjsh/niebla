@@ -149,8 +149,9 @@ flowchart TD
 
 
 ### Commit 3.5: `feat(ci): implement forgejo, github, and webhook remote runner providers`
-- [ ] Implement `pkg/ci/providers/forgejo` (workflow dispatch API), `pkg/ci/providers/github` (`repository_dispatch` / `workflow_dispatch` API), and `pkg/ci/providers/webhook` (CloudEvents + auth).
-- [ ] Add `httptest.NewServer` test suites in `pkg/ci/providers/` verifying headers, auth tokens, HMAC signatures, request bodies, and retry behavior.
+- [x] Implement `pkg/ci/providers/forgejo` (workflow dispatch API), `pkg/ci/providers/github` (`repository_dispatch` / `workflow_dispatch` API), and `pkg/ci/providers/webhook` (CloudEvents + auth).
+- [x] Add `httptest.NewServer` test suites in `pkg/ci/providers/` verifying headers, auth tokens, HMAC signatures, request bodies, and retry behavior.
+
 
 ### Commit 3.6: `feat(cli): add 'niebla ci exec' and 'niebla ci report' commands`
 - [ ] Add `niebla ci exec` and `niebla ci report` in `internal/cli/ci.go` so remote runners can wrap any build command and automatically report `running` -> `passed`/`failed` + log blobs back to the server.
