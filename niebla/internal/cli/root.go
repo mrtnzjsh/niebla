@@ -50,6 +50,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewSkillsCmd(flags))
 	rootCmd.AddCommand(NewConfigCmd(flags))
 	rootCmd.AddCommand(NewBackupCmd(flags))
+	rootCmd.AddCommand(NewCASCmd(flags))
 
 	return rootCmd
 }
