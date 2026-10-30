@@ -254,9 +254,9 @@ flowchart TD
 - [x] Add unit tests in `internal/grpc/auth_test.go` and `internal/config/config_test.go`.
 
 ### Commit 7.2: `feat(cli): add TLS credentials builder and Bearer auth credentials to DialGRPC`
-- [ ] Implement `BuildClientCredentials` and `TokenAuth` (`credentials.PerRPCCredentials`) in `internal/cli/client.go`.
-- [ ] Update `DialGRPC` and `ResolveServerAddr` to support optional TLS and token auth via config, flags, and `NIEBLA_TOKEN` environment variable while preserving insecure localhost defaults.
-- [ ] Add unit tests in `internal/cli/client_test.go`.
+- [x] Implement `BuildClientCredentials` and `TokenAuth` (`credentials.PerRPCCredentials`) in `internal/cli/client.go`.
+- [x] Update `DialGRPC` and `ResolveServerAddr` to support optional TLS and token auth via config, flags, and `NIEBLA_TOKEN` environment variable while preserving insecure localhost defaults.
+- [x] Add unit tests in `internal/cli/client_test.go`.
 
 ### Commit 7.3: `test(grpc): add integration suite for TLS transport and Bearer token authorization`
 - [ ] Add integration test in `internal/grpc/security_integration_test.go` using dynamically generated x509 certificates and testcontainers-go PostgreSQL.
