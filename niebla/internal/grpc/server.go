@@ -13,6 +13,7 @@ import (
 	"niebla/internal/config"
 	"niebla/internal/db"
 	internalevents "niebla/internal/events"
+	"niebla/pkg/agents"
 	"niebla/pkg/cas"
 	pkgevents "niebla/pkg/events"
 	"niebla/pkg/hooks"
@@ -358,6 +359,37 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 	if len(req.Reviewers) > 0 {
 		if err := s.db.AddReviewers(ctx, clID, req.Reviewers); err != nil {
 			log.Printf("warning: failed to assign reviewers to CL %d: %v", clID, err)
+		}
+	}
+
+	// Auto-assign Review Agent Personas from .niebla/agents.toml
+	fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
+		return s.getTreeEntries(ctx, treeHash)
+	}
+	var baseTree []byte = tree.EmptyTreeHash
+	if parentCLID > 0 {
+		if parentCL, err := s.db.GetCL(ctx, parentCLID); err == nil && parentCL != nil {
+			baseTree = parentCL.RootTreeHash
+		}
+	}
+	touchedFiles, _ := tree.DiffTreeFiles(baseTree, req.RootTreeHash, fetchTree)
+	if agentsEntry, err := tree.ResolvePath(req.RootTreeHash, ".niebla/agents.toml", fetchTree); err == nil && agentsEntry != nil && !agentsEntry.IsDir() && len(agentsEntry.BlobSHA256) > 0 {
+		if f, _, err := s.casStorage.OpenBlob(agentsEntry.BlobSHA256); err == nil {
+			defer f.Close()
+			if agentsData, rErr := io.ReadAll(f); rErr == nil {
+				if agentsCfg, pErr := agents.ParseTOML(agentsData); pErr == nil && agentsCfg != nil && len(agentsCfg.Agents) > 0 {
+					matched := agents.MatchAgents(agentsCfg.Agents, touchedFiles)
+					var agentNames []string
+					for _, a := range matched {
+						agentNames = append(agentNames, a.Name)
+					}
+					if len(agentNames) > 0 {
+						if err := s.db.AddReviewers(ctx, clID, agentNames); err != nil {
+							log.Printf("warning: failed to auto-assign review agents to CL %d: %v", clID, err)
+						}
+					}
+				}
+			}
 		}
 	}
 

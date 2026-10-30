@@ -324,8 +324,8 @@ flowchart TD
 - [x] Add comprehensive unit tests in `pkg/agents/agents_test.go`.
 
 ### Commit 10.2: `feat(grpc,db): wire review agent auto-assignment and dispatch into ShelveCL`
-- [ ] Parse `.niebla/agents.toml` from CL root tree in `ShelveCL` and auto-register matching agents in `cl_reviewers`.
-- [ ] Add unit tests in `internal/grpc/agents_dispatch_test.go`.
+- [x] Parse `.niebla/agents.toml` from CL root tree in `ShelveCL` and auto-register matching agents in `cl_reviewers`.
+- [x] Add unit tests in `internal/grpc/agents_dispatch_test.go`.
 
 ### Commit 10.3: `feat(agents,cotejo): implement review agent executor posting CAS logs, inline comments, and approvals`
 - [ ] Implement `AgentExecutor` executing in-tree scripts and CAS binaries against materialized trees with timeout.
