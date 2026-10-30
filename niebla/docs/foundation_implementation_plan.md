@@ -314,6 +314,31 @@ flowchart TD
 - [x] Update `docs/agentic_development_analysis.md` marking Submit Hook Architecture complete.
 - [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `niebla cas put`, `.niebla/hooks.toml` syntax, and submit hook behavior.
 
+## Component 10: Review Agent Personas Framework (`.niebla/agents.toml`) (Phase 3 P1)
+**References:**
+- [Agentic Roadmap Phase 3: Review Agent Personas](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L217)
+
+### Commit 10.1: `feat(agents): implement composable review agent TOML parser, path matcher, and diagnostic extractor`
+- [x] Create `pkg/agents/` with `Config`, `AgentDef`, `ParseTOML`, and `MatchAgents` by touched file paths.
+- [x] Implement `ParseDiagnostics` to extract compiler/linter `path:line: message` diagnostics for inline diff comments.
+- [x] Add comprehensive unit tests in `pkg/agents/agents_test.go`.
+
+### Commit 10.2: `feat(grpc,db): wire review agent auto-assignment and dispatch into ShelveCL`
+- [ ] Parse `.niebla/agents.toml` from CL root tree in `ShelveCL` and auto-register matching agents in `cl_reviewers`.
+- [ ] Add unit tests in `internal/grpc/agents_dispatch_test.go`.
+
+### Commit 10.3: `feat(agents,cotejo): implement review agent executor posting CAS logs, inline comments, and approvals`
+- [ ] Implement `AgentExecutor` executing in-tree scripts and CAS binaries against materialized trees with timeout.
+- [ ] Upload stdout/stderr logs to CAS, record `cl_check_runs`, post inline comments to Cotejo, and cast `lgtm` / `needs_work` approval verdicts.
+- [ ] Add unit tests in `internal/agents/executor_test.go`.
+
+### Commit 10.4: `test(grpc,web): add testcontainers integration suite for review agent personas and Cotejo comments`
+- [ ] Add PostgreSQL testcontainer integration tests in `internal/grpc/agents_integration_test.go` verifying automated agent assignment, log upload to CAS, inline Cotejo comments, and auto-approval.
+
+### Commit 10.5: `docs(skills): update niebla skill and roadmap checklists with review agent personas framework`
+- [ ] Update `docs/agentic_development_analysis.md` marking Review Agent Personas complete.
+- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `.niebla/agents.toml` syntax and review agent lifecycle.
+
 
 
 
