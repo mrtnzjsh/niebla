@@ -272,3 +272,103 @@ func filepathClean(p string) string {
 	}
 	return strings.Join(out, "/")
 }
+
+// DiffTreeFiles recursively walks and compares oldTree and newTree, returning the slice of relative
+// file paths that were added, modified, or deleted.
+func DiffTreeFiles(oldTree, newTree []byte, fetchTree FetchTreeFunc) ([]string, error) {
+	if bytes.Equal(oldTree, newTree) {
+		return nil, nil
+	}
+
+	var touched []string
+	var walk func(dirPath string, oldHash, newHash []byte) error
+
+	walk = func(dirPath string, oldHash, newHash []byte) error {
+		if bytes.Equal(oldHash, newHash) {
+			return nil
+		}
+
+		oldEntriesMap := make(map[string]Entry)
+		if len(oldHash) > 0 && !bytes.Equal(oldHash, EmptyTreeHash) {
+			entries, err := fetchTree(oldHash)
+			if err != nil {
+				return err
+			}
+			for _, e := range entries {
+				oldEntriesMap[e.Name] = e
+			}
+		}
+
+		newEntriesMap := make(map[string]Entry)
+		if len(newHash) > 0 && !bytes.Equal(newHash, EmptyTreeHash) {
+			entries, err := fetchTree(newHash)
+			if err != nil {
+				return err
+			}
+			for _, e := range entries {
+				newEntriesMap[e.Name] = e
+			}
+		}
+
+		// Union of all entry names
+		allNames := make(map[string]bool)
+		for n := range oldEntriesMap {
+			allNames[n] = true
+		}
+		for n := range newEntriesMap {
+			allNames[n] = true
+		}
+
+		for name := range allNames {
+			relPath := name
+			if dirPath != "" {
+				relPath = dirPath + "/" + name
+			}
+
+			oldE, inOld := oldEntriesMap[name]
+			newE, inNew := newEntriesMap[name]
+
+			if inOld && inNew {
+				if oldE.IsDir() && newE.IsDir() {
+					if !bytes.Equal(oldE.SubTreeHash, newE.SubTreeHash) {
+						if err := walk(relPath, oldE.SubTreeHash, newE.SubTreeHash); err != nil {
+							return err
+						}
+					}
+				} else if !oldE.IsDir() && !newE.IsDir() {
+					if !bytes.Equal(oldE.BlobSHA256, newE.BlobSHA256) {
+						touched = append(touched, relPath)
+					}
+				} else {
+					// Type change (file <-> dir)
+					touched = append(touched, relPath)
+				}
+			} else if inNew {
+				// Added in new
+				if newE.IsDir() {
+					if err := walk(relPath, EmptyTreeHash, newE.SubTreeHash); err != nil {
+						return err
+					}
+				} else {
+					touched = append(touched, relPath)
+				}
+			} else if inOld {
+				// Deleted in new
+				if oldE.IsDir() {
+					if err := walk(relPath, oldE.SubTreeHash, EmptyTreeHash); err != nil {
+						return err
+					}
+				} else {
+					touched = append(touched, relPath)
+				}
+			}
+		}
+		return nil
+	}
+
+	if err := walk("", oldTree, newTree); err != nil {
+		return nil, err
+	}
+	sort.Strings(touched)
+	return touched, nil
+}

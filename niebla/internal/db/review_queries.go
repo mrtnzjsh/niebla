@@ -771,3 +771,28 @@ func (d *DB) CountApprovals(ctx context.Context, clID int64) (int, error) {
 	}
 	return count, nil
 }
+
+// GetApprovedReviewers returns the usernames of all reviewers who approved the changelist ("lgtm" or "approved").
+func (d *DB) GetApprovedReviewers(ctx context.Context, clID int64) ([]string, error) {
+	query := `
+		SELECT reviewer
+		FROM cl_approvals
+		WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved')
+		ORDER BY reviewer ASC;
+	`
+	rows, err := d.pool.Query(ctx, query, clID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query approved reviewers for CL %d: %w", clID, err)
+	}
+	defer rows.Close()
+
+	var reviewers []string
+	for rows.Next() {
+		var rev string
+		if err := rows.Scan(&rev); err != nil {
+			return nil, err
+		}
+		reviewers = append(reviewers, rev)
+	}
+	return reviewers, nil
+}

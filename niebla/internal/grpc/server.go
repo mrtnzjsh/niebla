@@ -15,8 +15,10 @@ import (
 	internalevents "niebla/internal/events"
 	"niebla/pkg/cas"
 	pkgevents "niebla/pkg/events"
+	"niebla/pkg/owners"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 	"niebla/pkg/tree"
+	"os"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/grpc"
@@ -461,6 +463,64 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 				return nil, status.Errorf(codes.FailedPrecondition,
 					"cannot submit CL %d: CI check runs not passing for patchset %d (%d pending/running, %d failed out of %d total)",
 					req.ClId, latestPS, pending, failed, total)
+			}
+		}
+
+		// 4. Guard: Check OWNERS approval policy
+		baseTree := tree.EmptyTreeHash
+		if clInfo.ParentCL != nil && *clInfo.ParentCL > 0 {
+			if parentCL, err := s.db.GetCL(ctx, *clInfo.ParentCL); err == nil && parentCL != nil {
+				baseTree = parentCL.RootTreeHash
+			}
+		}
+
+		fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
+			return s.getTreeEntries(ctx, treeHash)
+		}
+
+		touchedFiles, err := tree.DiffTreeFiles(baseTree, clInfo.RootTreeHash, fetchTree)
+		if err != nil {
+			log.Printf("warning: failed to diff tree files for CL %d: %v", req.ClId, err)
+		} else if len(touchedFiles) > 0 {
+			ownersProvider := func(dir string) ([]byte, error) {
+				ownersPath := "OWNERS.toml"
+				if dir != "" {
+					ownersPath = dir + "/OWNERS.toml"
+				}
+				entry, err := tree.ResolvePath(clInfo.RootTreeHash, ownersPath, fetchTree)
+				if err != nil || entry == nil || entry.IsDir() || len(entry.BlobSHA256) == 0 {
+					return nil, os.ErrNotExist
+				}
+				f, _, err := s.casStorage.OpenBlob(entry.BlobSHA256)
+				if err != nil {
+					return nil, err
+				}
+				defer f.Close()
+				return io.ReadAll(f)
+			}
+
+			var groupResolver owners.GroupResolver
+			if s.toolchainConfig != nil && s.toolchainConfig.Critique.Groups.Mode == "static" {
+				groupResolver = func(group string) []string {
+					groupKey := strings.TrimPrefix(group, "@")
+					return s.toolchainConfig.Critique.Groups.Static[groupKey]
+				}
+			}
+
+			evaluator := owners.NewEvaluator(ownersProvider, groupResolver)
+			approvedReviewers, _ := s.db.GetApprovedReviewers(ctx, req.ClId)
+
+			evalResult, err := evaluator.Evaluate(touchedFiles, approvedReviewers)
+			if err != nil {
+				log.Printf("warning: failed to evaluate OWNERS for CL %d: %v", req.ClId, err)
+			} else if !evalResult.Satisfied {
+				var missingDesc []string
+				for _, m := range evalResult.Missing {
+					missingDesc = append(missingDesc, fmt.Sprintf("%s (%s owners: %s)", m.Path, m.Directory, strings.Join(m.Approvers, ", ")))
+				}
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"cannot submit CL %d: missing required OWNERS approval for: %s",
+					req.ClId, strings.Join(missingDesc, "; "))
 			}
 		}
 	}
