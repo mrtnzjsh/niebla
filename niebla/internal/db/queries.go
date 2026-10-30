@@ -471,6 +471,20 @@ func (d *DB) UpdateCLRootTreeHash(ctx context.Context, clID int64, newRootTreeHa
 	return nil
 }
 
+// UpdateCLBasePatchset updates the base patchset number of a changelist.
+func (d *DB) UpdateCLBasePatchset(ctx context.Context, clID int64, basePatchsetNumber int) error {
+	query := `
+		UPDATE changelists
+		SET base_patchset_number = $2
+		WHERE cl_id = $1;
+	`
+	_, err := d.pool.Exec(ctx, query, clID, basePatchsetNumber)
+	if err != nil {
+		return fmt.Errorf("failed to update base patchset number for CL %d: %w", clID, err)
+	}
+	return nil
+}
+
 // MarkCLRebaseConflict flags a changelist as requiring rebase resolution due to a merge conflict.
 func (d *DB) MarkCLRebaseConflict(ctx context.Context, clID int64, conflictDetails string) error {
 	query := `

@@ -230,9 +230,9 @@ flowchart TD
 - [x] Add unit tests in `internal/grpc/rebase_queue_test.go` verifying asynchronous task execution, branch mutex isolation, and graceful worker shutdown.
 
 ### Commit 6.2: `feat(grpc): wire async rebase queue into ShelveCL and implement on-demand Sync-Through`
-- [ ] Wire `RebaseQueue` into `Server`: offload downstream stack re-parenting in `ShelveCL` to background queue for sub-100ms response.
-- [ ] Implement on-demand `SyncThrough` in `SyncWorkspace`: if a child CL's parent tree was updated while a background rebase is queued, immediately flush the child's rebase synchronously.
-- [ ] Add unit tests in `internal/grpc/sync_through_test.go` verifying instant shelve return and deterministic sync-through reconciliation.
+- [x] Wire `RebaseQueue` into `Server`: offload downstream stack re-parenting in `ShelveCL` to background queue for sub-100ms response.
+- [x] Implement on-demand `SyncThrough` in `SyncWorkspace`: if a child CL's parent tree was updated while a background rebase is queued, immediately flush the child's rebase synchronously.
+- [x] Add unit tests in `internal/grpc/sync_through_test.go` verifying instant shelve return and deterministic sync-through reconciliation.
 
 ### Commit 6.3: `test(grpc): add testcontainers integration suite for deep stack async cascading rebases`
 - [ ] Add PostgreSQL testcontainer integration test in `internal/grpc/cascade_integration_test.go` verifying multi-tier stack re-parenting ($CL_1 \to CL_2 \to CL_3$), concurrent shelving, and conflict handling.

@@ -38,6 +38,7 @@ type Server struct {
 	treeCache       *lru.Cache[string, []*nieblav1.NodeEntry]
 	toolchainConfig *config.Config
 	emitter         pkgevents.Emitter
+	rebaseQueue     *RebaseQueue
 }
 
 // NewServer creates a new instance of the NieblaService gRPC server.
@@ -65,13 +66,28 @@ func NewServer(database *db.DB, casStorage *cas.Storage, cacheSize int, configs 
 		}
 	}
 
-	return &Server{
+	s := &Server{
 		db:              database,
 		casStorage:      casStorage,
 		treeCache:       cache,
 		toolchainConfig: toolchainCfg,
 		emitter:         emitter,
-	}, nil
+	}
+	s.rebaseQueue = NewRebaseQueue(2, 256, s.CascadeStackRebase)
+
+	return s, nil
+}
+
+// Close stops the server's background workers and releases resources.
+func (s *Server) Close() {
+	if s.rebaseQueue != nil {
+		s.rebaseQueue.Stop()
+	}
+}
+
+// RebaseQueue returns the background rebase queue (used in testing).
+func (s *Server) RebaseQueue() *RebaseQueue {
+	return s.rebaseQueue
 }
 
 // Register registers the server with a gRPC server instance.
@@ -342,9 +358,15 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 		}
 	}
 
-	// Trigger cascading rebase for any downstream shelved changelists
+	// Offload cascading rebase to background queue for sub-100ms shelve response
 	if len(oldRootTree) > 0 && !bytes.Equal(oldRootTree, req.RootTreeHash) {
-		_, _ = s.CascadeStackRebase(ctx, clID, oldRootTree, req.RootTreeHash)
+		if s.rebaseQueue != nil {
+			s.rebaseQueue.Enqueue(clID, oldRootTree, req.RootTreeHash)
+		} else {
+			go func() {
+				_, _ = s.CascadeStackRebase(context.Background(), clID, oldRootTree, req.RootTreeHash)
+			}()
+		}
 	}
 
 	if s.emitter != nil {
@@ -631,6 +653,13 @@ func (s *Server) SyncWorkspace(ctx context.Context, req *nieblav1.SyncWorkspaceR
 	var parentRootTree []byte
 	if cl.ParentCL != nil && *cl.ParentCL > 0 {
 		parentCL = *cl.ParentCL
+
+		// On-Demand Sync-Through: flush pending parent rebase synchronously
+		_ = s.SyncThrough(ctx, cl.CLID)
+		if refreshed, err := s.db.GetCL(ctx, cl.CLID); err == nil && refreshed != nil {
+			cl = refreshed
+		}
+
 		parent, err := s.db.GetCL(ctx, parentCL)
 		if err == nil && parent != nil {
 			parentRootTree = parent.RootTreeHash

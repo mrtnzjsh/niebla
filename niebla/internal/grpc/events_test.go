@@ -222,6 +222,10 @@ func TestServer_CloudEventsEmission(t *testing.T) {
 		t.Fatalf("Re-shelve CL 3: %v", err)
 	}
 
+	if rq := server.RebaseQueue(); rq != nil {
+		rq.WaitIdle()
+	}
+
 	// Assert events contain: CLCreated (CL 3 PS 2) and CLRebased (CL 4)
 	events = emitter.Events()
 	var foundRebased bool
@@ -271,6 +275,10 @@ func TestServer_CloudEventsEmission(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Re-shelve CL 3 conflict: %v", err)
+	}
+
+	if rq := server.RebaseQueue(); rq != nil {
+		rq.WaitIdle()
 	}
 
 	events = emitter.Events()
