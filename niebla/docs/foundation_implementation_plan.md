@@ -333,7 +333,7 @@ flowchart TD
 - [x] Add unit tests in `internal/agents/executor_test.go`.
 
 ### Commit 10.4: `test(grpc,web): add testcontainers integration suite for review agent personas and Cotejo comments`
-- [ ] Add PostgreSQL testcontainer integration tests in `internal/grpc/agents_integration_test.go` verifying automated agent assignment, log upload to CAS, inline Cotejo comments, and auto-approval.
+- [x] Add PostgreSQL testcontainer integration tests in `internal/grpc/agents_integration_test.go` verifying automated agent assignment, log upload to CAS, inline Cotejo comments, and auto-approval.
 
 ### Commit 10.5: `docs(skills): update niebla skill and roadmap checklists with review agent personas framework`
 - [ ] Update `docs/agentic_development_analysis.md` marking Review Agent Personas complete.
