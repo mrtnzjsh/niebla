@@ -328,9 +328,9 @@ flowchart TD
 - [x] Add unit tests in `internal/grpc/agents_dispatch_test.go`.
 
 ### Commit 10.3: `feat(agents,cotejo): implement review agent executor posting CAS logs, inline comments, and approvals`
-- [ ] Implement `AgentExecutor` executing in-tree scripts and CAS binaries against materialized trees with timeout.
-- [ ] Upload stdout/stderr logs to CAS, record `cl_check_runs`, post inline comments to Cotejo, and cast `lgtm` / `needs_work` approval verdicts.
-- [ ] Add unit tests in `internal/agents/executor_test.go`.
+- [x] Implement `AgentExecutor` executing in-tree scripts and CAS binaries against materialized trees with timeout.
+- [x] Upload stdout/stderr logs to CAS, record `cl_check_runs`, post inline comments to Cotejo, and cast `lgtm` / `needs_work` approval verdicts.
+- [x] Add unit tests in `internal/agents/executor_test.go`.
 
 ### Commit 10.4: `test(grpc,web): add testcontainers integration suite for review agent personas and Cotejo comments`
 - [ ] Add PostgreSQL testcontainer integration tests in `internal/grpc/agents_integration_test.go` verifying automated agent assignment, log upload to CAS, inline Cotejo comments, and auto-approval.
