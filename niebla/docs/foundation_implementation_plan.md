@@ -336,8 +336,8 @@ flowchart TD
 - [x] Add PostgreSQL testcontainer integration tests in `internal/grpc/agents_integration_test.go` verifying automated agent assignment, log upload to CAS, inline Cotejo comments, and auto-approval.
 
 ### Commit 10.5: `docs(skills): update niebla skill and roadmap checklists with review agent personas framework`
-- [ ] Update `docs/agentic_development_analysis.md` marking Review Agent Personas complete.
-- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `.niebla/agents.toml` syntax and review agent lifecycle.
+- [x] Update `docs/agentic_development_analysis.md` marking Review Agent Personas complete.
+- [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `.niebla/agents.toml` syntax and review agent lifecycle.
 
 
 

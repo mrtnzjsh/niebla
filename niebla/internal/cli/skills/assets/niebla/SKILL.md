@@ -23,6 +23,7 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 7. **Transport Security & Bearer Authentication:** Single-system development connects to `127.0.0.1:50051` via plaintext loopback without auth by default. For distributed or remote environments, enable TLS (`[server.tls]`, `[core.tls]`) and pass bearer authentication tokens via `NIEBLA_TOKEN=<token>` or `core.auth_token` in `config.toml`.
 8. **OWNERS Approval Governance:** Monorepo paths and critical file patterns enforce granular ownership via `OWNERS.toml` files. Changelists affecting owned paths require approval (`lgtm`/`approved`) from designated directory or pattern owners before `niebla submit` will succeed.
 9. **Presubmit Hook Gating:** Monorepos declare client and server presubmit hooks in `.niebla/hooks.toml` (Conventional Commits, secret patterns, max file sizes). Client hooks can be bypassed with `--no-verify`; server gates are evaluated under transaction locks and bypassable only via `--force`.
+10. **Review Agent Personas:** Specialized review bots (`.niebla/agents.toml`) are auto-assigned upon `niebla shelve`, executing in-tree scripts or precompiled CAS binaries, uploading build logs to CAS, posting compiler/linter errors as inline diff comments, and casting review approvals (`lgtm`/`changes_requested`).
 
 ---
 
@@ -342,6 +343,42 @@ Niebla provides an extensible client- and server-side presubmit pipeline configu
      - `tree_scan`: Checks touched file paths against forbidden glob patterns and verifies file size limits.
      - `cas_binary`: Pulls and executes precompiled binaries directly from central CAS storage by cryptographic SHA-256 without repository pollution.
    - **Emergency Bypass:** When urgent hotfixes are required, `niebla submit --force` bypasses server-side presubmit gates.
+
+### Review Agent Personas Framework (`.niebla/agents.toml`)
+
+Niebla supports automated, collaborative review personas (linter bots, security scanners, build checkers) declared in `.niebla/agents.toml` (`pkg/agents`, `internal/agents`):
+
+1. **`.niebla/agents.toml` Schema:**
+   ```toml
+   # Specialized in-tree script reviewer
+   [[agent]]
+   name = "sec-scanner"
+   display_name = "Security Pattern Scanner"
+   type = "in_tree"
+   entrypoint = "tools/agents/sec-scanner.sh"
+   trigger_paths = ["pkg/security/**", "**/auth/**"]
+   auto_approve = true            # Casts 'lgtm' if script succeeds (exit 0)
+   capture_logs = true            # Ingests stdout/stderr to CAS (/cl/{id}/runs/{agent}/logs)
+   post_inline_diagnostics = true # Parses "path:line: message" into Cotejo inline diff comments
+   timeout_seconds = 60
+
+   # Compiled prebuilt binary runner referenced by CAS digest
+   [[agent]]
+   name = "package-builder"
+   display_name = "Package Build Runner"
+   type = "cas_binary"
+   cas_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   args = ["--strict"]
+   trigger_paths = ["src/**", "pkg/**", "go.mod"]
+   auto_approve = true
+   capture_logs = true
+   ```
+
+2. **Automated Assignment & Review Lifecycle:**
+   - **Trigger Evaluation on Shelve:** Whenever `niebla shelve` is run, `ShelveCL` resolves `.niebla/agents.toml` from the CL's root Merkle tree and matches `trigger_paths` against touched files. Matching agents are auto-registered in `cl_reviewers`.
+   - **CAS Log Streaming & Build Artifacts:** Runners capture full build output, upload it to the central CAS store (`UploadBlob`), and record the check run in `cl_check_runs` with an internal URL (`/cl/{id}/runs/{agent}/logs`).
+   - **Inline Cotejo Diagnostics:** If a compiler or linter produces output (e.g. `pkg/auth/token.go:42:15: error: missing token validation`), the agent executor parses the line numbers and posts inline comments directly into Cotejo diff threads with links to the full CAS log.
+   - **Verdict Voting:** Passing checks automatically grant `lgtm` (satisfying `OWNERS.toml` rules); failing checks register `changes_requested`, blocking `niebla submit` until fixed in a subsequent patchset.
 
 ### File Review Tracking & Status
 
