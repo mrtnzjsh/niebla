@@ -241,6 +241,32 @@ flowchart TD
 - [x] Update `docs/agentic_development_analysis.md` marking Phase 2 P1 Asynchronous Cascading Rebases as complete.
 - [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting background stack rebase and sync-through.
 
+---
+
+## Component 7: gRPC Transport Security (TLS) & Bearer Token Authentication
+**References:**
+- [Distributed Analysis Gap 3: Unauthenticated & Unencrypted gRPC Transport](file:///home/matatan/Developer/niebla/niebla/docs/distributed_architecture_analysis.md#L140-L156)
+- [Distributed Architecture Roadmap: gRPC Security](file:///home/matatan/Developer/niebla/niebla/docs/distributed_architecture_analysis.md#L381)
+
+### Commit 7.1: `feat(config,grpc): add TLS and auth token configuration schema and server auth interceptors`
+- [x] Add `ServerTLSConfig`, `ClientTLSConfig`, and `AuthTokens` schema to `internal/config/config.go` with TOML parsing and validation.
+- [x] Implement `AuthUnaryInterceptor` and `AuthStreamInterceptor` in `internal/grpc/auth.go` checking `Authorization: Bearer <token>` and `X-Niebla-Token`.
+- [x] Add unit tests in `internal/grpc/auth_test.go` and `internal/config/config_test.go`.
+
+### Commit 7.2: `feat(cli): add TLS credentials builder and Bearer auth credentials to DialGRPC`
+- [ ] Implement `BuildClientCredentials` and `TokenAuth` (`credentials.PerRPCCredentials`) in `internal/cli/client.go`.
+- [ ] Update `DialGRPC` and `ResolveServerAddr` to support optional TLS and token auth via config, flags, and `NIEBLA_TOKEN` environment variable while preserving insecure localhost defaults.
+- [ ] Add unit tests in `internal/cli/client_test.go`.
+
+### Commit 7.3: `test(grpc): add integration suite for TLS transport and Bearer token authorization`
+- [ ] Add integration test in `internal/grpc/security_integration_test.go` using dynamically generated x509 certificates and testcontainers-go PostgreSQL.
+- [ ] Verify plaintext rejection by TLS server, unauthenticated rejection, invalid token rejection, valid token authorization across unary and streaming RPCs, and insecure backward compatibility.
+
+### Commit 7.4: `docs(skills): update niebla skill and roadmap checklists with gRPC TLS & Bearer auth`
+- [ ] Update `docs/distributed_architecture_analysis.md` marking gRPC Security complete.
+- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `--token`, `NIEBLA_TOKEN`, TLS flags, and `config.toml` security sections.
+
+
 
 
 

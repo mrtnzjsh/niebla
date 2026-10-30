@@ -1,0 +1,106 @@
+package grpc
+
+import (
+	"context"
+	"strings"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+)
+
+// HeaderAuthorization is the standard gRPC / HTTP authorization header name.
+const HeaderAuthorization = "authorization"
+
+// HeaderNieblaToken is an alternative custom header name for bearer tokens.
+const HeaderNieblaToken = "x-niebla-token"
+
+// Authenticator validates incoming RPC credentials against a configured set of authorized bearer tokens.
+type Authenticator struct {
+	tokens map[string]bool
+}
+
+// NewAuthenticator initializes an Authenticator with a slice of authorized bearer tokens.
+// If tokens is empty, authentication is disabled (permissive local development mode).
+func NewAuthenticator(tokens []string) *Authenticator {
+	m := make(map[string]bool)
+	for _, t := range tokens {
+		trimmed := strings.TrimSpace(t)
+		if trimmed != "" {
+			m[trimmed] = true
+		}
+	}
+	return &Authenticator{tokens: m}
+}
+
+// IsEnabled returns true if token authentication is enabled (i.e. at least one valid token is configured).
+func (a *Authenticator) IsEnabled() bool {
+	return a != nil && len(a.tokens) > 0
+}
+
+// ValidateContext extracts credentials from gRPC incoming metadata and asserts validity against configured tokens.
+func (a *Authenticator) ValidateContext(ctx context.Context) error {
+	if !a.IsEnabled() {
+		return nil
+	}
+
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "authentication required: missing request metadata")
+	}
+
+	// 1. Check "authorization" header: "Bearer <token>"
+	if authHeaders := md.Get(HeaderAuthorization); len(authHeaders) > 0 {
+		for _, h := range authHeaders {
+			parts := strings.SplitN(strings.TrimSpace(h), " ", 2)
+			if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
+				token := strings.TrimSpace(parts[1])
+				if a.tokens[token] {
+					return nil
+				}
+			}
+		}
+	}
+
+	// 2. Check "x-niebla-token" header
+	if tokenHeaders := md.Get(HeaderNieblaToken); len(tokenHeaders) > 0 {
+		for _, t := range tokenHeaders {
+			if a.tokens[strings.TrimSpace(t)] {
+				return nil
+			}
+		}
+	}
+
+	return status.Error(codes.Unauthenticated, "authentication required: invalid or missing bearer token")
+}
+
+// UnaryServerInterceptor returns a grpc.UnaryServerInterceptor that enforces token authentication.
+func (a *Authenticator) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req any,
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (any, error) {
+		if err := a.ValidateContext(ctx); err != nil {
+			return nil, err
+		}
+		return handler(ctx, req)
+	}
+}
+
+// StreamServerInterceptor returns a grpc.StreamServerInterceptor that enforces token authentication.
+func (a *Authenticator) StreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(
+		srv any,
+		ss grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		if err := a.ValidateContext(ss.Context()); err != nil {
+			return err
+		}
+		return handler(srv, ss)
+	}
+}

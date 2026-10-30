@@ -132,6 +132,38 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// Server TLS validation
+	if cfg.Server.TLS.Enabled {
+		if strings.TrimSpace(cfg.Server.TLS.CertFile) == "" {
+			errs = append(errs, ValidationError{
+				Field:   "server.tls.cert_file",
+				Value:   cfg.Server.TLS.CertFile,
+				Message: "cert_file cannot be empty when server TLS is enabled",
+				Hint:    "Specify the path to the server's TLS certificate (e.g. '/etc/niebla/tls/server.crt').",
+			})
+		}
+		if strings.TrimSpace(cfg.Server.TLS.KeyFile) == "" {
+			errs = append(errs, ValidationError{
+				Field:   "server.tls.key_file",
+				Value:   cfg.Server.TLS.KeyFile,
+				Message: "key_file cannot be empty when server TLS is enabled",
+				Hint:    "Specify the path to the server's private key (e.g. '/etc/niebla/tls/server.key').",
+			})
+		}
+	}
+
+	// Server AuthTokens validation
+	for i, token := range cfg.Server.AuthTokens {
+		if strings.TrimSpace(token) == "" {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("server.auth_tokens[%d]", i),
+				Value:   token,
+				Message: "auth token cannot be empty or whitespace",
+				Hint:    "Provide a non-empty bearer token string or remove the entry.",
+			})
+		}
+	}
+
 	// 4. FS configuration validation
 	if cfg.FS.MountBase != "" && !strings.HasPrefix(cfg.FS.MountBase, "/") {
 		errs = append(errs, ValidationError{

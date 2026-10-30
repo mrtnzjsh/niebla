@@ -20,17 +20,36 @@ type Config struct {
 
 // CoreConfig holds settings shared across toolchain components.
 type CoreConfig struct {
-	ServerAddr       string `toml:"server_addr"`
-	DefaultWorkspace string `toml:"default_workspace"`
+	ServerAddr       string          `toml:"server_addr"`
+	DefaultWorkspace string          `toml:"default_workspace"`
+	AuthToken        string          `toml:"auth_token,omitempty"`
+	TLS              ClientTLSConfig `toml:"tls"`
+}
+
+// ClientTLSConfig holds client-side transport security options for connecting to niebla-server.
+type ClientTLSConfig struct {
+	Enabled    bool   `toml:"enabled"`
+	CAFile     string `toml:"ca_file,omitempty"`
+	ServerName string `toml:"server_name,omitempty"`
 }
 
 // ServerConfig holds daemon settings for niebla-server.
 type ServerConfig struct {
-	Host      string `toml:"host"`
-	Port      int    `toml:"port"`
-	DBURL     string `toml:"db_url"`
-	BlobPath  string `toml:"blob_path"`
-	CacheSize int    `toml:"cache_size"`
+	Host       string          `toml:"host"`
+	Port       int             `toml:"port"`
+	DBURL      string          `toml:"db_url"`
+	BlobPath   string          `toml:"blob_path"`
+	CacheSize  int             `toml:"cache_size"`
+	AuthTokens []string        `toml:"auth_tokens,omitempty"`
+	TLS        ServerTLSConfig `toml:"tls"`
+}
+
+// ServerTLSConfig holds TLS listener configuration for niebla-server.
+type ServerTLSConfig struct {
+	Enabled      bool   `toml:"enabled"`
+	CertFile     string `toml:"cert_file,omitempty"`
+	KeyFile      string `toml:"key_file,omitempty"`
+	ClientCAFile string `toml:"client_ca_file,omitempty"`
 }
 
 // FSConfig holds filesystem mount and caching options for nieblafs.
