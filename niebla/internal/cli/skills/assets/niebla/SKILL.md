@@ -21,6 +21,7 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 5. **Automatic Workspace Detection:** Running `niebla` commands inside a workspace directory automatically detects the active workspace via `$PWD`. When running from outside, specify `--workspace <name>`.
 6. **Code Review with Cotejo:** Code reviews and changelist inspections are conducted in Cotejo (`http://127.0.0.1:7331` or configured port), featuring side-by-side diffs, patchset history, and multi-line code block comments.
 7. **Transport Security & Bearer Authentication:** Single-system development connects to `127.0.0.1:50051` via plaintext loopback without auth by default. For distributed or remote environments, enable TLS (`[server.tls]`, `[core.tls]`) and pass bearer authentication tokens via `NIEBLA_TOKEN=<token>` or `core.auth_token` in `config.toml`.
+8. **OWNERS Approval Governance:** Monorepo paths and critical file patterns enforce granular ownership via `OWNERS.toml` files. Changelists affecting owned paths require approval (`lgtm`/`approved`) from designated directory or pattern owners before `niebla submit` will succeed.
 
 ---
 
@@ -139,8 +140,8 @@ Niebla supports optional TLS 1.3 transport encryption and Bearer token authentic
   Atomically commits the changelist to trunk head under a transaction-scoped PostgreSQL advisory lock (`pg_advisory_xact_lock`):
   * **Monotonic Trunk Revisions (`trunk_revision`):** While `cl_id` is allocated when a CL is first shelved, `SubmitCL` assigns a strictly sequential `trunk_revision` ($r1, r2, r3, \dots$) in exact commit order so out-of-order CL submissions never invert trunk head.
   * **Automatic 3-Way Trunk Merge:** If a CL's `parent_cl` lags behind the current `HeadCL`, `SubmitCL` automatically performs a server-side 3-way Merkle tree merge (`tree.ThreeWayTreeMerge`). Disjoint changes merge cleanly onto trunk head; overlapping file conflicts abort submission with `FailedPrecondition` (`needs_rebase = true`) so the author can run `niebla sync`.
-  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, CI check runs are green when `require_green_to_submit = true`, and no pending rebase conflicts exist (`needs_rebase = false`).
-  * **Bypass Guard:** Use `--force` to bypass unresolved comments, missing approvals, or failed check runs when urgent trunk submission is required.
+  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), all affected directory and file scopes in `OWNERS.toml` have received approval from authorized approvers (unless overridden with `--force`), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, CI check runs are green when `require_green_to_submit = true`, and no pending rebase conflicts exist (`needs_rebase = false`).
+  * **Bypass Guard:** Use `--force` to bypass unresolved comments, missing approvals, OWNERS policy violations, or failed check runs when urgent trunk submission is required.
 
 ### CI Runner Execution & Reporting (`niebla ci`)
 
@@ -246,6 +247,44 @@ Cotejo includes a dedicated **Reviewers Bar** in the header overview:
    - **Pending Approvals Override:** If `approvedCount < requiredApprovals`, clicking the button opens the `<dialog id="override-approvals-modal">` titled **Override Approvals and Submit**. Users can enter an approval override justification (up to 400 characters with a live character counter); the bottom right Submit button unlocks once any text is entered.
    - **Blocked by Unresolved Comments:** If `allow_submit_with_unresolved_comments = false` and unresolved comments exist, the submit button is styled in amber and clicking it opens the `<dialog id="unresolved-comments-modal">`.
    - **Already Submitted:** Displays an immutable `CL Submitted` status pill.
+
+### Policy & Auto-Approval Engine (`OWNERS.toml`)
+
+Niebla enforces hierarchical directory and pattern-based code ownership using `OWNERS.toml` files committed directly into the repository Merkle tree (`pkg/owners`):
+
+1. **`OWNERS.toml` Schema:**
+   ```toml
+   # Approvers authorized to satisfy ownership requirements for this directory
+   approvers = [
+     "alice",
+     "bob",
+     "@security-team",
+   ]
+
+   # Recommended reviewers suggested during review assignment
+   reviewers = [
+     "charlie",
+   ]
+
+   # Isolate this directory from inheriting parent/root OWNERS
+   set_noparent = true
+
+   # Scoped rules for specific file patterns (highest precedence)
+   [per_file]
+   "*.proto" = { approvers = ["@proto-leads"], set_noparent = true }
+   "BUILD.bazel" = { approvers = ["build-cop"] }
+   ```
+
+2. **Hierarchical Inheritance & Resolution:**
+   - When a changelist modifies, adds, or deletes files, `SubmitCL` diffs the CL against its base tree (`pkg/tree.DiffTreeFiles`).
+   - For every affected file path:
+     - Checks for matching patterns in `[per_file]` tables in the file's directory and parent directories.
+     - Walks up the directory hierarchy from the file's parent directory to root (`/`), locating `OWNERS.toml` files.
+     - Collects all authorized approvers across inherited files. If any `OWNERS.toml` or `per_file` entry sets `set_noparent = true`, traversal stops immediately at that directory level.
+     - Enterprise user groups (e.g. `@security-team`) are expanded into individual member usernames via the group resolver.
+   - For submission to succeed, **every required directory and pattern scope** must have at least one approver who has submitted an approving verdict (`lgtm` or `approved`).
+   - Submissions lacking required owner approvals fail atomically with `FailedPrecondition` diagnostics detailing the unapproved scopes and eligible approvers.
+   - Emergency or administrative override is supported via `niebla submit --force` or Cotejo approval override modal.
 
 ### File Review Tracking & Status
 

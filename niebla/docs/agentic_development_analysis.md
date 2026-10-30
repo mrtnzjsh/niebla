@@ -215,4 +215,4 @@ flowchart TD
 ### Phase 3: Future Updates (Submit Hooks & Review Agent Framework)
 - [ ] **Submit Hook Architecture:** Extensible server and client hooks for presubmit validation.
 - [ ] **Review Agent Personas:** Framework for linter bots, security scanners, and test validation agents.
-- [ ] **Policy & Auto-Approval Engine:** Scoped approval rules, `OWNERS` file syntax, and bot verdict aggregation.
+- [x] **P1: Policy & Auto-Approval Engine (`OWNERS.toml`)** *(✅ Completed: [Commits 8.1–8.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L271-L287))* — Scoped approval rules, hierarchical `OWNERS.toml` TOML syntax, `@group` expansion, `set_noparent` isolation, `[per_file]` pattern matching, and transaction-scoped submit gating with `--force` emergency bypass.

@@ -286,8 +286,8 @@ flowchart TD
 - [x] Add PostgreSQL testcontainer integration tests in `internal/grpc/owners_integration_test.go` verifying multi-directory submit gating, `set_noparent` isolation, and `--force` bypass.
 
 ### Commit 8.4: `docs(skills): update niebla skill and roadmap checklists with OWNERS.toml policy engine`
-- [ ] Update `docs/agentic_development_analysis.md` marking Policy & Auto-Approval Engine complete.
-- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `OWNERS.toml` syntax, approval enforcement, and bypass flags.
+- [x] Update `docs/agentic_development_analysis.md` marking Policy & Auto-Approval Engine complete.
+- [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `OWNERS.toml` syntax, approval enforcement, and bypass flags.
 
 
 
