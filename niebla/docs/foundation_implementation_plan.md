@@ -235,7 +235,7 @@ flowchart TD
 - [x] Add unit tests in `internal/grpc/sync_through_test.go` verifying instant shelve return and deterministic sync-through reconciliation.
 
 ### Commit 6.3: `test(grpc): add testcontainers integration suite for deep stack async cascading rebases`
-- [ ] Add PostgreSQL testcontainer integration test in `internal/grpc/cascade_integration_test.go` verifying multi-tier stack re-parenting ($CL_1 \to CL_2 \to CL_3$), concurrent shelving, and conflict handling.
+- [x] Add PostgreSQL testcontainer integration test in `internal/grpc/cascade_integration_test.go` verifying multi-tier stack re-parenting ($CL_1 \to CL_2 \to CL_3$), concurrent shelving, and conflict handling.
 
 ### Commit 6.4: `docs(skills): update niebla skill and roadmap checklists with async cascading rebases`
 - [ ] Update `docs/agentic_development_analysis.md` marking Phase 2 P1 Asynchronous Cascading Rebases as complete.
