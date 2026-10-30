@@ -232,6 +232,12 @@ Cotejo supports both single-line comments and multi-line code block comments:
    - **Resolving:** Toggle comment status between `Unresolved` and `Resolved` once comments are published.
    - **Approvals:** Submit `LGTM` (Approve) or `Request Changes` directly from the action bar or within the Reply modal dialog.
 
+5. **AI-Generated Comment Hints & Suggested Changes:**
+   - **Interactive Hint Generation (`Provide AI hint`):** Checking `🤖 Provide AI hint` in the inline comment box reveals the `✨ Generate Hint` button (`POST /cl/{id}/ai-hint/generate`).
+   - **Adaptive Context Aperture:** The `ai-hint-agent` starts with **Tier 1** (`lines`: only the commented line range). If surrounding declarations are required, it automatically widens to **Tier 2** (`block`: enclosing function/type block) or **Tier 3** (`file`: full file up to `max_context_lines`), calling the OpenAI-compatible endpoint configured under `[critique.ai]` with the version-controlled system prompt (`.niebla/prompts/comment_hint.md`).
+   - **Dual Suggestion Storage:** Accepting a hint (or an autonomous agent posting a suggestion directly) stores the replacement code in **both** a standard Markdown ```` ```suggestion ```` block inside `comment.body` and dedicated PostgreSQL columns on `cl_comments` (`has_suggestion`, `suggestion_start_line`, `suggestion_end_line`, `suggestion_code`, `suggestion_applied_ps`).
+   - **One-Click Patch Application (Submitter):** Published comments with suggestions render a **Suggested Change** diff card with **`✓ Apply Suggestion`** (`POST /cl/{id}/comments/{id}/apply-suggestion`) and **`✕ Reject`** (`POST /cl/{id}/comments/{id}/reject-suggestion`). Clicking **Apply Suggestion** splices the replacement into the file, writes the new blob to CAS, recomputes the Merkle tree, creates **Patchset $N+1$**, and automatically resolves the comment thread (`resolved = true`, `suggestion_applied_ps = N+1`).
+
 ### Reviewer Management & Enterprise Groups
 
 Cotejo includes a dedicated **Reviewers Bar** in the header overview:
@@ -424,7 +430,10 @@ Agents interacting with Cotejo via HTTP can utilize the following endpoints:
 | `GET` | `/cls` | `tab=my-reviews\|outgoing\|agents\|submitted\|all&reviewer={user}` | Segregated review inbox; returns partial content when `HX-Request: true`. |
 | `GET` | `/cl/{id}` | `file={path}&ps={ps}&base_ps={base}&reviewer={user}` | Full review interface; auto-marks selected file reviewed and displays active reviewer's drafts. |
 | `GET` | `/cl/{id}/comment-box` | `file={path}&line={start}&end_line={end}&side={side}&ps={ps}` | Fetches inline comment thread container. |
-| `POST` | `/cl/{id}/comments` | `file_path, line_number, end_line_number, side, author, body` | Creates single or multi-line comment as an unposted draft (`is_draft=true`). |
+| `POST` | `/cl/{id}/comments` | `file_path, line_number, end_line_number, side, author, body, has_suggestion, suggestion_start_line, suggestion_end_line, suggestion_code` | Creates single or multi-line comment as an unposted draft (`is_draft=true`) with optional dual-stored code suggestion. |
+| `POST` | `/cl/{id}/ai-hint/generate` | `cl_id, patchset_number, file_path, line_number, end_line_number, body` | Queries `ai-hint-agent` (OpenAI-compatible endpoint with adaptive context aperture) and returns `AIHintPreviewCard`. |
+| `POST` | `/cl/{id}/comments/{id}/apply-suggestion` | *(none)* | Applies suggested code block to latest patchset, writes blob to CAS, creates Patchset $N+1$, and auto-resolves the thread. |
+| `POST` | `/cl/{id}/comments/{id}/reject-suggestion` | *(none)* | Marks the code suggestion on the comment as rejected (`suggestion_applied_ps = -1`). |
 | `POST` | `/cl/{id}/comments/{id}/discard` | `author={user}` | Discards a single unposted draft comment. |
 | `POST` | `/cl/{id}/reply` | `author={user}&message={msg}&verdict=lgtm\|changes_requested\|none` | Publishes all pending draft comments for reviewer, posts summary message, and records verdict. |
 | `POST` | `/cl/{id}/comments/{id}/resolve` | `resolved=true\|false` | Toggles resolution status of a published comment. |
@@ -499,4 +508,4 @@ Niebla includes an enterprise-grade, completely decoupled resilience and replica
 
 * [niebla-ci](file:///home/matatan/.gemini/config/skills/niebla-ci/SKILL.md): Continuous integration runner configuration (`[ci.runners.<name>]`), workflow authoring (`niebla export` + `niebla ci exec`), and check run troubleshooting.
 * [niebla-config](file:///home/matatan/.gemini/config/skills/niebla-config/SKILL.md): Configuration schema reference (`~/.config/niebla/config.toml`), theming presets, and fast-fail validation.
-
+* [niebla-review-agent](file:///home/matatan/.gemini/config/skills/niebla-review-agent/SKILL.md): Autonomous AI code review agent workflows, adaptive context aperture, inline ```` ```suggestion ```` commenting, and `.niebla/agents.toml` registration.

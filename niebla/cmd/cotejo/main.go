@@ -143,6 +143,7 @@ func main() {
 	groupResolver := groups.NewResolver(cfg.Critique.Groups)
 	clHandler.SetDependencies(cfg, groupResolver)
 	commentsHandler := handlers.NewCommentsHandler(database, authResolver)
+	commentsHandler.SetDependencies(casStorage, cfg)
 	rawHandler := handlers.NewRawHandler(database, casStorage)
 	ciHandler := handlers.NewCIHandler(database)
 
@@ -175,11 +176,14 @@ func main() {
 	mux.HandleFunc("POST /cl/{id}/reply", clHandler.HandlePublishReview)
 	mux.HandleFunc("POST /cl/{id}/publish", clHandler.HandlePublishReview)
 
-	// Inline comments HTMX endpoints
+	// Inline comments & AI hints HTMX endpoints
 	mux.HandleFunc("GET /cl/{id}/comment-box", commentsHandler.HandleGetCommentBox)
 	mux.HandleFunc("POST /cl/{id}/comments", commentsHandler.HandleCreateComment)
+	mux.HandleFunc("POST /cl/{id}/ai-hint/generate", commentsHandler.HandleGenerateAIHint)
 	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/resolve", commentsHandler.HandleResolveComment)
 	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/discard", commentsHandler.HandleDiscardComment)
+	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/apply-suggestion", commentsHandler.HandleApplySuggestion)
+	mux.HandleFunc("POST /cl/{id}/comments/{comment_id}/reject-suggestion", commentsHandler.HandleRejectSuggestion)
 
 	// CI Check Runs API
 	mux.HandleFunc("POST /api/v1/ci/status", ciHandler.HandlePostCheckRunStatus)

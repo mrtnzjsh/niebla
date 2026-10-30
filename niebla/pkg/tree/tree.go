@@ -372,3 +372,89 @@ func DiffTreeFiles(oldTree, newTree []byte, fetchTree FetchTreeFunc) ([]string, 
 	sort.Strings(touched)
 	return touched, nil
 }
+
+// SaveTreeFunc persists a computed tree node's entries and returns an error if storage fails.
+type SaveTreeFunc func(treeHash []byte, entries []Entry) error
+
+// UpdateFileEntry updates (or inserts) the file at filePath in the Merkle tree rooted at rootTreeHash,
+// recursively recomputing and persisting parent directory tree hashes up to the new root.
+func UpdateFileEntry(rootTreeHash []byte, filePath string, newBlobSHA256 []byte, newSize uint64, fetchTree FetchTreeFunc, saveTree SaveTreeFunc) ([]byte, error) {
+	cleaned := strings.Trim(filepathClean(filePath), "/")
+	if cleaned == "" || cleaned == "." {
+		return nil, errors.New("filePath cannot be empty")
+	}
+	segments := strings.Split(cleaned, "/")
+
+	var updateRec func(currentTreeHash []byte, depth int) ([]byte, error)
+	updateRec = func(currentTreeHash []byte, depth int) ([]byte, error) {
+		var entries []Entry
+		if len(currentTreeHash) > 0 && !bytes.Equal(currentTreeHash, EmptyTreeHash) {
+			fetched, err := fetchTree(currentTreeHash)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, fetched...)
+		}
+
+		seg := segments[depth]
+		isLeaf := depth == len(segments)-1
+
+		foundIdx := -1
+		for i := range entries {
+			if entries[i].Name == seg {
+				foundIdx = i
+				break
+			}
+		}
+
+		if isLeaf {
+			mode := uint32(0100644)
+			if foundIdx >= 0 && entries[foundIdx].Mode != 0 {
+				mode = entries[foundIdx].Mode
+			}
+			newEntry := Entry{
+				Name:       seg,
+				Mode:       mode,
+				Size:       newSize,
+				BlobSHA256: newBlobSHA256,
+			}
+			if foundIdx >= 0 {
+				entries[foundIdx] = newEntry
+			} else {
+				entries = append(entries, newEntry)
+			}
+		} else {
+			var subHash []byte
+			if foundIdx >= 0 && entries[foundIdx].IsDir() {
+				subHash = entries[foundIdx].SubTreeHash
+			} else {
+				subHash = EmptyTreeHash
+			}
+			newSubHash, err := updateRec(subHash, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			newDirEntry := Entry{
+				Name:        seg,
+				Mode:        0040755,
+				SubTreeHash: newSubHash,
+			}
+			if foundIdx >= 0 {
+				entries[foundIdx] = newDirEntry
+			} else {
+				entries = append(entries, newDirEntry)
+			}
+		}
+
+		SortEntries(entries)
+		newHash := ComputeTreeHash(entries)
+		if saveTree != nil {
+			if err := saveTree(newHash, entries); err != nil {
+				return nil, err
+			}
+		}
+		return newHash, nil
+	}
+
+	return updateRec(rootTreeHash, 0)
+}

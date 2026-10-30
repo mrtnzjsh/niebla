@@ -2,13 +2,12 @@ package cli
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"os"
 	"time"
 
 	"niebla/internal/config"
+	"niebla/pkg/httpclient"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"google.golang.org/grpc"
@@ -106,21 +105,13 @@ func BuildClientCredentials(tlsCfg *config.ClientTLSConfig) (credentials.Transpo
 		return insecure.NewCredentials(), nil
 	}
 
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS13,
+	tlsConfig, err := httpclient.BuildTLSConfig(httpclient.TLSOptions{
+		Enabled:    tlsCfg.Enabled,
+		CAFile:     tlsCfg.CAFile,
 		ServerName: tlsCfg.ServerName,
-	}
-
-	if tlsCfg.CAFile != "" {
-		caPEM, err := os.ReadFile(tlsCfg.CAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate from %s: %w", tlsCfg.CAFile, err)
-		}
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("failed to parse CA certificate from %s", tlsCfg.CAFile)
-		}
-		tlsConfig.RootCAs = certPool
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return credentials.NewTLS(tlsConfig), nil

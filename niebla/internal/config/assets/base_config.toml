@@ -95,6 +95,27 @@ syntax_style = "catppuccin-mocha"
 # diff_del_border = "#f38ba8"                   # Left border on deleted lines
 
 # ------------------------------------------------------------------------------
+# Critique AI Hint & Assisted Review Configuration (Optional)
+# ------------------------------------------------------------------------------
+# By default, no OpenAI-compatible endpoint is configured and AI hint UI controls
+# are hidden in Cotejo. Uncomment and configure an endpoint below to enable AI hints.
+[critique.ai]
+enabled = false
+# endpoint = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+# model = "gpt-4o"
+# timeout_seconds = 30
+# temperature = 0.2
+# system_prompt_path = ".niebla/prompts/comment_hint.md"
+# max_context_lines = 1200
+# agent_name = "ai-hint-agent"
+
+[critique.ai.tls]
+enabled = false
+# ca_file = "/etc/niebla/tls/ca.crt"
+# server_name = "llm.internal.corp"
+
+# ------------------------------------------------------------------------------
 # Events & Notification Subsystem
 # ------------------------------------------------------------------------------
 [events]

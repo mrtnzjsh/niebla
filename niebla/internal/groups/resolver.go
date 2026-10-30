@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"niebla/internal/config"
+	"niebla/pkg/httpclient"
 )
 
 // Resolver resolves group identifiers into individual usernames.
@@ -127,7 +127,14 @@ func (a *APIResolver) getClient() *http.Client {
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
-	return &http.Client{Timeout: timeout}
+	client, err := httpclient.NewClient(timeout, httpclient.AuthConfig{
+		Mode:     "bearer",
+		TokenEnv: a.TokenEnv,
+	})
+	if err != nil {
+		return &http.Client{Timeout: timeout}
+	}
+	return client
 }
 
 func (a *APIResolver) IsGroup(candidate string) bool {
@@ -143,8 +150,9 @@ func (a *APIResolver) ResolveGroup(ctx context.Context, group string) ([]string,
 		return nil, fmt.Errorf("failed to create group api request: %w", err)
 	}
 
-	if a.TokenEnv != "" {
-		if token := os.Getenv(a.TokenEnv); token != "" {
+	if a.Client != nil && a.TokenEnv != "" {
+		authCfg := httpclient.AuthConfig{Mode: "bearer", TokenEnv: a.TokenEnv}
+		if token := authCfg.ResolveToken(); token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 	}

@@ -100,6 +100,24 @@ diff_add_border = "#a6e3a1"
 diff_del_bg     = "rgba(243, 139, 168, 0.20)"
 diff_del_border = "#f38ba8"
 
+[critique.ai]
+enabled = false
+# By default, no OpenAI-compatible endpoint is configured and AI hint UI controls
+# are hidden in Cotejo until an endpoint is configured below.
+# endpoint = "https://api.openai.com/v1"             # OpenAI-compatible API base URL (OpenAI, vLLM, Ollama, LiteLLM)
+# api_key_env = "OPENAI_API_KEY"                     # Environment variable containing bearer token
+# model = "gpt-4o"                                   # Model identifier
+# timeout_seconds = 30
+# temperature = 0.2                                  # 0.0 to 2.0 (lower = deterministic code suggestions)
+# system_prompt_path = ".niebla/prompts/comment_hint.md"
+# max_context_lines = 1200                           # Max lines when widening context aperture to full file
+# agent_name = "ai-hint-agent"                       # Agent registered in .niebla/agents.toml
+
+[critique.ai.tls]
+enabled = false
+# ca_file = "/etc/niebla/tls/ca.crt"
+# server_name = "llm.internal.corp"
+
 [resilience]
 enabled = false
 default_mode = "zfs_stream" # "zfs_stream" (default) or "bundle"

@@ -1,0 +1,15 @@
+# ==============================================================================
+# Niebla Review Agent Personas (.niebla/agents.toml)
+# ==============================================================================
+
+[[agent]]
+name = "ai-hint-agent"
+display_name = "AI Code Review Hint Assistant"
+type = "in_tree"
+entrypoint = "tools/agents/ai-hint-agent/main.go"
+args = ["--prompt", ".niebla/prompts/comment_hint.md"]
+blocking = false
+auto_approve = false
+capture_logs = true
+timeout_seconds = 30
+

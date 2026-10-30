@@ -491,3 +491,80 @@ func TestCIValidation(t *testing.T) {
 		t.Fatalf("expected valid forgejo runner config to pass, got: %v", err)
 	}
 }
+
+func TestValidateCritiqueAIConfig(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// 1. Disabled and unconfigured by default passes, and IsConfigured() is false
+	if cfg.Critique.AI.Endpoint != "" {
+		t.Fatalf("expected DefaultConfig() to have empty AI endpoint, got %q", cfg.Critique.AI.Endpoint)
+	}
+	if cfg.Critique.AI.IsConfigured() {
+		t.Fatalf("expected DefaultConfig().Critique.AI.IsConfigured() to be false")
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected DefaultConfig() to pass validation, got: %v", err)
+	}
+
+	// 2. Enabled without an endpoint fails validation
+	cfg.Critique.AI.Enabled = true
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "AI endpoint URL cannot be empty") {
+		t.Errorf("expected error for empty AI endpoint when enabled, got: %v", err)
+	}
+
+	// 3. Enabled with valid endpoint and model passes validation and IsConfigured() is true
+	cfg.Critique.AI.Endpoint = "https://api.openai.com/v1"
+	cfg.Critique.AI.Model = "gpt-4o"
+	if !cfg.Critique.AI.IsConfigured() {
+		t.Errorf("expected IsConfigured() to be true when enabled and endpoint is set")
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected configured AI config to pass validation, got: %v", err)
+	}
+
+	// 4. Invalid endpoint scheme fails
+	cfg.Critique.AI.Endpoint = "ws://api.openai.com/v1"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "must begin with http:// or https://") {
+		t.Errorf("expected error for invalid AI endpoint scheme, got: %v", err)
+	}
+	cfg.Critique.AI.Endpoint = "https://api.openai.com/v1"
+
+	// 5. Empty model fails
+	cfg.Critique.AI.Model = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "model cannot be empty") {
+		t.Errorf("expected error for empty AI model, got: %v", err)
+	}
+	cfg.Critique.AI.Model = "gpt-4o"
+
+	// 6. Empty system_prompt_path fails
+	cfg.Critique.AI.SystemPromptPath = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "system_prompt_path cannot be empty") {
+		t.Errorf("expected error for empty system_prompt_path, got: %v", err)
+	}
+	cfg.Critique.AI.SystemPromptPath = ".niebla/prompts/comment_hint.md"
+
+	// 7. Temperature out of range fails
+	cfg.Critique.AI.Temperature = 2.5
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "temperature must be between 0.0 and 2.0") {
+		t.Errorf("expected error for out-of-range temperature, got: %v", err)
+	}
+	cfg.Critique.AI.Temperature = 0.2
+
+	// 8. Negative timeout_seconds fails
+	cfg.Critique.AI.TimeoutSeconds = -5
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "timeout_seconds cannot be negative") {
+		t.Errorf("expected error for negative timeout_seconds, got: %v", err)
+	}
+	cfg.Critique.AI.TimeoutSeconds = 30
+
+	// 9. Negative max_context_lines fails
+	cfg.Critique.AI.MaxContextLines = -10
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "max_context_lines cannot be negative") {
+		t.Errorf("expected error for negative max_context_lines, got: %v", err)
+	}
+	cfg.Critique.AI.MaxContextLines = 1200
+
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected valid AI config to pass, got: %v", err)
+	}
+}

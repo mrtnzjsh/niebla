@@ -24,19 +24,80 @@ type Patchset struct {
 // For single-line comments, EndLineNumber equals LineNumber.
 // For multi-line code block comments, LineNumber is start line and EndLineNumber is end line.
 type Comment struct {
-	ID              int64
-	CLID            int64
-	PatchsetNumber  int
-	FilePath        string
-	LineNumber      int
-	EndLineNumber   int
-	Side            string // 'base' or 'modified'
-	Author          string
-	Body            string
-	Resolved        bool
-	ParentCommentID *int64
-	IsDraft         bool
-	CreatedAt       time.Time
+	ID                  int64
+	CLID                int64
+	PatchsetNumber      int
+	FilePath            string
+	LineNumber          int
+	EndLineNumber       int
+	Side                string // 'base' or 'modified'
+	Author              string
+	Body                string
+	Resolved            bool
+	ParentCommentID     *int64
+	IsDraft             bool
+	HasSuggestion       bool
+	SuggestionStartLine int
+	SuggestionEndLine   int
+	SuggestionCode      string
+	SuggestionAppliedPS int // 0 = pending, >0 = applied in PS N, -1 = rejected
+	CreatedAt           time.Time
+}
+
+// BodyWithoutSuggestionFence returns the comment text with any ```suggestion ... ``` block stripped,
+// so the UI can render the explanatory text above a dedicated Suggested Change card.
+func (c Comment) BodyWithoutSuggestionFence() string {
+	idx := strings.Index(c.Body, "```suggestion")
+	if idx == -1 {
+		return c.Body
+	}
+	endIdx := strings.Index(c.Body[idx+13:], "```")
+	if endIdx == -1 {
+		return strings.TrimSpace(c.Body[:idx])
+	}
+	before := strings.TrimSpace(c.Body[:idx])
+	after := strings.TrimSpace(c.Body[idx+13+endIdx+3:])
+	if before != "" && after != "" {
+		return before + "\n\n" + after
+	}
+	if before != "" {
+		return before
+	}
+	return after
+}
+
+// ParseSuggestionFromMarkdown extracts a ```suggestion ... ``` code block from markdown text if present.
+func ParseSuggestionFromMarkdown(body string) (code string, ok bool) {
+	idx := strings.Index(body, "```suggestion")
+	if idx == -1 {
+		return "", false
+	}
+	rest := body[idx+len("```suggestion"):]
+	if strings.HasPrefix(rest, "\r\n") {
+		rest = rest[2:]
+	} else if strings.HasPrefix(rest, "\n") {
+		rest = rest[1:]
+	}
+	endIdx := strings.Index(rest, "```")
+	if endIdx == -1 {
+		return "", false
+	}
+	code = strings.TrimSuffix(rest[:endIdx], "\n")
+	code = strings.TrimSuffix(code, "\r")
+	return code, true
+}
+
+// FormatSuggestionMarkdown ensures the comment body includes a ```suggestion ... ``` markdown fence
+// for dual-storage compatibility.
+func FormatSuggestionMarkdown(body, suggestionCode string) string {
+	if _, hasFence := ParseSuggestionFromMarkdown(body); hasFence || suggestionCode == "" {
+		return body
+	}
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return fmt.Sprintf("```suggestion\n%s\n```", suggestionCode)
+	}
+	return fmt.Sprintf("%s\n\n```suggestion\n%s\n```", trimmed, suggestionCode)
 }
 
 // LineRangeStr returns a human-friendly range representation (e.g. "Line 42" or "Lines 42–48").
@@ -197,144 +258,11 @@ func (d *DB) CreateAutoRebasePatchset(ctx context.Context, clID int64, patchsetN
 	return nil
 }
 
-// ListComments retrieves all comments for a specific file in a changelist.
-func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]Comment, error) {
-	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
-		FROM cl_comments
-		WHERE cl_id = $1 AND file_path = $2
-		ORDER BY line_number ASC, end_line_number ASC, created_at ASC;
-	`
-	rows, err := d.pool.Query(ctx, query, clID, filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query comments: %w", err)
-	}
-	defer rows.Close()
+const commentSelectCols = `id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, has_suggestion, suggestion_start_line, suggestion_end_line, suggestion_code, suggestion_applied_ps, created_at`
 
-	var comments []Comment
-	for rows.Next() {
-		var c Comment
-		if err := rows.Scan(
-			&c.ID,
-			&c.CLID,
-			&c.PatchsetNumber,
-			&c.FilePath,
-			&c.LineNumber,
-			&c.EndLineNumber,
-			&c.Side,
-			&c.Author,
-			&c.Body,
-			&c.Resolved,
-			&c.ParentCommentID,
-			&c.IsDraft,
-			&c.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan comment: %w", err)
-		}
-		if c.EndLineNumber <= 0 {
-			c.EndLineNumber = c.LineNumber
-		}
-		comments = append(comments, c)
-	}
-	return comments, rows.Err()
-}
-
-// ListCommentsForLine retrieves comments for a specific file, line, and side.
-func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath string, line int, side string) ([]Comment, error) {
-	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
-		FROM cl_comments
-		WHERE cl_id = $1 AND file_path = $2 AND (end_line_number = $3 OR (end_line_number <= 0 AND line_number = $3)) AND side = $4
-		ORDER BY created_at ASC;
-	`
-	rows, err := d.pool.Query(ctx, query, clID, filePath, line, side)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query comments for line: %w", err)
-	}
-	defer rows.Close()
-
-	var comments []Comment
-	for rows.Next() {
-		var c Comment
-		if err := rows.Scan(
-			&c.ID,
-			&c.CLID,
-			&c.PatchsetNumber,
-			&c.FilePath,
-			&c.LineNumber,
-			&c.EndLineNumber,
-			&c.Side,
-			&c.Author,
-			&c.Body,
-			&c.Resolved,
-			&c.ParentCommentID,
-			&c.IsDraft,
-			&c.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan comment: %w", err)
-		}
-		if c.EndLineNumber <= 0 {
-			c.EndLineNumber = c.LineNumber
-		}
-		comments = append(comments, c)
-	}
-	return comments, rows.Err()
-}
-
-// ListAllComments retrieves all comments for a changelist across all files.
-func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error) {
-	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
-		FROM cl_comments
-		WHERE cl_id = $1
-		ORDER BY file_path ASC, line_number ASC, end_line_number ASC, created_at ASC;
-	`
-	rows, err := d.pool.Query(ctx, query, clID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query all comments for cl: %w", err)
-	}
-	defer rows.Close()
-
-	var comments []Comment
-	for rows.Next() {
-		var c Comment
-		if err := rows.Scan(
-			&c.ID,
-			&c.CLID,
-			&c.PatchsetNumber,
-			&c.FilePath,
-			&c.LineNumber,
-			&c.EndLineNumber,
-			&c.Side,
-			&c.Author,
-			&c.Body,
-			&c.Resolved,
-			&c.ParentCommentID,
-			&c.IsDraft,
-			&c.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan comment: %w", err)
-		}
-		if c.EndLineNumber <= 0 {
-			c.EndLineNumber = c.LineNumber
-		}
-		comments = append(comments, c)
-	}
-	return comments, rows.Err()
-}
-
-// CreateComment inserts a new comment into cl_comments with range support and draft status.
-func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, filePath string, line, endLine int, side, author, body string, parentID *int64, isDraft bool) (*Comment, error) {
-	if endLine < line {
-		endLine = line
-	}
-	query := `
-		INSERT INTO cl_comments (cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, parent_comment_id, is_draft)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		RETURNING id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at;
-	`
+func scanCommentRow(scanner interface{ Scan(dest ...any) error }) (Comment, error) {
 	var c Comment
-	err := d.pool.QueryRow(ctx, query, clID, patchsetNumber, filePath, line, endLine, side, author, body, parentID, isDraft).Scan(
+	err := scanner.Scan(
 		&c.ID,
 		&c.CLID,
 		&c.PatchsetNumber,
@@ -347,18 +275,241 @@ func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, 
 		&c.Resolved,
 		&c.ParentCommentID,
 		&c.IsDraft,
+		&c.HasSuggestion,
+		&c.SuggestionStartLine,
+		&c.SuggestionEndLine,
+		&c.SuggestionCode,
+		&c.SuggestionAppliedPS,
 		&c.CreatedAt,
 	)
+	if err != nil {
+		return Comment{}, err
+	}
+	if c.EndLineNumber <= 0 {
+		c.EndLineNumber = c.LineNumber
+	}
+	if !c.HasSuggestion {
+		if code, ok := ParseSuggestionFromMarkdown(c.Body); ok {
+			c.HasSuggestion = true
+			c.SuggestionCode = code
+			if c.SuggestionStartLine <= 0 {
+				c.SuggestionStartLine = c.LineNumber
+			}
+			if c.SuggestionEndLine < c.SuggestionStartLine {
+				c.SuggestionEndLine = c.EndLineNumber
+			}
+		}
+	}
+	return c, nil
+}
+
+// ListComments retrieves all comments for a specific file in a changelist.
+func (d *DB) ListComments(ctx context.Context, clID int64, filePath string) ([]Comment, error) {
+	query := `
+		SELECT ` + commentSelectCols + `
+		FROM cl_comments
+		WHERE cl_id = $1 AND file_path = $2
+		ORDER BY line_number ASC, end_line_number ASC, created_at ASC;
+	`
+	rows, err := d.pool.Query(ctx, query, clID, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query comments: %w", err)
+	}
+	defer rows.Close()
+
+	var comments []Comment
+	for rows.Next() {
+		c, err := scanCommentRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan comment: %w", err)
+		}
+		comments = append(comments, c)
+	}
+	return comments, rows.Err()
+}
+
+// ListCommentsForLine retrieves comments for a specific file, line, and side.
+func (d *DB) ListCommentsForLine(ctx context.Context, clID int64, filePath string, line int, side string) ([]Comment, error) {
+	query := `
+		SELECT ` + commentSelectCols + `
+		FROM cl_comments
+		WHERE cl_id = $1 AND file_path = $2 AND (end_line_number = $3 OR (end_line_number <= 0 AND line_number = $3)) AND side = $4
+		ORDER BY created_at ASC;
+	`
+	rows, err := d.pool.Query(ctx, query, clID, filePath, line, side)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query comments for line: %w", err)
+	}
+	defer rows.Close()
+
+	var comments []Comment
+	for rows.Next() {
+		c, err := scanCommentRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan comment: %w", err)
+		}
+		comments = append(comments, c)
+	}
+	return comments, rows.Err()
+}
+
+// ListAllComments retrieves all comments for a changelist across all files.
+func (d *DB) ListAllComments(ctx context.Context, clID int64) ([]Comment, error) {
+	query := `
+		SELECT ` + commentSelectCols + `
+		FROM cl_comments
+		WHERE cl_id = $1
+		ORDER BY file_path ASC, line_number ASC, end_line_number ASC, created_at ASC;
+	`
+	rows, err := d.pool.Query(ctx, query, clID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all comments for cl: %w", err)
+	}
+	defer rows.Close()
+
+	var comments []Comment
+	for rows.Next() {
+		c, err := scanCommentRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan comment: %w", err)
+		}
+		comments = append(comments, c)
+	}
+	return comments, rows.Err()
+}
+
+// CreateComment inserts a new comment into cl_comments with range support and draft status.
+// If the comment body contains a ```suggestion ... ``` markdown block, the suggestion columns
+// are automatically populated as well.
+func (d *DB) CreateComment(ctx context.Context, clID int64, patchsetNumber int, filePath string, line, endLine int, side, author, body string, parentID *int64, isDraft bool) (*Comment, error) {
+	if endLine < line {
+		endLine = line
+	}
+	var suggStart, suggEnd int
+	var suggCode string
+	if parsed, ok := ParseSuggestionFromMarkdown(body); ok {
+		suggStart = line
+		suggEnd = endLine
+		suggCode = parsed
+	}
+	return d.CreateCommentWithSuggestion(ctx, clID, patchsetNumber, filePath, line, endLine, side, author, body, parentID, isDraft, suggStart, suggEnd, suggCode)
+}
+
+// CreateCommentWithSuggestion inserts a comment along with dual-stored suggestion metadata (both markdown fence in body and DB columns).
+func (d *DB) CreateCommentWithSuggestion(
+	ctx context.Context,
+	clID int64,
+	patchsetNumber int,
+	filePath string,
+	line, endLine int,
+	side, author, body string,
+	parentID *int64,
+	isDraft bool,
+	suggestionStart, suggestionEnd int,
+	suggestionCode string,
+) (*Comment, error) {
+	if endLine < line {
+		endLine = line
+	}
+	hasSuggestion := false
+	if suggestionCode != "" {
+		hasSuggestion = true
+		if suggestionStart <= 0 {
+			suggestionStart = line
+		}
+		if suggestionEnd < suggestionStart {
+			suggestionEnd = endLine
+		}
+		body = FormatSuggestionMarkdown(body, suggestionCode)
+	} else if parsed, ok := ParseSuggestionFromMarkdown(body); ok {
+		hasSuggestion = true
+		suggestionCode = parsed
+		if suggestionStart <= 0 {
+			suggestionStart = line
+		}
+		if suggestionEnd < suggestionStart {
+			suggestionEnd = endLine
+		}
+	}
+
+	query := `
+		INSERT INTO cl_comments (
+			cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, parent_comment_id, is_draft,
+			has_suggestion, suggestion_start_line, suggestion_end_line, suggestion_code
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		RETURNING ` + commentSelectCols + `;
+	`
+	c, err := scanCommentRow(d.pool.QueryRow(
+		ctx,
+		query,
+		clID,
+		patchsetNumber,
+		filePath,
+		line,
+		endLine,
+		side,
+		author,
+		body,
+		parentID,
+		isDraft,
+		hasSuggestion,
+		suggestionStart,
+		suggestionEnd,
+		suggestionCode,
+	))
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert comment: %w", err)
 	}
 	return &c, nil
 }
 
+// MarkSuggestionApplied records the patchset where a comment's suggestion was applied
+// and automatically resolves the comment thread.
+func (d *DB) MarkSuggestionApplied(ctx context.Context, commentID int64, appliedPS int) error {
+	c, err := d.GetComment(ctx, commentID)
+	if err != nil {
+		return err
+	}
+	query := `
+		UPDATE cl_comments
+		SET suggestion_applied_ps = $1, resolved = true
+		WHERE id = $2;
+	`
+	if _, err := d.pool.Exec(ctx, query, appliedPS, commentID); err != nil {
+		return fmt.Errorf("failed to mark suggestion applied: %w", err)
+	}
+	// Also resolve all comments in the same inline thread
+	threadQuery := `
+		UPDATE cl_comments
+		SET resolved = true
+		WHERE cl_id = $1 AND file_path = $2 AND (end_line_number = $3 OR (end_line_number <= 0 AND line_number = $3)) AND side = $4;
+	`
+	_, _ = d.pool.Exec(ctx, threadQuery, c.CLID, c.FilePath, c.EndLineNumber, c.Side)
+	return nil
+}
+
+// RejectCommentSuggestion marks a comment's code suggestion as rejected (suggestion_applied_ps = -1).
+func (d *DB) RejectCommentSuggestion(ctx context.Context, commentID int64) error {
+	query := `
+		UPDATE cl_comments
+		SET suggestion_applied_ps = -1
+		WHERE id = $1;
+	`
+	res, err := d.pool.Exec(ctx, query, commentID)
+	if err != nil {
+		return fmt.Errorf("failed to reject comment suggestion: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListDraftComments retrieves all unposted draft comments by a specific author on a changelist.
 func (d *DB) ListDraftComments(ctx context.Context, clID int64, author string) ([]Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
+		SELECT ` + commentSelectCols + `
 		FROM cl_comments
 		WHERE cl_id = $1 AND author = $2 AND is_draft = true
 		ORDER BY file_path ASC, line_number ASC, created_at ASC;
@@ -371,26 +522,9 @@ func (d *DB) ListDraftComments(ctx context.Context, clID int64, author string) (
 
 	var comments []Comment
 	for rows.Next() {
-		var c Comment
-		if err := rows.Scan(
-			&c.ID,
-			&c.CLID,
-			&c.PatchsetNumber,
-			&c.FilePath,
-			&c.LineNumber,
-			&c.EndLineNumber,
-			&c.Side,
-			&c.Author,
-			&c.Body,
-			&c.Resolved,
-			&c.ParentCommentID,
-			&c.IsDraft,
-			&c.CreatedAt,
-		); err != nil {
+		c, err := scanCommentRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan draft comment: %w", err)
-		}
-		if c.EndLineNumber <= 0 {
-			c.EndLineNumber = c.LineNumber
 		}
 		comments = append(comments, c)
 	}
@@ -462,34 +596,16 @@ func (d *DB) ResolveComment(ctx context.Context, commentID int64, resolved bool)
 // GetComment retrieves a single comment by ID.
 func (d *DB) GetComment(ctx context.Context, commentID int64) (*Comment, error) {
 	query := `
-		SELECT id, cl_id, patchset_number, file_path, line_number, end_line_number, side, author, body, resolved, parent_comment_id, is_draft, created_at
+		SELECT ` + commentSelectCols + `
 		FROM cl_comments
 		WHERE id = $1;
 	`
-	var c Comment
-	err := d.pool.QueryRow(ctx, query, commentID).Scan(
-		&c.ID,
-		&c.CLID,
-		&c.PatchsetNumber,
-		&c.FilePath,
-		&c.LineNumber,
-		&c.EndLineNumber,
-		&c.Side,
-		&c.Author,
-		&c.Body,
-		&c.Resolved,
-		&c.ParentCommentID,
-		&c.IsDraft,
-		&c.CreatedAt,
-	)
+	c, err := scanCommentRow(d.pool.QueryRow(ctx, query, commentID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to query comment %d: %w", commentID, err)
-	}
-	if c.EndLineNumber <= 0 {
-		c.EndLineNumber = c.LineNumber
 	}
 	return &c, nil
 }

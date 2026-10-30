@@ -1,11 +1,42 @@
 package views
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"niebla/internal/db"
 )
+
+type aiHintsCtxKey struct{}
+
+var defaultAIHintsEnabled atomic.Bool
+
+// SetDefaultAIHintsEnabled sets the process-wide default for whether an OpenAI-compatible
+// endpoint is configured and AI hint UI controls should be rendered.
+func SetDefaultAIHintsEnabled(enabled bool) {
+	defaultAIHintsEnabled.Store(enabled)
+}
+
+// WithAIHintsEnabled attaches a per-request flag indicating whether AI hint UI controls should be rendered.
+func WithAIHintsEnabled(ctx context.Context, enabled bool) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, aiHintsCtxKey{}, enabled)
+}
+
+// IsAIHintsEnabled returns true only when an OpenAI-compatible endpoint is configured.
+func IsAIHintsEnabled(ctx context.Context) bool {
+	if ctx != nil {
+		if v, ok := ctx.Value(aiHintsCtxKey{}).(bool); ok {
+			return v
+		}
+	}
+	return defaultAIHintsEnabled.Load()
+}
 
 templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLine int, side string, comments []db.Comment, draftCount ...int) {
 	if endLine < line {
@@ -83,6 +114,11 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 											<span>Draft</span>
 										</span>
 									}
+									if c.HasSuggestion {
+										<span class="inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">
+											<span>💡 AI / Code Suggestion</span>
+										</span>
+									}
 								</div>
 								<div class="flex items-center space-x-2">
 									if c.IsDraft {
@@ -114,9 +150,14 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 									}
 								</div>
 							</div>
-							<div class="text-slate-300 whitespace-pre-wrap font-sans text-xs pl-7 leading-relaxed">
-								{ c.Body }
-							</div>
+							if c.BodyWithoutSuggestionFence() != "" {
+								<div class="text-slate-300 whitespace-pre-wrap font-sans text-xs pl-7 leading-relaxed">
+									{ c.BodyWithoutSuggestionFence() }
+								</div>
+							}
+							if c.HasSuggestion && c.SuggestionCode != "" {
+								@CommentSuggestionCard(clID, filePath, endLine, c)
+							}
 						</div>
 					}
 				</div>
@@ -124,6 +165,7 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 
 			<!-- Reply / New Comment Form -->
 			<form
+				id={ fmt.Sprintf("comment-form-%s-%d", sanitizeHTMLID(filePath), endLine) }
 				hx-post={ fmt.Sprintf("/cl/%d/comments", clID) }
 				hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), endLine) }
 				hx-swap="innerHTML"
@@ -135,9 +177,14 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 				<input type="hidden" name="line_number" value={ strconv.Itoa(line) }/>
 				<input type="hidden" name="end_line_number" value={ strconv.Itoa(endLine) }/>
 				<input type="hidden" name="side" value={ side }/>
+				<input type="hidden" id={ fmt.Sprintf("sugg-has-%s-%d", sanitizeHTMLID(filePath), endLine) } name="has_suggestion" value="false"/>
+				<input type="hidden" id={ fmt.Sprintf("sugg-start-%s-%d", sanitizeHTMLID(filePath), endLine) } name="suggestion_start_line" value={ strconv.Itoa(line) }/>
+				<input type="hidden" id={ fmt.Sprintf("sugg-end-%s-%d", sanitizeHTMLID(filePath), endLine) } name="suggestion_end_line" value={ strconv.Itoa(endLine) }/>
+				<input type="hidden" id={ fmt.Sprintf("sugg-code-%s-%d", sanitizeHTMLID(filePath), endLine) } name="suggestion_code" value=""/>
 
 				<div>
 					<textarea
+						id={ fmt.Sprintf("comment-body-%s-%d", sanitizeHTMLID(filePath), endLine) }
 						name="body"
 						rows="3"
 						required
@@ -146,8 +193,13 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 					></textarea>
 				</div>
 
-				<div class="flex items-center justify-between">
-					<div class="flex items-center space-x-3 text-xs">
+				if IsAIHintsEnabled(ctx) {
+					<!-- AI Hint Preview Container -->
+					<div id={ fmt.Sprintf("ai-hint-preview-%s-%d", sanitizeHTMLID(filePath), endLine) }></div>
+				}
+
+				<div class="flex items-center justify-between flex-wrap gap-2">
+					<div class="flex items-center space-x-3 text-xs flex-wrap gap-y-1.5">
 						<label class="flex items-center space-x-1.5 text-slate-400 text-xs cursor-pointer select-none">
 							<input
 								type="text"
@@ -167,6 +219,31 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 							/>
 							<span>Resolve thread</span>
 						</label>
+						if IsAIHintsEnabled(ctx) {
+							<label class="flex items-center space-x-1.5 text-sky-300 text-xs cursor-pointer select-none">
+								<input
+									type="checkbox"
+									id={ fmt.Sprintf("ai-hint-cb-%s-%d", sanitizeHTMLID(filePath), endLine) }
+									name="provide_ai_hint"
+									value="true"
+									onchange={ templ.ComponentScript{Call: fmt.Sprintf("const btn = document.getElementById('ai-hint-btn-%s-%d'); if (btn) { btn.classList.toggle('hidden', !this.checked); }", sanitizeHTMLID(filePath), endLine)} }
+									class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-sky-500 focus:ring-offset-0"
+								/>
+								<span>🤖 Provide AI hint</span>
+							</label>
+							<button
+								type="button"
+								id={ fmt.Sprintf("ai-hint-btn-%s-%d", sanitizeHTMLID(filePath), endLine) }
+								hx-post={ fmt.Sprintf("/cl/%d/ai-hint/generate", clID) }
+								hx-include="closest form"
+								hx-target={ fmt.Sprintf("#ai-hint-preview-%s-%d", sanitizeHTMLID(filePath), endLine) }
+								hx-swap="innerHTML"
+								class="hidden px-2.5 py-1 bg-sky-950/80 hover:bg-sky-900 text-sky-300 border border-sky-700/60 rounded-md text-[11px] font-semibold transition flex items-center space-x-1"
+								title="Query the AI hint agent with your comment and selected lines"
+							>
+								<span>✨ Generate Hint</span>
+							</button>
+						}
 					</div>
 					<div class="flex items-center space-x-2">
 						<button
@@ -188,6 +265,142 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 			</div>
 		}
 	</td>
+}
+
+templ CommentSuggestionCard(clID int64, filePath string, threadEndLine int, c db.Comment) {
+	<div class="ml-7 mt-2.5 rounded-lg border border-sky-800/60 bg-[#080d19] overflow-hidden shadow-md">
+		<div class="px-3 py-1.5 bg-sky-950/40 border-b border-sky-900/50 flex items-center justify-between">
+			<div class="flex items-center space-x-2 text-[11px] font-mono">
+				<span class="text-sky-400 font-semibold">💡 Suggested change</span>
+				<span class="text-slate-500">
+					if c.SuggestionEndLine > c.SuggestionStartLine {
+						{ fmt.Sprintf("(Lines %d–%d)", c.SuggestionStartLine, c.SuggestionEndLine) }
+					} else if c.SuggestionStartLine > 0 {
+						{ fmt.Sprintf("(Line %d)", c.SuggestionStartLine) }
+					}
+				</span>
+			</div>
+			<div class="flex items-center space-x-2">
+				if c.SuggestionAppliedPS > 0 {
+					<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-950/70 text-emerald-400 border border-emerald-800/60">
+						<span>✓ Applied in PS { strconv.Itoa(c.SuggestionAppliedPS) }</span>
+					</span>
+				} else if c.SuggestionAppliedPS < 0 {
+					<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-rose-950/70 text-rose-400 border border-rose-800/60">
+						<span>✕ Suggestion Rejected</span>
+					</span>
+				} else if !c.IsDraft {
+					<button
+						type="button"
+						hx-post={ fmt.Sprintf("/cl/%d/comments/%d/apply-suggestion", clID, c.ID) }
+						hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), threadEndLine) }
+						hx-swap="innerHTML"
+						class="px-2.5 py-0.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-[11px] font-semibold shadow-sm transition flex items-center space-x-1 cursor-pointer"
+						title="Apply this suggested code change, create a new patchset, and resolve this thread"
+					>
+						<span>✓ Apply Suggestion</span>
+					</button>
+					<button
+						type="button"
+						hx-post={ fmt.Sprintf("/cl/%d/comments/%d/reject-suggestion", clID, c.ID) }
+						hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), threadEndLine) }
+						hx-swap="innerHTML"
+						class="px-2 py-0.5 bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 rounded text-[11px] font-medium transition cursor-pointer"
+						title="Reject this code suggestion"
+					>
+						<span>✕ Reject</span>
+					</button>
+				}
+			</div>
+		</div>
+		<pre class="p-3 text-xs font-mono leading-relaxed overflow-x-auto bg-emerald-950/20 text-emerald-200 border-l-2 border-emerald-500"><code>{ formatPlusLines(c.SuggestionCode) }</code></pre>
+	</div>
+}
+
+templ AIHintPreviewCard(clID int64, filePath string, endLine int, explanation string, targetCode string, replacementStart int, replacementEnd int, replacementCode string, apertureUsed string, errMsg string) {
+	<div class="rounded-lg border border-sky-700/70 bg-[#070c18] p-3 space-y-2.5 text-xs shadow-lg">
+		<div class="flex items-center justify-between border-b border-slate-800 pb-2">
+			<div class="flex items-center space-x-2">
+				<span class="font-semibold text-sky-400 font-mono">🤖 AI Hint Preview</span>
+				if apertureUsed != "" {
+					<span class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-400">
+						{ fmt.Sprintf("aperture: %s", apertureUsed) }
+					</span>
+				}
+			</div>
+			<button
+				type="button"
+				onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('ai-hint-preview-%s-%d').innerHTML = '';", sanitizeHTMLID(filePath), endLine)} }
+				class="text-[11px] text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-800 transition"
+			>
+				✕ Dismiss
+			</button>
+		</div>
+
+		if errMsg != "" {
+			<div class="text-rose-400 font-mono text-[11px] bg-rose-950/30 border border-rose-800/50 rounded p-2">
+				{ errMsg }
+			</div>
+		} else {
+			if explanation != "" {
+				<div class="text-slate-300 text-xs leading-relaxed">
+					💡 { explanation }
+				</div>
+			}
+			if replacementCode != "" {
+				<div class="rounded border border-slate-800 overflow-hidden font-mono text-[11px]">
+					if targetCode != "" {
+						<pre class="px-3 py-1.5 bg-rose-950/25 text-rose-300 border-l-2 border-rose-500 overflow-x-auto"><code>{ formatMinusLines(targetCode) }</code></pre>
+					}
+					<pre class="px-3 py-1.5 bg-emerald-950/25 text-emerald-200 border-l-2 border-emerald-500 overflow-x-auto"><code>{ formatPlusLines(replacementCode) }</code></pre>
+				</div>
+				<div class="flex items-center justify-end space-x-2 pt-1">
+					<textarea id={ fmt.Sprintf("ai-raw-code-%s-%d", sanitizeHTMLID(filePath), endLine) } class="hidden">{ replacementCode }</textarea>
+					<button
+						type="button"
+						onclick={ acceptAIHintScript(sanitizeHTMLID(filePath), endLine, replacementStart, replacementEnd) }
+						class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-semibold shadow-sm transition flex items-center space-x-1 cursor-pointer"
+					>
+						<span>✓ Accept Hint into Comment</span>
+					</button>
+				</div>
+			} else {
+				<div class="text-slate-400 italic text-[11px]">
+					No direct code replacement required for this comment.
+				</div>
+			}
+		}
+	</div>
+}
+
+func acceptAIHintScript(safeID string, endLine int, replStart int, replEnd int) templ.ComponentScript {
+	call := fmt.Sprintf(
+		"(function(){ const rawEl = document.getElementById('ai-raw-code-%s-%d'); const bodyEl = document.getElementById('comment-body-%s-%d'); const hasEl = document.getElementById('sugg-has-%s-%d'); const startEl = document.getElementById('sugg-start-%s-%d'); const endEl = document.getElementById('sugg-end-%s-%d'); const codeEl = document.getElementById('sugg-code-%s-%d'); if (!rawEl || !bodyEl) return; const code = rawEl.value; if (hasEl) hasEl.value = 'true'; if (startEl) startEl.value = '%d'; if (endEl) endEl.value = '%d'; if (codeEl) codeEl.value = code; const fence = '```suggestion\\n' + code + '\\n```'; if (!bodyEl.value.includes('```suggestion')) { bodyEl.value = (bodyEl.value.trim() ? bodyEl.value.trim() + '\\n\\n' : '') + fence; } })()",
+		safeID, endLine,
+		safeID, endLine,
+		safeID, endLine,
+		safeID, endLine,
+		safeID, endLine,
+		safeID, endLine,
+		replStart, replEnd,
+	)
+	return templ.ComponentScript{Call: call}
+}
+
+func formatPlusLines(code string) string {
+	lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = "+ " + l
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatMinusLines(code string) string {
+	lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = "- " + l
+	}
+	return strings.Join(lines, "\n")
 }
 
 func hasPublishedComments(comments []db.Comment) bool {

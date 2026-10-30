@@ -220,6 +220,43 @@ type CritiqueConfig struct {
 	Auth                              CritiqueAuthConfig  `toml:"auth"`
 	Groups                            CritiqueGroupConfig `toml:"groups"`
 	Theme                             ThemeConfig         `toml:"theme"`
+	AI                                CritiqueAIConfig    `toml:"ai"`
+}
+
+// CritiqueAIConfig holds settings for AI-assisted review and inline comment hints.
+type CritiqueAIConfig struct {
+	Enabled          bool            `toml:"enabled"`
+	Endpoint         string          `toml:"endpoint"`
+	APIKey           string          `toml:"api_key,omitempty"`
+	APIKeyEnv        string          `toml:"api_key_env,omitempty"`
+	Model            string          `toml:"model"`
+	TimeoutSeconds   int             `toml:"timeout_seconds"`
+	Temperature      float64         `toml:"temperature"`
+	SystemPromptPath string          `toml:"system_prompt_path"`
+	MaxContextLines  int             `toml:"max_context_lines"`
+	AgentName        string          `toml:"agent_name"`
+	TLS              ClientTLSConfig `toml:"tls"`
+}
+
+// IsConfigured returns true only when AI hints are enabled and an OpenAI-compatible endpoint URL is configured.
+func (a *CritiqueAIConfig) IsConfigured() bool {
+	if a == nil {
+		return false
+	}
+	return a.Enabled && strings.TrimSpace(a.Endpoint) != ""
+}
+
+// ResolveAPIKey returns the API key from APIKey or APIKeyEnv.
+func (a *CritiqueAIConfig) ResolveAPIKey() string {
+	if a.APIKey != "" {
+		return a.APIKey
+	}
+	if a.APIKeyEnv != "" {
+		if val := os.Getenv(a.APIKeyEnv); val != "" {
+			return val
+		}
+	}
+	return ""
 }
 
 // DefaultAgentAuthorPatterns defines the default author patterns classified as automated agents.
@@ -381,6 +418,17 @@ func DefaultConfig() *Config {
 			Theme: ThemeConfig{
 				Preset:      "catppuccin-mocha",
 				SyntaxStyle: "catppuccin-mocha",
+			},
+			AI: CritiqueAIConfig{
+				Enabled:          false,
+				Endpoint:         "",
+				APIKeyEnv:        "",
+				Model:            "",
+				TimeoutSeconds:   30,
+				Temperature:      0.2,
+				SystemPromptPath: ".niebla/prompts/comment_hint.md",
+				MaxContextLines:  1200,
+				AgentName:        "ai-hint-agent",
 			},
 		},
 		Events: EventsConfig{

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,9 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"niebla/internal/config"
 	"niebla/internal/db"
 	"niebla/internal/web/auth"
 	"niebla/internal/web/views"
+	"niebla/pkg/cas"
 )
 
 var (
@@ -20,10 +23,30 @@ var (
 	nextCommentID     int64 = 100
 )
 
-// CommentsHandler handles HTMX endpoints for inline code reviews and drafts.
+// CommentsHandler handles HTMX endpoints for inline code reviews, drafts, and AI hints.
 type CommentsHandler struct {
 	db           *db.DB
+	cas          *cas.Storage
+	config       *config.Config
 	authResolver auth.UserIdentityResolver
+}
+
+// SetDependencies injects the CAS storage and toolchain configuration into CommentsHandler.
+func (h *CommentsHandler) SetDependencies(casStorage *cas.Storage, cfg *config.Config) {
+	h.cas = casStorage
+	h.config = cfg
+	views.SetDefaultAIHintsEnabled(h.isAIHintConfigured())
+}
+
+func (h *CommentsHandler) isAIHintConfigured() bool {
+	if h.config == nil {
+		return false
+	}
+	return h.config.Critique.AI.IsConfigured()
+}
+
+func (h *CommentsHandler) renderContext(ctx context.Context) context.Context {
+	return views.WithAIHintsEnabled(ctx, h.isAIHintConfigured())
 }
 
 // NewCommentsHandler initializes a new CommentsHandler with optional auth resolver.
@@ -155,7 +178,7 @@ func (h *CommentsHandler) HandleGetCommentBox(w http.ResponseWriter, r *http.Req
 	draftCount := h.countDrafts(r, clID, activeReviewer)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	component := views.CommentBox(clID, psNum, filePath, line, endLine, side, comments, draftCount)
-	_ = component.Render(r.Context(), w)
+	_ = component.Render(h.renderContext(r.Context()), w)
 }
 
 // HandleCreateComment creates a new inline draft comment on a specific code line or multi-line range.
@@ -212,12 +235,28 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	suggStart, _ := strconv.Atoi(r.FormValue("suggestion_start_line"))
+	suggEnd, _ := strconv.Atoi(r.FormValue("suggestion_end_line"))
+	suggCode := r.FormValue("suggestion_code")
+	if parsed, ok := db.ParseSuggestionFromMarkdown(body); ok && suggCode == "" {
+		suggCode = parsed
+	}
+	if suggCode != "" {
+		if suggStart <= 0 {
+			suggStart = line
+		}
+		if suggEnd < suggStart {
+			suggEnd = endLine
+		}
+		body = db.FormatSuggestionMarkdown(body, suggCode)
+	}
+
 	resolved := r.FormValue("resolved") == "true"
 	var comments []db.Comment
 
 	if h.db != nil {
 		// New inline comments are saved as unposted drafts (IsDraft = true)
-		newComment, err := h.db.CreateComment(r.Context(), clID, psNum, filePath, line, endLine, side, author, body, nil, true)
+		newComment, err := h.db.CreateCommentWithSuggestion(r.Context(), clID, psNum, filePath, line, endLine, side, author, body, nil, true, suggStart, suggEnd, suggCode)
 		if err != nil {
 			log.Printf("failed to insert draft comment: %v", err)
 			http.Error(w, "failed to record draft comment", http.StatusInternalServerError)
@@ -237,18 +276,22 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 		demoCommentsMu.Lock()
 		nextCommentID++
 		c := db.Comment{
-			ID:             nextCommentID,
-			CLID:           clID,
-			PatchsetNumber: psNum,
-			FilePath:       filePath,
-			LineNumber:     line,
-			EndLineNumber:  endLine,
-			Side:           side,
-			Author:         author,
-			Body:           body,
-			Resolved:       resolved,
-			IsDraft:        true,
-			CreatedAt:      time.Now(),
+			ID:                  nextCommentID,
+			CLID:                clID,
+			PatchsetNumber:      psNum,
+			FilePath:            filePath,
+			LineNumber:          line,
+			EndLineNumber:       endLine,
+			Side:                side,
+			Author:              author,
+			Body:                body,
+			Resolved:            resolved,
+			IsDraft:             true,
+			HasSuggestion:       suggCode != "",
+			SuggestionStartLine: suggStart,
+			SuggestionEndLine:   suggEnd,
+			SuggestionCode:      suggCode,
+			CreatedAt:           time.Now(),
 		}
 		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, endLine, side)
 		demoCommentsStore[key] = append(demoCommentsStore[key], c)
@@ -259,7 +302,7 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 	draftCount := h.countDrafts(r, clID, author)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	component := views.CommentBox(clID, psNum, filePath, line, endLine, side, comments, draftCount)
-	_ = component.Render(r.Context(), w)
+	_ = component.Render(h.renderContext(r.Context()), w)
 }
 
 // HandleDiscardComment deletes an unposted draft comment.
@@ -360,7 +403,7 @@ func (h *CommentsHandler) HandleDiscardComment(w http.ResponseWriter, r *http.Re
 	draftCount := h.countDrafts(r, clID, author)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	component := views.CommentBox(clID, patchsetNumber, filePath, line, endLine, side, comments, draftCount)
-	_ = component.Render(r.Context(), w)
+	_ = component.Render(h.renderContext(r.Context()), w)
 }
 
 // HandleResolveComment toggles the resolved status of an inline comment.
@@ -416,7 +459,7 @@ func (h *CommentsHandler) HandleResolveComment(w http.ResponseWriter, r *http.Re
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		component := views.CommentBox(comment.CLID, comment.PatchsetNumber, comment.FilePath, comment.LineNumber, anchorLine, comment.Side, comments, draftCount)
-		_ = component.Render(r.Context(), w)
+		_ = component.Render(h.renderContext(r.Context()), w)
 		return
 	}
 
@@ -452,5 +495,5 @@ func (h *CommentsHandler) HandleResolveComment(w http.ResponseWriter, r *http.Re
 	draftCount := h.countDrafts(r, matched.CLID, author)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	component := views.CommentBox(matched.CLID, matched.PatchsetNumber, matched.FilePath, matched.LineNumber, anchorLine, matched.Side, comments, draftCount)
-	_ = component.Render(r.Context(), w)
+	_ = component.Render(h.renderContext(r.Context()), w)
 }

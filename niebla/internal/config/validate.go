@@ -336,6 +336,71 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// 6. Critique AI hint subsystem validation
+	if cfg.Critique.AI.Enabled {
+		endpoint := strings.TrimSpace(cfg.Critique.AI.Endpoint)
+		if endpoint == "" {
+			errs = append(errs, ValidationError{
+				Field:   "critique.ai.endpoint",
+				Value:   cfg.Critique.AI.Endpoint,
+				Message: "AI endpoint URL cannot be empty when critique.ai is enabled",
+				Hint:    "Provide an OpenAI-compatible API base URL (e.g. 'https://api.openai.com/v1' or 'http://127.0.0.1:11434/v1').",
+			})
+		} else if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+			errs = append(errs, ValidationError{
+				Field:   "critique.ai.endpoint",
+				Value:   cfg.Critique.AI.Endpoint,
+				Message: "AI endpoint must begin with http:// or https://",
+				Hint:    "Provide an HTTP/HTTPS URL such as 'https://api.openai.com/v1'.",
+			})
+		}
+
+		if strings.TrimSpace(cfg.Critique.AI.Model) == "" {
+			errs = append(errs, ValidationError{
+				Field:   "critique.ai.model",
+				Value:   cfg.Critique.AI.Model,
+				Message: "model cannot be empty when critique.ai is enabled",
+				Hint:    "Specify a target model identifier (e.g. 'gpt-4o', 'deepseek-coder', or 'qwen2.5-coder').",
+			})
+		}
+
+		if strings.TrimSpace(cfg.Critique.AI.SystemPromptPath) == "" {
+			errs = append(errs, ValidationError{
+				Field:   "critique.ai.system_prompt_path",
+				Value:   cfg.Critique.AI.SystemPromptPath,
+				Message: "system_prompt_path cannot be empty when critique.ai is enabled",
+				Hint:    "Specify the path to the system prompt file (default: '.niebla/prompts/comment_hint.md').",
+			})
+		}
+
+		if cfg.Critique.AI.Temperature < 0.0 || cfg.Critique.AI.Temperature > 2.0 {
+			errs = append(errs, ValidationError{
+				Field:   "critique.ai.temperature",
+				Value:   fmt.Sprintf("%.2f", cfg.Critique.AI.Temperature),
+				Message: "temperature must be between 0.0 and 2.0",
+				Hint:    "Set a sampling temperature between 0.0 and 2.0 (recommended: 0.2 for code suggestions).",
+			})
+		}
+
+		if cfg.Critique.AI.TimeoutSeconds < 0 {
+			errs = append(errs, ValidationError{
+				Field:   "critique.ai.timeout_seconds",
+				Value:   fmt.Sprintf("%d", cfg.Critique.AI.TimeoutSeconds),
+				Message: "timeout_seconds cannot be negative",
+				Hint:    "Specify a positive timeout in seconds (default: 30).",
+			})
+		}
+
+		if cfg.Critique.AI.MaxContextLines < 0 {
+			errs = append(errs, ValidationError{
+				Field:   "critique.ai.max_context_lines",
+				Value:   fmt.Sprintf("%d", cfg.Critique.AI.MaxContextLines),
+				Message: "max_context_lines cannot be negative",
+				Hint:    "Specify a positive maximum line count for context aperture widening (default: 1200).",
+			})
+		}
+	}
+
 	// 8. Events and notification subsystem validation
 	if cfg.Events.Enabled {
 		sink := strings.ToLower(strings.TrimSpace(cfg.Events.Sink))

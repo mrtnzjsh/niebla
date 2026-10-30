@@ -95,6 +95,22 @@ func LoadBytes(data []byte) (*Config, error) {
 		return nil, err
 	}
 
+	// If the user configured an AI endpoint in TOML and did not explicitly set enabled = false,
+	// enable the AI hint subsystem automatically.
+	var rawProbe struct {
+		Critique struct {
+			AI struct {
+				Enabled  *bool   `toml:"enabled"`
+				Endpoint *string `toml:"endpoint"`
+			} `toml:"ai"`
+		} `toml:"critique"`
+	}
+	if err := toml.Unmarshal(data, &rawProbe); err == nil {
+		if rawProbe.Critique.AI.Endpoint != nil && strings.TrimSpace(*rawProbe.Critique.AI.Endpoint) != "" && rawProbe.Critique.AI.Enabled == nil {
+			cfg.Critique.AI.Enabled = true
+		}
+	}
+
 	// 4. Expand environment variables ($USER, $HOME, etc.)
 	expandConfigEnv(cfg)
 
@@ -115,6 +131,9 @@ func expandConfigEnv(cfg *Config) {
 	cfg.FS.MountBase = os.ExpandEnv(cfg.FS.MountBase)
 	cfg.FS.CacheDir = os.ExpandEnv(cfg.FS.CacheDir)
 	cfg.Critique.Host = os.ExpandEnv(cfg.Critique.Host)
+	cfg.Critique.AI.Endpoint = os.ExpandEnv(cfg.Critique.AI.Endpoint)
+	cfg.Critique.AI.SystemPromptPath = os.ExpandEnv(cfg.Critique.AI.SystemPromptPath)
+	cfg.Critique.AI.TLS.CAFile = os.ExpandEnv(cfg.Critique.AI.TLS.CAFile)
 
 	reviewer := strings.TrimSpace(os.ExpandEnv(cfg.Critique.DefaultReviewer))
 	if reviewer == "" || reviewer == "$USER" {
