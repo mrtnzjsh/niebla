@@ -283,7 +283,7 @@ flowchart TD
 - [x] Add unit tests in `internal/grpc/submit_owners_test.go`.
 
 ### Commit 8.3: `test(grpc,web): add testcontainers integration suite for OWNERS submit gates and Cotejo review status`
-- [ ] Add PostgreSQL testcontainer integration tests in `internal/grpc/owners_integration_test.go` verifying multi-directory submit gating, `set_noparent` isolation, and `--force` bypass.
+- [x] Add PostgreSQL testcontainer integration tests in `internal/grpc/owners_integration_test.go` verifying multi-directory submit gating, `set_noparent` isolation, and `--force` bypass.
 
 ### Commit 8.4: `docs(skills): update niebla skill and roadmap checklists with OWNERS.toml policy engine`
 - [ ] Update `docs/agentic_development_analysis.md` marking Policy & Auto-Approval Engine complete.
