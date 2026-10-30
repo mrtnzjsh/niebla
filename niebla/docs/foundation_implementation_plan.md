@@ -263,8 +263,8 @@ flowchart TD
 - [x] Verify plaintext rejection by TLS server, unauthenticated rejection, invalid token rejection, valid token authorization across unary and streaming RPCs, and insecure backward compatibility.
 
 ### Commit 7.4: `docs(skills): update niebla skill and roadmap checklists with gRPC TLS & Bearer auth`
-- [ ] Update `docs/distributed_architecture_analysis.md` marking gRPC Security complete.
-- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `--token`, `NIEBLA_TOKEN`, TLS flags, and `config.toml` security sections.
+- [x] Update `docs/distributed_architecture_analysis.md` marking gRPC Security complete.
+- [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `--token`, `NIEBLA_TOKEN`, TLS flags, and `config.toml` security sections.
 
 
 

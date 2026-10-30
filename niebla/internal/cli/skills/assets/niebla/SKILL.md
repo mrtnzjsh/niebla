@@ -20,10 +20,45 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 4. **Machine-Readable `--json` Contracts:** AI agents should pass `--json` to `status`, `shelve`, `submit`, `sync`, `export`, and `workspace` commands for deterministic JSON output.
 5. **Automatic Workspace Detection:** Running `niebla` commands inside a workspace directory automatically detects the active workspace via `$PWD`. When running from outside, specify `--workspace <name>`.
 6. **Code Review with Cotejo:** Code reviews and changelist inspections are conducted in Cotejo (`http://127.0.0.1:7331` or configured port), featuring side-by-side diffs, patchset history, and multi-line code block comments.
+7. **Transport Security & Bearer Authentication:** Single-system development connects to `127.0.0.1:50051` via plaintext loopback without auth by default. For distributed or remote environments, enable TLS (`[server.tls]`, `[core.tls]`) and pass bearer authentication tokens via `NIEBLA_TOKEN=<token>` or `core.auth_token` in `config.toml`.
 
 ---
 
 ## 2. Command Reference
+
+### gRPC Transport Security & Bearer Authentication
+
+Niebla supports optional TLS 1.3 transport encryption and Bearer token authentication across all CLI and daemon operations:
+
+* **Authentication Token Precedence:**
+  1. Explicit `--token <token>` flag (or CLI option)
+  2. `NIEBLA_TOKEN` environment variable
+  3. `core.auth_token` in `~/.config/niebla/config.toml`
+
+* **Configuration in `config.toml`:**
+  ```toml
+  [server]
+  auth_tokens = ["agent-worker-token-xyz", "human-admin-token-abc"]
+
+  [server.tls]
+  enabled = true
+  cert_file = "/etc/niebla/tls/server.crt"
+  key_file = "/etc/niebla/tls/server.key"
+
+  [core]
+  auth_token = "agent-worker-token-xyz"
+
+  [core.tls]
+  enabled = true
+  ca_file = "/etc/niebla/tls/ca.crt"       # optional if using private CA
+  server_name = "niebla.internal"          # SNI hostname verification
+  ```
+
+* **Server Daemon Security Flags:**
+  ```bash
+  niebla-server --tls --tls-cert /path/to/server.crt --tls-key /path/to/server.key --token <secret-token>
+  ```
+  When tokens are configured, the server enforces Bearer token authentication via `Authorization: Bearer <token>` and `X-Niebla-Token` metadata interceptors across all unary and streaming RPCs.
 
 ### Workspace Lifecycle & Stateless Export
 
