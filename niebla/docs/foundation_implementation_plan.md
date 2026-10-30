@@ -308,7 +308,7 @@ flowchart TD
 - [x] Add unit tests in `internal/grpc/submit_hooks_test.go`.
 
 ### Commit 9.4: `test(grpc,cli): add testcontainers integration suite for CAS put and submit hook gates`
-- [ ] Add PostgreSQL testcontainer integration tests in `internal/grpc/hooks_integration_test.go` verifying `niebla cas put`, metadata presubmit rules, tree scan presubmit rules, and `--force` bypass.
+- [x] Add PostgreSQL testcontainer integration tests in `internal/grpc/hooks_integration_test.go` verifying `niebla cas put`, metadata presubmit rules, tree scan presubmit rules, and `--force` bypass.
 
 ### Commit 9.5: `docs(skills): update niebla skill and roadmap checklists with submit hook architecture`
 - [ ] Update `docs/agentic_development_analysis.md` marking Submit Hook Architecture complete.
