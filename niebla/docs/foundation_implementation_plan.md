@@ -259,8 +259,8 @@ flowchart TD
 - [x] Add unit tests in `internal/cli/client_test.go`.
 
 ### Commit 7.3: `test(grpc): add integration suite for TLS transport and Bearer token authorization`
-- [ ] Add integration test in `internal/grpc/security_integration_test.go` using dynamically generated x509 certificates and testcontainers-go PostgreSQL.
-- [ ] Verify plaintext rejection by TLS server, unauthenticated rejection, invalid token rejection, valid token authorization across unary and streaming RPCs, and insecure backward compatibility.
+- [x] Add integration test in `internal/grpc/security_integration_test.go` using dynamically generated x509 certificates and testcontainers-go PostgreSQL.
+- [x] Verify plaintext rejection by TLS server, unauthenticated rejection, invalid token rejection, valid token authorization across unary and streaming RPCs, and insecure backward compatibility.
 
 ### Commit 7.4: `docs(skills): update niebla skill and roadmap checklists with gRPC TLS & Bearer auth`
 - [ ] Update `docs/distributed_architecture_analysis.md` marking gRPC Security complete.

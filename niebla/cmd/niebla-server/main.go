@@ -21,6 +21,7 @@ import (
 	pkgevents "niebla/pkg/events"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -45,6 +46,10 @@ func main() {
 	dbURLFlag := flag.String("db-url", getEnv("DATABASE_URL", "postgres:///niebla?host=/run/postgresql"), "PostgreSQL connection string")
 	blobPathFlag := flag.String("blob-path", getEnv("NIEBLA_BLOB_PATH", "/devpool/niebla_blobs"), "Path to CAS blob storage")
 	cacheSizeFlag := flag.Int("cache-size", 10000, "Maximum number of tree nodes in LRU cache")
+	tlsFlag := flag.Bool("tls", false, "Enable TLS transport security")
+	tlsCertFlag := flag.String("tls-cert", getEnv("NIEBLA_TLS_CERT", ""), "Path to TLS server certificate file")
+	tlsKeyFlag := flag.String("tls-key", getEnv("NIEBLA_TLS_KEY", ""), "Path to TLS server private key file")
+	tokenFlag := flag.String("token", getEnv("NIEBLA_TOKEN", ""), "Optional authorization token (enables bearer auth)")
 	flag.Parse()
 
 	log.Printf("Initializing niebla-server...")
@@ -70,15 +75,62 @@ func main() {
 	defer database.Close()
 	log.Printf("Connected to PostgreSQL and verified schema migrations.")
 
-	// 3. Initialize gRPC server & register NieblaService
-	grpcServer := grpc.NewServer()
+	// 3. Load toolchain configuration
+	cfg, _ := config.Load()
+
+	// 4. Build gRPC server options (TLS & Bearer Token Authentication)
+	var grpcOpts []grpc.ServerOption
+
+	// Determine TLS configuration (CLI flags take precedence over config.toml)
+	tlsEnabled := *tlsFlag
+	certFile := *tlsCertFlag
+	keyFile := *tlsKeyFlag
+	if !tlsEnabled && cfg != nil && cfg.Server.TLS.Enabled {
+		tlsEnabled = true
+		certFile = cfg.Server.TLS.CertFile
+		keyFile = cfg.Server.TLS.KeyFile
+	}
+
+	if tlsEnabled {
+		if certFile == "" || keyFile == "" {
+			log.Fatalf("TLS enabled but certificate or key file not specified (use --tls-cert and --tls-key or server.tls in config)")
+		}
+		creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
+		if err != nil {
+			log.Fatalf("Failed to load TLS credentials: %v", err)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+		log.Printf("TLS 1.3 transport security enabled (cert: %s)", certFile)
+	} else {
+		log.Printf("Running gRPC server with insecure transport (plaintext loopback)")
+	}
+
+	// Determine Auth Tokens
+	var authTokens []string
+	if *tokenFlag != "" {
+		authTokens = append(authTokens, *tokenFlag)
+	}
+	if cfg != nil && len(cfg.Server.AuthTokens) > 0 {
+		authTokens = append(authTokens, cfg.Server.AuthTokens...)
+	}
+
+	auth := internalgrpc.NewAuthenticator(authTokens)
+	if auth.IsEnabled() {
+		grpcOpts = append(grpcOpts,
+			grpc.UnaryInterceptor(auth.UnaryServerInterceptor()),
+			grpc.StreamInterceptor(auth.StreamServerInterceptor()),
+		)
+		log.Printf("Bearer token authentication enforced (%d valid token(s) configured)", len(authTokens))
+	}
+
+	grpcServer := grpc.NewServer(grpcOpts...)
 	repoServer, err := internalgrpc.NewServer(database, casStorage, *cacheSizeFlag)
 	if err != nil {
 		log.Fatalf("Failed to create NieblaService server: %v", err)
 	}
 
 	var emitter pkgevents.Emitter
-	if cfg, err := config.Load(); err == nil {
+	if cfg != nil {
 		repoServer.SetToolchainConfig(cfg)
 		if em, err := internalevents.NewEmitterFromConfig(&cfg.Events); err == nil {
 			emitter = em
