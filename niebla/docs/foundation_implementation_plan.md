@@ -298,9 +298,9 @@ flowchart TD
 - [x] Add unit tests in `internal/cli/cas_test.go`.
 
 ### Commit 9.2: `feat(hooks): implement composable hooks TOML parser and presubmit evaluator`
-- [ ] Create `pkg/hooks/` with `Config`, `ParseTOML`, metadata rules, and CAS tree scanning rules.
-- [ ] Implement `EvaluateMetadata` and `EvaluateTreeScan` with detailed diagnostics.
-- [ ] Add comprehensive unit tests in `pkg/hooks/hooks_test.go`.
+- [x] Create `pkg/hooks/` with `Config`, `ParseTOML`, metadata rules, and CAS tree scanning rules.
+- [x] Implement `EvaluateMetadata` and `EvaluateTreeScan` with detailed diagnostics.
+- [x] Add comprehensive unit tests in `pkg/hooks/hooks_test.go`.
 
 ### Commit 9.3: `feat(grpc,cli): wire presubmit hook validation into SubmitCL and client submit command`
 - [ ] Add client-side presubmit execution in `internal/cli/submit.go` with `--no-verify`.
