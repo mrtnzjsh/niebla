@@ -266,6 +266,30 @@ flowchart TD
 - [x] Update `docs/distributed_architecture_analysis.md` marking gRPC Security complete.
 - [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `--token`, `NIEBLA_TOKEN`, TLS flags, and `config.toml` security sections.
 
+---
+
+## Component 8: Policy & Auto-Approval Engine (`OWNERS.toml`) (Phase 3 P1)
+**References:**
+- [Agentic Roadmap Phase 3: Policy & Auto-Approval Engine](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L218)
+
+### Commit 8.1: `feat(owners): implement composable OWNERS.toml parser and hierarchical inheritance evaluator`
+- [x] Create `pkg/owners/` with `OwnersConfig`, `ParseTOML`, directory hierarchy inheritance, `set_noparent` isolation, `per_file` glob matching, and `@group` expansion.
+- [x] Implement `Evaluate(touchedPaths []string, approvedBy []string, groupResolver GroupResolver) EvaluationResult`.
+- [x] Add comprehensive unit tests in `pkg/owners/owners_test.go`.
+
+### Commit 8.2: `feat(grpc): wire OWNERS approval enforcement into SubmitCL transaction gate`
+- [ ] Wire `pkg/owners` into `SubmitCL` in `internal/grpc/server.go`: extract touched files, locate `OWNERS.toml` files, and evaluate required approvals.
+- [ ] Block unapproved submissions with `codes.FailedPrecondition` when `req.Force == false`.
+- [ ] Add unit tests in `internal/grpc/submit_owners_test.go`.
+
+### Commit 8.3: `test(grpc,web): add testcontainers integration suite for OWNERS submit gates and Cotejo review status`
+- [ ] Add PostgreSQL testcontainer integration tests in `internal/grpc/owners_integration_test.go` verifying multi-directory submit gating, `set_noparent` isolation, and `--force` bypass.
+
+### Commit 8.4: `docs(skills): update niebla skill and roadmap checklists with OWNERS.toml policy engine`
+- [ ] Update `docs/agentic_development_analysis.md` marking Policy & Auto-Approval Engine complete.
+- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `OWNERS.toml` syntax, approval enforcement, and bypass flags.
+
+
 
 
 
