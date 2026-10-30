@@ -22,6 +22,7 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
 6. **Code Review with Cotejo:** Code reviews and changelist inspections are conducted in Cotejo (`http://127.0.0.1:7331` or configured port), featuring side-by-side diffs, patchset history, and multi-line code block comments.
 7. **Transport Security & Bearer Authentication:** Single-system development connects to `127.0.0.1:50051` via plaintext loopback without auth by default. For distributed or remote environments, enable TLS (`[server.tls]`, `[core.tls]`) and pass bearer authentication tokens via `NIEBLA_TOKEN=<token>` or `core.auth_token` in `config.toml`.
 8. **OWNERS Approval Governance:** Monorepo paths and critical file patterns enforce granular ownership via `OWNERS.toml` files. Changelists affecting owned paths require approval (`lgtm`/`approved`) from designated directory or pattern owners before `niebla submit` will succeed.
+9. **Presubmit Hook Gating:** Monorepos declare client and server presubmit hooks in `.niebla/hooks.toml` (Conventional Commits, secret patterns, max file sizes). Client hooks can be bypassed with `--no-verify`; server gates are evaluated under transaction locks and bypassable only via `--force`.
 
 ---
 
@@ -74,6 +75,13 @@ Niebla supports optional TLS 1.3 transport encryption and Bearer token authentic
   niebla export [--cl <id>] [--patchset <n>] --dest <dir> [--cas-dir <path>] [--concurrency <n>] [--json]
   ```
   Materializes any changelist (or trunk head when `--cl` is omitted) directly into `--dest` using a concurrent worker pool (`pkg/materialize`). When `--cas-dir` points to a local CAS directory on the same filesystem, blobs are zero-copy hardlinked (`os.Link`) in milliseconds for ephemeral CI runners.
+
+* **Direct Content-Addressable Storage (CAS) Ingestion (`niebla cas`):**
+  ```bash
+  niebla cas put <file> [--json]
+  niebla cas get <sha256> [--out <dest>] [--json]
+  ```
+  Uploads precompiled binaries, tool artifacts, or datasets directly to the server's central CAS storage tier over streaming gRPC (`UploadBlob`), returning the immutable SHA-256 for use in `.niebla/hooks.toml` without committing binary files to version control.
 
 * **List active workspaces:**
   ```bash
@@ -135,13 +143,14 @@ Niebla supports optional TLS 1.3 transport encryption and Bearer token authentic
 
 * **Submit changelist to trunk:**
   ```bash
-  niebla submit [--cl <id>] [--workspace <name>] [--force] [--json]
+  niebla submit [--cl <id>] [--workspace <name>] [--no-verify] [--force] [--json]
   ```
   Atomically commits the changelist to trunk head under a transaction-scoped PostgreSQL advisory lock (`pg_advisory_xact_lock`):
+  * **Client Presubmit Hooks:** Automatically executes local commands declared in `.niebla/hooks.toml` (`[[client.presubmit]]`) before dialing the server. Pass `--no-verify` to bypass local checks.
   * **Monotonic Trunk Revisions (`trunk_revision`):** While `cl_id` is allocated when a CL is first shelved, `SubmitCL` assigns a strictly sequential `trunk_revision` ($r1, r2, r3, \dots$) in exact commit order so out-of-order CL submissions never invert trunk head.
   * **Automatic 3-Way Trunk Merge:** If a CL's `parent_cl` lags behind the current `HeadCL`, `SubmitCL` automatically performs a server-side 3-way Merkle tree merge (`tree.ThreeWayTreeMerge`). Disjoint changes merge cleanly onto trunk head; overlapping file conflicts abort submission with `FailedPrecondition` (`needs_rebase = true`) so the author can run `niebla sync`.
-  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), all affected directory and file scopes in `OWNERS.toml` have received approval from authorized approvers (unless overridden with `--force`), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, CI check runs are green when `require_green_to_submit = true`, and no pending rebase conflicts exist (`needs_rebase = false`).
-  * **Bypass Guard:** Use `--force` to bypass unresolved comments, missing approvals, OWNERS policy violations, or failed check runs when urgent trunk submission is required.
+  * **Submission Guards:** Verifies that required approvals are satisfied (`approvals >= required_approvals`), all affected directory and file scopes in `OWNERS.toml` have received approval from authorized approvers, all server presubmit hooks in `.niebla/hooks.toml` pass (commit description regex, secret patterns, file size limits), no unresolved comments remain when `allow_submit_with_unresolved_comments = false`, CI check runs are green when `require_green_to_submit = true`, and no pending rebase conflicts exist (`needs_rebase = false`).
+  * **Bypass Guard:** Use `--force` to bypass unresolved comments, missing approvals, OWNERS policy violations, presubmit hook gates, or failed check runs when urgent trunk submission is required.
 
 ### CI Runner Execution & Reporting (`niebla ci`)
 
@@ -285,6 +294,54 @@ Niebla enforces hierarchical directory and pattern-based code ownership using `O
    - For submission to succeed, **every required directory and pattern scope** must have at least one approver who has submitted an approving verdict (`lgtm` or `approved`).
    - Submissions lacking required owner approvals fail atomically with `FailedPrecondition` diagnostics detailing the unapproved scopes and eligible approvers.
    - Emergency or administrative override is supported via `niebla submit --force` or Cotejo approval override modal.
+
+### Submit Hook Architecture (`.niebla/hooks.toml`)
+
+Niebla provides an extensible client- and server-side presubmit pipeline configured via `.niebla/hooks.toml` in the repository root (`pkg/hooks`):
+
+1. **`.niebla/hooks.toml` Schema:**
+   ```toml
+   # Client-Side Presubmit Hooks (run locally in workspace before gRPC dispatch)
+   [[client.presubmit]]
+   name = "gofmt"
+   command = "gofmt -l ."
+   fail_on_output = true
+   description = "Verify Go source files are formatted"
+
+   # Server-Side Presubmit Hooks (run under pg_advisory_xact_lock in SubmitCL)
+   [[server.presubmit]]
+   name = "conventional-commits"
+   type = "metadata"
+   blocking = true
+   description = "Enforce Conventional Commits format"
+   [server.presubmit.metadata]
+   field = "description"
+   pattern = "^(feat|fix|docs|refactor|test|chore)(\\(.+\\))?: .+"
+   min_length = 10
+
+   [[server.presubmit]]
+   name = "forbid-secrets"
+   type = "tree_scan"
+   blocking = true
+   description = "Block credentials and oversized binary files"
+   [server.presubmit.tree_scan]
+   forbidden_patterns = ["*.pem", "*.key", "id_rsa*"]
+   max_file_size_bytes = 10485760 # 10MB limit
+
+   [[server.presubmit]]
+   name = "custom-linter"
+   type = "cas_binary"
+   cas_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   args = ["--strict", "."]
+   ```
+
+2. **Execution Flow & Gating:**
+   - **Client Execution:** When running `niebla submit`, the CLI executes `[[client.presubmit]]` commands inside the local workspace. If any hook returns non-zero or produces output (when `fail_on_output = true`), submission is aborted locally before reaching the server. Pass `--no-verify` to skip.
+   - **Server Execution:** `SubmitCL` resolves `.niebla/hooks.toml` directly from the CL's root Merkle tree and runs all server-side presubmits:
+     - `metadata`: Evaluates description regex and character limits.
+     - `tree_scan`: Checks touched file paths against forbidden glob patterns and verifies file size limits.
+     - `cas_binary`: Pulls and executes precompiled binaries directly from central CAS storage by cryptographic SHA-256 without repository pollution.
+   - **Emergency Bypass:** When urgent hotfixes are required, `niebla submit --force` bypasses server-side presubmit gates.
 
 ### File Review Tracking & Status
 

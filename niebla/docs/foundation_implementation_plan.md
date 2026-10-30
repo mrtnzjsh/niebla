@@ -311,8 +311,8 @@ flowchart TD
 - [x] Add PostgreSQL testcontainer integration tests in `internal/grpc/hooks_integration_test.go` verifying `niebla cas put`, metadata presubmit rules, tree scan presubmit rules, and `--force` bypass.
 
 ### Commit 9.5: `docs(skills): update niebla skill and roadmap checklists with submit hook architecture`
-- [ ] Update `docs/agentic_development_analysis.md` marking Submit Hook Architecture complete.
-- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `niebla cas put`, `.niebla/hooks.toml` syntax, and submit hook behavior.
+- [x] Update `docs/agentic_development_analysis.md` marking Submit Hook Architecture complete.
+- [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting `niebla cas put`, `.niebla/hooks.toml` syntax, and submit hook behavior.
 
 
 

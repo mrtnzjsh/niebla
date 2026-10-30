@@ -213,6 +213,6 @@ flowchart TD
 - [x] **P2: Cotejo Inbox Segregation** *(✅ Completed: [Commits 5.1–5.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L198-L215))* — Add segregated inbox queue tabs (`My Reviews`, `Out for Review`, `Agent / Automated`, `Submitted / Trunk`) to Cotejo, protecting human attention from automated agent review fatigue.
 
 ### Phase 3: Future Updates (Submit Hooks & Review Agent Framework)
-- [ ] **Submit Hook Architecture:** Extensible server and client hooks for presubmit validation.
+- [x] **P1: Submit Hook Architecture (`.niebla/hooks.toml` & `niebla cas put`)** *(✅ Completed: [Commits 9.1–9.4](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L293-L311))* — Extensible client and server presubmit hooks, `niebla cas put/get` direct CAS blob ingestion, declarative `.niebla/hooks.toml` TOML syntax, metadata rules, path/pattern tree scans, `--no-verify` client bypass, and `--force` emergency bypass.
 - [ ] **Review Agent Personas:** Framework for linter bots, security scanners, and test validation agents.
 - [x] **P1: Policy & Auto-Approval Engine (`OWNERS.toml`)** *(✅ Completed: [Commits 8.1–8.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L271-L287))* — Scoped approval rules, hierarchical `OWNERS.toml` TOML syntax, `@group` expansion, `set_noparent` isolation, `[per_file]` pattern matching, and transaction-scoped submit gating with `--force` emergency bypass.
