@@ -217,5 +217,31 @@ flowchart TD
 - [x] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting Cotejo inbox tabs.
 
 
+---
+
+## Component 6: Asynchronous Cascading Stack Rebases with On-Demand Sync-Through (Phase 2 P1)
+**References:**
+- [Agentic Analysis §2.2: Asynchronous Cascading Rebases with "Sync-Through" Fast-Path](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L152-L160)
+- [Agentic Roadmap Phase 2: P1 Asynchronous Cascading Rebases](file:///home/matatan/Developer/niebla/niebla/docs/agentic_development_analysis.md#L211)
+
+### Commit 6.1: `feat(grpc): create asynchronous cascade rebase worker queue with per-CL locking`
+- [x] Create `internal/grpc/rebase_queue.go` with background worker pool, FIFO task channels, and per-CL branch locking (`KeyedMutex`).
+- [x] Implement `Enqueue(parentCLID int64, oldTree, newTree []byte)`, `Drain()`, and `Stop()`.
+- [x] Add unit tests in `internal/grpc/rebase_queue_test.go` verifying asynchronous task execution, branch mutex isolation, and graceful worker shutdown.
+
+### Commit 6.2: `feat(grpc): wire async rebase queue into ShelveCL and implement on-demand Sync-Through`
+- [ ] Wire `RebaseQueue` into `Server`: offload downstream stack re-parenting in `ShelveCL` to background queue for sub-100ms response.
+- [ ] Implement on-demand `SyncThrough` in `SyncWorkspace`: if a child CL's parent tree was updated while a background rebase is queued, immediately flush the child's rebase synchronously.
+- [ ] Add unit tests in `internal/grpc/sync_through_test.go` verifying instant shelve return and deterministic sync-through reconciliation.
+
+### Commit 6.3: `test(grpc): add testcontainers integration suite for deep stack async cascading rebases`
+- [ ] Add PostgreSQL testcontainer integration test in `internal/grpc/cascade_integration_test.go` verifying multi-tier stack re-parenting ($CL_1 \to CL_2 \to CL_3$), concurrent shelving, and conflict handling.
+
+### Commit 6.4: `docs(skills): update niebla skill and roadmap checklists with async cascading rebases`
+- [ ] Update `docs/agentic_development_analysis.md` marking Phase 2 P1 Asynchronous Cascading Rebases as complete.
+- [ ] Update `~/.gemini/config/skills/niebla/SKILL.md` and embedded `assets/niebla/SKILL.md` documenting background stack rebase and sync-through.
+
+
+
 
 
