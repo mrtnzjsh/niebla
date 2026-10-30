@@ -14,10 +14,11 @@ This skill guides AI agents and developers in inspecting, modifying, and validat
 
 ## 1. Core Principles for AI Agents
 
-1. **Canonical Config Location:**
-   Configuration is rooted at:
-   - `$XDG_CONFIG_HOME/niebla/config.toml` (default: `~/.config/niebla/config.toml`).
-   - Overridable via `NIEBLA_CONFIG` environment variable or `--config <path>` flag.
+1. **Canonical Config Location & Multi-File Modularity (`~/.config/niebla/*.toml`):**
+   - Configuration is rooted in `$XDG_CONFIG_HOME/niebla/` (default: `~/.config/niebla/`).
+   - Users can either keep all settings in `~/.config/niebla/config.toml` or split subsystems into separate `.toml` files inside `~/.config/niebla/` (e.g., `config.toml`, `ai.toml`, `theme.toml`, `ci.toml`, `resilience.toml`).
+   - All non-hidden `*.toml` files in `~/.config/niebla/` are automatically discovered (`config.toml` first, followed by alphabetical order) and combined at runtime.
+   - **Header / Subsection Uniqueness Rule:** The same table header or subsection (e.g., `[server]`, `[critique]`, `[critique.theme]`, `[critique.ai]`) **cannot** be defined in multiple `.toml` files. Defining `[critique]` in `config.toml` and `[critique.ai]` in `ai.toml` is valid, whereas defining `[critique.ai]` in both `config.toml` and `ai.toml` fails fast with a duplicate section error.
 2. **User Precedence & Non-Destructive Merges:**
    - On first run, Niebla initializes `~/.config/niebla/config.toml` from embedded baseline defaults.
    - Any value defined by the user strictly takes precedence over defaults.

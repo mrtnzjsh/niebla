@@ -37,6 +37,15 @@ func newConfigPathCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), path)
+			if dir, err := config.DefaultConfigDir(); err == nil {
+				if files, err := config.DiscoverConfigFiles(dir); err == nil && len(files) > 1 {
+					for _, f := range files {
+						if f != path {
+							fmt.Fprintln(cmd.OutOrStdout(), f)
+						}
+					}
+				}
+			}
 			return nil
 		},
 	}
@@ -48,7 +57,7 @@ func newConfigValidateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "validate [file]",
 		Short: "Validate configuration syntax and semantics (fail fast)",
-		Long:  "Parses and validates the active configuration or specified file against schema rules, port collision checks, and theme presets. Fails fast with descriptive error messages.",
+		Long:  "Parses and validates the active configuration (including all *.toml files in ~/.config/niebla/) or specified file against schema rules, duplicate header checks, port collision checks, and theme presets. Fails fast with descriptive error messages.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targetPath := configPath
 			if len(args) > 0 {
@@ -72,6 +81,17 @@ func newConfigValidateCmd() *cobra.Command {
 			theme := config.ResolveTheme(cfg.Critique.Theme)
 
 			fmt.Fprintf(cmd.OutOrStdout(), "✓ Configuration is valid: %s\n", targetPath)
+			dir := targetPath
+			if info, err := os.Stat(targetPath); err == nil && !info.IsDir() {
+				dir = filepath.Dir(targetPath)
+			}
+			if files, err := config.DiscoverConfigFiles(dir); err == nil && len(files) > 1 {
+				var names []string
+				for _, f := range files {
+					names = append(names, filepath.Base(f))
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "  • Combined files   : %v\n", names)
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "  • Server gRPC      : %s\n", cfg.Core.ServerAddr)
 			fmt.Fprintf(cmd.OutOrStdout(), "  • Workspace root   : %s\n", cfg.FS.MountBase)
 			fmt.Fprintf(cmd.OutOrStdout(), "  • Critique web UI  : http://%s:%d\n", cfg.Critique.Host, cfg.Critique.Port)
@@ -98,7 +118,22 @@ func newConfigShowCmd() *cobra.Command {
 			}
 
 			if !resolved {
-				// Display raw file content if available
+				dir := filepath.Dir(path)
+				if files, err := config.DiscoverConfigFiles(dir); err == nil && len(files) > 1 {
+					for i, f := range files {
+						data, rErr := os.ReadFile(f)
+						if rErr != nil {
+							continue
+						}
+						if i > 0 {
+							fmt.Fprintln(cmd.OutOrStdout())
+						}
+						fmt.Fprintf(cmd.OutOrStdout(), "# === %s ===\n", filepath.Base(f))
+						fmt.Fprint(cmd.OutOrStdout(), string(data))
+					}
+					return nil
+				}
+				// Display raw single file content if available
 				data, err := os.ReadFile(path)
 				if err == nil {
 					fmt.Fprint(cmd.OutOrStdout(), string(data))

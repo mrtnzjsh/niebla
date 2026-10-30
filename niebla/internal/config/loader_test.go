@@ -163,3 +163,126 @@ default_reviewer = "$TEST_REVIEWER"
 		t.Errorf("expected expanded default_reviewer 'test_reviewer', got %q", cfg.Critique.DefaultReviewer)
 	}
 }
+
+func TestLoadFromDir_CombinesDisjointSubsections(t *testing.T) {
+	dir := t.TempDir()
+
+	mainTOML := `
+version = 1
+
+[core]
+server_addr = "127.0.0.1:50051"
+
+[critique]
+port = 8088
+proxy_port = 7331
+`
+	themeTOML := `
+[critique.theme]
+preset = "dracula"
+syntax_style = "dracula"
+`
+	aiTOML := `
+[critique.ai]
+enabled = true
+endpoint = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(mainTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "theme.toml"), []byte(themeTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ai.toml"), []byte(aiTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Loading via config.toml path should automatically discover and combine sibling *.toml files
+	cfg, err := LoadFromPath(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatalf("expected disjoint multi-file TOMLs to combine cleanly, got: %v", err)
+	}
+
+	if cfg.Critique.Port != 8088 {
+		t.Errorf("expected critique.port 8088 from config.toml, got %d", cfg.Critique.Port)
+	}
+	if cfg.Critique.Theme.Preset != "dracula" {
+		t.Errorf("expected critique.theme.preset 'dracula' from theme.toml, got %q", cfg.Critique.Theme.Preset)
+	}
+	if !cfg.Critique.AI.IsConfigured() || cfg.Critique.AI.Endpoint != "http://127.0.0.1:11434/v1" {
+		t.Errorf("expected critique.ai from ai.toml to be configured, got %+v", cfg.Critique.AI)
+	}
+}
+
+func TestLoadFromDir_RejectsDuplicateHeaderAcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Both config.toml and ai.toml define [critique.ai] (even with different attributes)
+	mainTOML := `
+version = 1
+
+[critique]
+port = 8080
+
+[critique.ai]
+enabled = true
+`
+	aiTOML := `
+[critique.ai]
+endpoint = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(mainTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ai.toml"), []byte(aiTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadFromPath(filepath.Join(dir, "config.toml"))
+	if err == nil {
+		t.Fatalf("expected error when [critique.ai] is defined in both config.toml and ai.toml, got nil")
+	}
+
+	errStr := err.Error()
+	if !strings.Contains(errStr, "duplicate configuration section [critique.ai]") {
+		t.Errorf("expected duplicate section error message, got:\n%s", errStr)
+	}
+	if !strings.Contains(errStr, "config.toml") || !strings.Contains(errStr, "ai.toml") {
+		t.Errorf("expected error to name both conflicting files (config.toml and ai.toml), got:\n%s", errStr)
+	}
+}
+
+func TestLoadFromDir_RejectsInlineSubtableConflict(t *testing.T) {
+	dir := t.TempDir()
+
+	// config.toml defines inline `ai = { ... }` under [critique], while ai.toml defines [critique.ai]
+	mainTOML := `
+version = 1
+
+[critique]
+port = 8080
+ai = { enabled = true }
+`
+	aiTOML := `
+[critique.ai]
+endpoint = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(mainTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ai.toml"), []byte(aiTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadFromDir(dir)
+	if err == nil {
+		t.Fatalf("expected duplicate section conflict for inline table vs [critique.ai] header, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate configuration section [critique.ai]") {
+		t.Errorf("expected duplicate section [critique.ai] error, got: %v", err)
+	}
+}
+
