@@ -15,6 +15,7 @@ import (
 	internalevents "niebla/internal/events"
 	"niebla/pkg/cas"
 	pkgevents "niebla/pkg/events"
+	"niebla/pkg/hooks"
 	"niebla/pkg/owners"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 	"niebla/pkg/tree"
@@ -521,6 +522,67 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 				return nil, status.Errorf(codes.FailedPrecondition,
 					"cannot submit CL %d: missing required OWNERS approval for: %s",
 					req.ClId, strings.Join(missingDesc, "; "))
+			}
+		}
+
+		// 5. Guard: Check Presubmit Hooks (.niebla/hooks.toml)
+		hooksEntry, err := tree.ResolvePath(clInfo.RootTreeHash, ".niebla/hooks.toml", fetchTree)
+		if err == nil && hooksEntry != nil && !hooksEntry.IsDir() && len(hooksEntry.BlobSHA256) > 0 {
+			f, _, err := s.casStorage.OpenBlob(hooksEntry.BlobSHA256)
+			if err != nil {
+				log.Printf("warning: failed to open .niebla/hooks.toml blob for CL %d: %v", req.ClId, err)
+			} else {
+				defer f.Close()
+				hooksData, rErr := io.ReadAll(f)
+				if rErr != nil {
+					log.Printf("warning: failed to read .niebla/hooks.toml data for CL %d: %v", req.ClId, rErr)
+				} else if hooksCfg, pErr := hooks.ParseTOML(hooksData); pErr == nil && hooksCfg != nil && len(hooksCfg.Server.Presubmit) > 0 {
+					var parentCLID int64
+					if clInfo.ParentCL != nil {
+						parentCLID = *clInfo.ParentCL
+					}
+					clMeta := hooks.CLMetadata{
+						CLID:        clInfo.CLID,
+						Author:      clInfo.Author,
+						Description: clInfo.Description,
+						ParentCLID:  parentCLID,
+					}
+					var touched []hooks.TouchedFile
+					for _, p := range touchedFiles {
+						entry, _ := tree.ResolvePath(clInfo.RootTreeHash, p, fetchTree)
+						status := "modified"
+						var size uint64
+						var blobSHA []byte
+						if entry == nil {
+							status = "deleted"
+						} else {
+							size = entry.Size
+							blobSHA = entry.BlobSHA256
+						}
+						touched = append(touched, hooks.TouchedFile{
+							Path:      p,
+							SizeBytes: size,
+							BlobSHA:   blobSHA,
+							Status:    status,
+						})
+					}
+					evalRes := hooks.EvaluateServerPresubmit(hooksCfg.Server.Presubmit, clMeta, touched)
+					if !evalRes.Passed {
+						var failureMsgs []string
+						for _, fail := range evalRes.Failures {
+							if fail.Blocking {
+								if fail.Path != "" {
+									failureMsgs = append(failureMsgs, fmt.Sprintf("[%s] %s: %s", fail.HookName, fail.Path, fail.Message))
+								} else {
+									failureMsgs = append(failureMsgs, fmt.Sprintf("[%s] %s", fail.HookName, fail.Message))
+								}
+							}
+						}
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"cannot submit CL %d: presubmit hook(s) failed: %s",
+							req.ClId, strings.Join(failureMsgs, "; "))
+					}
+				}
 			}
 		}
 	}

@@ -303,9 +303,9 @@ flowchart TD
 - [x] Add comprehensive unit tests in `pkg/hooks/hooks_test.go`.
 
 ### Commit 9.3: `feat(grpc,cli): wire presubmit hook validation into SubmitCL and client submit command`
-- [ ] Add client-side presubmit execution in `internal/cli/submit.go` with `--no-verify`.
-- [ ] Wire server-side presubmit hooks into `SubmitCL` in `internal/grpc/server.go`: parse `.niebla/hooks.toml` from CL root tree, run metadata and tree_scan validations, and block on failures unless `Force` is set.
-- [ ] Add unit tests in `internal/grpc/submit_hooks_test.go`.
+- [x] Add client-side presubmit execution in `internal/cli/submit.go` with `--no-verify`.
+- [x] Wire server-side presubmit hooks into `SubmitCL` in `internal/grpc/server.go`: parse `.niebla/hooks.toml` from CL root tree, run metadata and tree_scan validations, and block on failures unless `Force` is set.
+- [x] Add unit tests in `internal/grpc/submit_hooks_test.go`.
 
 ### Commit 9.4: `test(grpc,cli): add testcontainers integration suite for CAS put and submit hook gates`
 - [ ] Add PostgreSQL testcontainer integration tests in `internal/grpc/hooks_integration_test.go` verifying `niebla cas put`, metadata presubmit rules, tree scan presubmit rules, and `--force` bypass.

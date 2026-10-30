@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"niebla/internal/cli/config"
+	"niebla/pkg/hooks"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"github.com/spf13/cobra"
@@ -23,6 +27,7 @@ type SubmitOutput struct {
 func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 	var targetCL int64
 	var force bool
+	var noVerify bool
 
 	cmd := &cobra.Command{
 		Use:   "submit",
@@ -54,6 +59,29 @@ func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 					return fmt.Errorf("workspace %q has no active shelved CL; specify --cl <id> or run 'niebla shelve' first", ws.Name)
 				}
 				clIDToSubmit = ws.ActiveCL
+			}
+
+			// Run client-side presubmit hooks if present and not bypassed
+			if activeWS != nil && !noVerify {
+				hooksFile := filepath.Join(activeWS.MountDir, ".niebla", "hooks.toml")
+				if hooksBytes, err := os.ReadFile(hooksFile); err == nil {
+					if hooksCfg, err := hooks.ParseTOML(hooksBytes); err == nil && hooksCfg != nil && len(hooksCfg.Client.Presubmit) > 0 {
+						for _, clientHook := range hooksCfg.Client.Presubmit {
+							if clientHook.Command == "" {
+								continue
+							}
+							hookCmd := exec.CommandContext(cmd.Context(), "sh", "-c", clientHook.Command)
+							hookCmd.Dir = activeWS.MountDir
+							out, hErr := hookCmd.CombinedOutput()
+							if clientHook.FailOnOutput && len(bytes.TrimSpace(out)) > 0 {
+								return fmt.Errorf("client presubmit hook %q failed (produced unexpected output, fail_on_output=true):\n%s", clientHook.Name, string(out))
+							}
+							if hErr != nil {
+								return fmt.Errorf("client presubmit hook %q failed with error: %w\n%s", clientHook.Name, hErr, string(out))
+							}
+						}
+					}
+				}
 			}
 
 			serverAddr := ResolveServerAddr(rootFlags.Server)
@@ -98,6 +126,7 @@ func NewSubmitCmd(rootFlags *RootFlags) *cobra.Command {
 
 	cmd.Flags().Int64Var(&targetCL, "cl", 0, "Changelist ID to submit (defaults to active shelved CL in current workspace)")
 	cmd.Flags().BoolVar(&force, "force", false, "Force submission, bypassing unresolved comments and approval requirements")
+	cmd.Flags().BoolVar(&noVerify, "no-verify", false, "Bypass client-side presubmit hooks")
 
 	return cmd
 }
