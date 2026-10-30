@@ -208,7 +208,7 @@ flowchart TD
 
 ### Phase 2: Enterprise Concurrency & Trunk Integrity
 - [x] **P0: Trunk Submit Queue & Linear Revision Numbers** *(✅ Completed: [Commits 1.4–1.5](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L74-L85))* — Implement atomic 3-way merge on submit with sequential trunk revisions ($r1, r2, \dots$) and advisory locking.
-- [ ] **P1: Asynchronous Cascading Rebases:** Transition stack re-parenting to background queue with on-demand sync-through for child CLs.
+- [x] **P1: Asynchronous Cascading Rebases** *(✅ Completed: [Commits 6.1–6.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L225-L242))* — Transition stack re-parenting to background worker queue (`RebaseQueue` with branch `KeyedMutex`) with sub-100ms `ShelveCL` return and deterministic on-demand `SyncThrough` for child CLs.
 - [x] **P2: CAS Binary Tree Manifests** *(✅ Completed: [Commits 1.2–1.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L65-L72))* — Migrate directory storage from row-per-entry `tree_nodes` to serialized binary/Protobuf manifests.
 - [x] **P2: Cotejo Inbox Segregation** *(✅ Completed: [Commits 5.1–5.3](file:///home/matatan/Developer/niebla/niebla/docs/foundation_implementation_plan.md#L198-L215))* — Add segregated inbox queue tabs (`My Reviews`, `Out for Review`, `Agent / Automated`, `Submitted / Trunk`) to Cotejo, protecting human attention from automated agent review fatigue.
 

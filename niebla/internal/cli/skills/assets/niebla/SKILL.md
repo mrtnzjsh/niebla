@@ -82,7 +82,7 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
   2. Constructs the updated Merkle tree hierarchy and recomputes hashes up to the root.
   3. Calls `ShelveCL` on `niebla-server` to create or update a shelved changelist:
      - If `--cl <id>` or workspace active CL is set, creates patchset $N+1$ on the existing changelist.
-     - **Automated Cascading Rebase:** Re-shelving an upstream parent CL ($B_2$) automatically triggers recursive 3-way Merkle tree re-parenting across all downstream shelved children ($C \rightarrow D$).
+     - **Asynchronous Cascading Rebase:** Re-shelving an upstream parent CL ($B_2$) offloads recursive 3-way Merkle tree re-parenting across downstream shelved children ($C \rightarrow D$) to a background worker queue (`RebaseQueue` with branch-level `KeyedMutex`), allowing `niebla shelve` to return immediately in <100ms.
   4. Expands enterprise groups (e.g. `@backend` -> `alice, bob`) and registers reviewers in `cl_reviewers`.
   5. Records the active `cl_id` and updated Merkle tree in the workspace configuration.
 
@@ -91,6 +91,7 @@ Niebla is a server-authoritative, cloud-native monorepo VCS (strictly no Git). W
   niebla sync [--workspace <name>] [--dry-run] [--json]
   ```
   Reconciles the local workspace's base tree with the server's latest rebased tree or trunk:
+  * **On-Demand Recursive Sync-Through:** If an author or agent runs `niebla sync` on a downstream child CL ($CL_4$) while background worker re-parenting of upstream parents ($CL_1 \to CL_2 \to CL_3$) is still queued or running, the server synchronously flushes and executes the cascading rebase on-demand from the root down to the target child, guaranteeing 100% deterministic sync results without race conditions.
   * **Clean Sync (FUSE Mode):** If server auto-rebase succeeded without conflict, fast-forwards `root_tree_hash` and sends a `reanchor` IPC request over the Unix domain control socket (`pkg/nieblafs/control`) to `nieblafs.sock`. The daemon purges in-memory metadata/inode caches and re-binds to the new root tree in sub-millisecond time with zero file copy.
   * **Clean Sync (`--no-fuse` Mode):** Directly re-materializes modified/added files into the workspace mount directory (`pkg/materialize`) using cached CAS blobs.
   * **Conflict Handling:** If server detected overlapping edits between parent and child, outputs conflict diagnostics and injects standard conflict markers (`<<<<<<< PARENT`, `=======`, `>>>>>>> CHILD`) into the workspace scratch files for manual resolution.
