@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	internalagents "niebla/internal/agents"
+	"niebla/internal/db"
 	pkgagents "niebla/pkg/agents"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 )
@@ -220,5 +221,131 @@ exit 0
 	}
 	if approvals2[0].Reviewer != "sec-scanner" || approvals2[0].Verdict != "lgtm" {
 		t.Errorf("expected lgtm verdict after fix, got: %+v", approvals2[0])
+	}
+}
+
+func TestOwnersSubtreeGovernance_AgentsHooksRunnersAndApprovals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testcontainers integration test in short mode")
+	}
+
+	client, database, casStorage, _, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// 1. Base trunk CL
+	baseTree := putHierarchicalTree(t, ctx, database, casStorage, map[string]string{
+		"README.md": "# Enterprise Monorepo\n",
+	})
+	baseResp, err := client.ShelveCL(ctx, &nieblav1.ShelveCLRequest{
+		Author:       "admin@corp",
+		Description:  "feat: init",
+		RootTreeHash: baseTree,
+	})
+	if err != nil {
+		t.Fatalf("ShelveCL base failed: %v", err)
+	}
+	_, err = client.SubmitCL(ctx, &nieblav1.SubmitCLRequest{ClId: baseResp.ClId, Force: true})
+	if err != nil {
+		t.Fatalf("SubmitCL base failed: %v", err)
+	}
+
+	// 2. Child CL touching pkg/payments/charge.go with subtree OWNERS.toml requiring:
+	// - 2 approvals
+	// - opt-in agent "pci-audit-bot"
+	// - opt-in presubmit hook "pci-description-prefix"
+	// - CI runner "pci-compliance-suite"
+	clTree := putHierarchicalTree(t, ctx, database, casStorage, map[string]string{
+		".niebla/agents.toml": `
+[[agent]]
+name = "pci-audit-bot"
+display_name = "PCI Compliance Bot"
+opt_in = true
+`,
+		".niebla/hooks.toml": `
+[[server.presubmit]]
+name = "pci-description-prefix"
+type = "metadata"
+opt_in = true
+blocking = true
+[server.presubmit.metadata]
+field = "description"
+pattern = "^pci: .+"
+`,
+		"pkg/payments/OWNERS.toml": `
+set_noparent = true
+approvers = ["alice@corp", "bob@corp"]
+reviewers = ["charlie@corp"]
+required_approvals = 2
+agents = ["pci-audit-bot"]
+presubmit_hooks = ["pci-description-prefix"]
+ci_runners = ["pci-compliance-suite"]
+`,
+		"pkg/payments/charge.go": "package payments\n",
+	})
+
+	clResp, err := client.ShelveCL(ctx, &nieblav1.ShelveCLRequest{
+		Author:       "dev@corp",
+		Description:  "pci: add charge handler",
+		ParentCl:     baseResp.ClId,
+		RootTreeHash: clTree,
+	})
+	if err != nil {
+		t.Fatalf("ShelveCL failed: %v", err)
+	}
+	clID := clResp.ClId
+
+	// Verify charlie@corp and pci-audit-bot were auto-assigned as reviewers from OWNERS.toml
+	revs, err := database.ListReviewers(ctx, clID)
+	if err != nil {
+		t.Fatalf("ListReviewers failed: %v", err)
+	}
+	revMap := make(map[string]bool)
+	for _, r := range revs {
+		revMap[r.Reviewer] = true
+	}
+	if !revMap["charlie@corp"] || !revMap["pci-audit-bot"] {
+		t.Errorf("expected charlie@corp and pci-audit-bot auto-assigned from OWNERS.toml, got %+v", revs)
+	}
+
+	// Grant only 1 approval (alice@corp) -> SubmitCL must block because OWNERS.toml sets required_approvals = 2
+	_ = database.SetApproval(ctx, clID, "alice@corp", "lgtm")
+	_, err = client.SubmitCL(ctx, &nieblav1.SubmitCLRequest{ClId: clID})
+	if err == nil || !strings.Contains(err.Error(), "requires 2 approval(s)") {
+		t.Fatalf("expected SubmitCL to block on required_approvals = 2 from OWNERS.toml, got: %v", err)
+	}
+
+	// Grant 2nd approval (bob@corp) -> SubmitCL must now block on missing CI check run "pci-compliance-suite"
+	_ = database.SetApproval(ctx, clID, "bob@corp", "lgtm")
+	_, err = client.SubmitCL(ctx, &nieblav1.SubmitCLRequest{ClId: clID})
+	if err == nil || !strings.Contains(err.Error(), "check runs") {
+		t.Fatalf("expected SubmitCL to block on missing CI check runs from OWNERS.toml, got: %v", err)
+	}
+
+	// Record a passing check run for an unrelated runner "unit-tests", still missing "pci-compliance-suite"
+	_, _ = database.UpsertCheckRun(ctx, db.CheckRun{
+		CLID:           clID,
+		PatchsetNumber: 1,
+		RunnerName:     "unit-tests",
+		Provider:       "local",
+		Status:         "passed",
+	})
+	_, err = client.SubmitCL(ctx, &nieblav1.SubmitCLRequest{ClId: clID})
+	if err == nil || !strings.Contains(err.Error(), "pci-compliance-suite") {
+		t.Fatalf("expected SubmitCL to block on missing required runner pci-compliance-suite, got: %v", err)
+	}
+
+	// Record passing check run for "pci-compliance-suite" -> SubmitCL now succeeds!
+	_, _ = database.UpsertCheckRun(ctx, db.CheckRun{
+		CLID:           clID,
+		PatchsetNumber: 1,
+		RunnerName:     "pci-compliance-suite",
+		Provider:       "local",
+		Status:         "passed",
+	})
+	_, err = client.SubmitCL(ctx, &nieblav1.SubmitCLRequest{ClId: clID})
+	if err != nil {
+		t.Fatalf("expected SubmitCL to succeed after satisfying all OWNERS.toml governance requirements, got: %v", err)
 	}
 }

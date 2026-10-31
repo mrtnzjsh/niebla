@@ -70,6 +70,142 @@ func TestRawBlobHandler(t *testing.T) {
 	_ = hashBytes
 }
 
+func TestCIRunnersBlock_RenderingInCLView(t *testing.T) {
+	runners := []views.CIRunnerItem{
+		{
+			RunnerName: "local",
+			Provider:   "local",
+			Status:     "passed",
+			Duration:   "1.2s",
+			LogBlobHex: "abcdef123456",
+		},
+		{
+			RunnerName: "forgejo-linux",
+			Provider:   "forgejo",
+			Status:     "running",
+			IsRequired: true,
+		},
+		{
+			RunnerName: "fips-compliance",
+			Provider:   "webhook",
+			Status:     "failed",
+			IsRequired: true,
+			Duration:   "45s",
+		},
+	}
+
+	clData := views.CLDetailData{
+		CL: &db.Changelist{
+			CLID:        42,
+			Author:      "alice",
+			Description: "Feature CL with multiple CI runners",
+			Status:      "pending",
+			CommittedAt: time.Now(),
+		},
+		CurrentPatchset: 1,
+		Patchsets: []db.Patchset{
+			{PatchsetNumber: 1},
+		},
+		CIRunners: runners,
+	}
+
+	var buf bytes.Buffer
+	err := views.CLDetail(clData).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("failed to render CLDetail: %v", err)
+	}
+
+	html := buf.String()
+
+	// Verify CI runners block exists
+	if !strings.Contains(html, `id="ci-runners-block"`) {
+		t.Fatalf("expected html to contain id=\"ci-runners-block\"")
+	}
+
+	// Verify all runner names are rendered
+	if !strings.Contains(html, "local") {
+		t.Errorf("expected html to contain runner name 'local'")
+	}
+	if !strings.Contains(html, "forgejo-linux") {
+		t.Errorf("expected html to contain runner name 'forgejo-linux'")
+	}
+	if !strings.Contains(html, "fips-compliance") {
+		t.Errorf("expected html to contain runner name 'fips-compliance'")
+	}
+
+	// Verify statuses
+	if !strings.Contains(html, "Passed") {
+		t.Errorf("expected html to contain 'Passed' status")
+	}
+	if !strings.Contains(html, "Running") {
+		t.Errorf("expected html to contain 'Running' status")
+	}
+	if !strings.Contains(html, "Failed") {
+		t.Errorf("expected html to contain 'Failed' status")
+	}
+
+	// Verify 'Required' badge
+	if !strings.Contains(html, "Required") {
+		t.Errorf("expected html to contain 'Required' badge for required runners")
+	}
+
+	// Verify view log link
+	if !strings.Contains(html, "/cl/42/raw?hash=abcdef123456") {
+		t.Errorf("expected html to contain view log link for runner with log hash")
+	}
+
+	// Verify order: CI Runners block must appear BEFORE the Changed Files table
+	ciBlockIdx := strings.Index(html, `id="ci-runners-block"`)
+	diffBlockIdx := strings.Index(html, "Changed Files")
+	if ciBlockIdx == -1 || diffBlockIdx == -1 {
+		t.Fatalf("both ci-runners-block and Changed Files must be present in html")
+	}
+	if ciBlockIdx >= diffBlockIdx {
+		t.Errorf("expected ci-runners-block (idx %d) to appear BEFORE Changed Files (idx %d)", ciBlockIdx, diffBlockIdx)
+	}
+}
+
+func TestBuildCIRunnerItems(t *testing.T) {
+	h := &CLHandler{
+		config: &config.Config{
+			CI: config.CIConfig{
+				Runners: map[string]config.CIRunnerConfig{
+					"custom-k8s": {Provider: "webhook"},
+				},
+			},
+		},
+	}
+
+	demoCheckRunsMu.Lock()
+	demoCheckRunsStore["99:1"] = []db.CheckRun{
+		{
+			CLID:           99,
+			PatchsetNumber: 1,
+			RunnerName:     "local",
+			Provider:       "local",
+			Status:         "passed",
+		},
+	}
+	demoCheckRunsMu.Unlock()
+
+	// Required runners include 'local' (already reported) and 'custom-k8s' (not yet reported)
+	items := h.buildCIRunnerItems(context.Background(), 99, 1, []string{"local", "custom-k8s"})
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	// 1st item: local (passed, isRequired = true)
+	if items[0].RunnerName != "local" || items[0].Status != "passed" || !items[0].IsRequired {
+		t.Errorf("unexpected 1st item: %+v", items[0])
+	}
+
+	// 2nd item: custom-k8s (queued, provider = webhook, isRequired = true)
+	if items[1].RunnerName != "custom-k8s" || items[1].Status != "queued" || !items[1].IsRequired || items[1].Provider != "webhook" {
+		t.Errorf("unexpected 2nd item: %+v", items[1])
+	}
+}
+
 func TestViewsRendering(t *testing.T) {
 	ctx := context.Background()
 

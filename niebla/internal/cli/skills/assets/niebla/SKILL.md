@@ -264,9 +264,9 @@ Cotejo includes a dedicated **Reviewers Bar** in the header overview:
    - **Blocked by Unresolved Comments:** If `allow_submit_with_unresolved_comments = false` and unresolved comments exist, the submit button is styled in amber and clicking it opens the `<dialog id="unresolved-comments-modal">`.
    - **Already Submitted:** Displays an immutable `CL Submitted` status pill.
 
-### Policy & Auto-Approval Engine (`OWNERS.toml`)
+### Policy & Subtree Governance Engine (`OWNERS.toml`)
 
-Niebla enforces hierarchical directory and pattern-based code ownership using `OWNERS.toml` files committed directly into the repository Merkle tree (`pkg/owners`):
+Niebla uses a **3-tier enterprise governance architecture** combining host defaults (`~/.config/niebla/*.toml`), a shared repository catalog (`.niebla/agents.toml` and `.niebla/hooks.toml`), and hierarchical directory-level policy files (`OWNERS.toml`, `pkg/owners`) committed directly into the repository Merkle tree:
 
 1. **`OWNERS.toml` Schema:**
    ```toml
@@ -277,30 +277,40 @@ Niebla enforces hierarchical directory and pattern-based code ownership using `O
      "@security-team",
    ]
 
-   # Recommended reviewers suggested during review assignment
+   # Recommended human reviewers auto-assigned on niebla shelve
    reviewers = [
      "charlie",
    ]
 
-   # Isolate this directory from inheriting parent/root OWNERS
+   # Isolate this directory from inheriting parent/root OWNERS approvers and policies
    set_noparent = true
 
-   # Scoped rules for specific file patterns (highest precedence)
+   # Subtree Governance Overrides (optional; inherits/aggregates upward unless set_noparent = true)
+   required_approvals = 2
+   require_green_ci = true
+   allow_unresolved_comments = false
+
+   # Named references to the shared catalog in .niebla/agents.toml, .niebla/hooks.toml, and CI
+   agents = ["sec-bot"]
+   presubmit_hooks = ["no-raw-sql", "fips-crypto-check"]
+   ci_runners = ["security-integration-suite"]
+
+   # Scoped rules for specific file patterns (supports both inline table and legacy array syntax)
    [per_file]
-   "*.proto" = { approvers = ["@proto-leads"], set_noparent = true }
-   "BUILD.bazel" = { approvers = ["build-cop"] }
+   "*.templ"       = { approvers = ["@design-system"], agents = ["a11y-bot"] }
+   "*.proto"       = { approvers = ["@proto-leads"], set_noparent = true, required_approvals = 2 }
+   "*.sql"         = { approvers = ["@dba-team"], presubmit_hooks = ["sql-migration-lint"] }
+   "BUILD.bazel"   = ["build-cop"]
    ```
 
-2. **Hierarchical Inheritance & Resolution:**
-   - When a changelist modifies, adds, or deletes files, `SubmitCL` diffs the CL against its base tree (`pkg/tree.DiffTreeFiles`).
-   - For every affected file path:
-     - Checks for matching patterns in `[per_file]` tables in the file's directory and parent directories.
-     - Walks up the directory hierarchy from the file's parent directory to root (`/`), locating `OWNERS.toml` files.
-     - Collects all authorized approvers across inherited files. If any `OWNERS.toml` or `per_file` entry sets `set_noparent = true`, traversal stops immediately at that directory level.
-     - Enterprise user groups (e.g. `@security-team`) are expanded into individual member usernames via the group resolver.
-   - For submission to succeed, **every required directory and pattern scope** must have at least one approver who has submitted an approving verdict (`lgtm` or `approved`).
-   - Submissions lacking required owner approvals fail atomically with `FailedPrecondition` diagnostics detailing the unapproved scopes and eligible approvers.
-   - Emergency or administrative override is supported via `niebla submit --force` or Cotejo approval override modal.
+2. **Hierarchical Inheritance & Multi-Subtree Aggregation Rules:**
+   - When a changelist modifies, adds, or deletes files, `ShelveCL` and `SubmitCL` diff the CL against its base tree (`pkg/tree.DiffTreeFiles`) and evaluate `OWNERS.toml` along each touched file's directory ancestry up to root (`/`), stopping at `set_noparent = true`:
+     - **`approvers`:** Every touched directory/per-file scope must have at least one authorized approver (expanding `@group` via the group resolver) who has cast an approving verdict (`lgtm` or `approved`).
+     - **`required_approvals`:** Aggregated as the **maximum** `required_approvals` across all touched `OWNERS.toml` chains and matching `[per_file]` rules (falling back to `~/.config/niebla/*.toml` `required_approvals`).
+     - **`require_green_ci`:** Evaluates to `true` if **any** touched `OWNERS.toml` or matching `[per_file]` rule sets `require_green_ci = true` or specifies `ci_runners` (falling back to `~/.config/niebla/*.toml` `require_green_check_runs`).
+     - **`allow_unresolved_comments`:** Strictest wins (`false` if **any** touched `OWNERS.toml` or `[per_file]` rule sets `allow_unresolved_comments = false`).
+     - **`reviewers`, `agents`, `presubmit_hooks`, `ci_runners`:** Deduplicated union across all touched `OWNERS.toml` chains (respecting `set_noparent = true`).
+   - Emergency or administrative override is supported via `niebla submit --force` or the Cotejo approval override modal.
 
 ### Submit Hook Architecture (`.niebla/hooks.toml`)
 
@@ -336,26 +346,37 @@ Niebla provides an extensible client- and server-side presubmit pipeline configu
    max_file_size_bytes = 10485760 # 10MB limit
 
    [[server.presubmit]]
-   name = "custom-linter"
+   name = "sql-migration-lint"
    type = "cas_binary"
+   opt_in = true # Only runs when opted into by a subtree's OWNERS.toml presubmit_hooks = ["sql-migration-lint"]
    cas_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
    args = ["--strict", "."]
    ```
 
-2. **Execution Flow & Gating:**
-   - **Client Execution:** When running `niebla submit`, the CLI executes `[[client.presubmit]]` commands inside the local workspace. If any hook returns non-zero or produces output (when `fail_on_output = true`), submission is aborted locally before reaching the server. Pass `--no-verify` to skip.
-   - **Server Execution:** `SubmitCL` resolves `.niebla/hooks.toml` directly from the CL's root Merkle tree and runs all server-side presubmits:
-     - `metadata`: Evaluates description regex and character limits.
-     - `tree_scan`: Checks touched file paths against forbidden glob patterns and verifies file size limits.
-     - `cas_binary`: Pulls and executes precompiled binaries directly from central CAS storage by cryptographic SHA-256 without repository pollution.
-   - **Emergency Bypass:** When urgent hotfixes are required, `niebla submit --force` bypasses server-side presubmit gates.
+2. **Execution Flow & Subtree Opt-In:**
+   - **Client Execution:** When running `niebla submit`, the CLI executes `[[client.presubmit]]` commands inside the local workspace. Pass `--no-verify` to skip.
+   - **Server Execution:** `SubmitCL` resolves `.niebla/hooks.toml` from the CL's root Merkle tree and runs all server-side presubmits matching either global/`trigger_paths` rules OR explicit `presubmit_hooks = [...]` from touched `OWNERS.toml` files (`metadata`, `tree_scan`, `cas_binary`, `in_tree`, `exec`).
+   - **Emergency Bypass:** `niebla submit --force` bypasses server-side presubmit gates.
 
 ### Review Agent Personas Framework (`.niebla/agents.toml`)
 
-Niebla supports automated, collaborative review personas (linter bots, security scanners, build checkers) declared in `.niebla/agents.toml` (`pkg/agents`, `internal/agents`):
+Niebla supports both **AI-powered review personas** (driven by `.niebla/prompts/<domain>.md` and `[critique.ai]`) and **deterministic static analyzers / CAS binaries** declared in `.niebla/agents.toml` (`pkg/agents`, `internal/agents`):
 
 1. **`.niebla/agents.toml` Schema:**
    ```toml
+   # AI Persona Agent (uses .niebla/prompts/<domain>.md and [critique.ai] OpenAI endpoint)
+   [[agent]]
+   name = "a11y-bot"
+   display_name = "Accessibility Review Agent"
+   type = "ai"
+   prompt_file = ".niebla/prompts/accessibility.md"
+   trigger_paths = ["internal/web/views/**/*.templ"]
+   blocking = false
+   auto_approve = false
+   capture_logs = true
+   post_inline_diagnostics = true
+   timeout_seconds = 45
+
    # Specialized in-tree script reviewer
    [[agent]]
    name = "sec-scanner"
@@ -365,10 +386,10 @@ Niebla supports automated, collaborative review personas (linter bots, security 
    trigger_paths = ["pkg/security/**", "**/auth/**"]
    auto_approve = true            # Casts 'lgtm' if script succeeds (exit 0)
    capture_logs = true            # Ingests stdout/stderr to CAS (/cl/{id}/runs/{agent}/logs)
-   post_inline_diagnostics = true # Parses "path:line: message" into Cotejo inline diff comments
+   post_inline_diagnostics = true # Parses compiler lines OR structured AgentReviewReport JSON
    timeout_seconds = 60
 
-   # Compiled prebuilt binary runner referenced by CAS digest
+   # Compiled prebuilt binary runner referenced by CAS digest (can be opt_in = true for OWNERS.toml)
    [[agent]]
    name = "package-builder"
    display_name = "Package Build Runner"
@@ -380,11 +401,10 @@ Niebla supports automated, collaborative review personas (linter bots, security 
    capture_logs = true
    ```
 
-2. **Automated Assignment & Review Lifecycle:**
-   - **Trigger Evaluation on Shelve:** Whenever `niebla shelve` is run, `ShelveCL` resolves `.niebla/agents.toml` from the CL's root Merkle tree and matches `trigger_paths` against touched files. Matching agents are auto-registered in `cl_reviewers`.
-   - **CAS Log Streaming & Build Artifacts:** Runners capture full build output, upload it to the central CAS store (`UploadBlob`), and record the check run in `cl_check_runs` with an internal URL (`/cl/{id}/runs/{agent}/logs`).
-   - **Inline Cotejo Diagnostics:** If a compiler or linter produces output (e.g. `pkg/auth/token.go:42:15: error: missing token validation`), the agent executor parses the line numbers and posts inline comments directly into Cotejo diff threads with links to the full CAS log.
-   - **Verdict Voting:** Passing checks automatically grant `lgtm` (satisfying `OWNERS.toml` rules); failing checks register `changes_requested`, blocking `niebla submit` until fixed in a subsequent patchset.
+2. **Automated Assignment & Background Execution Lifecycle:**
+   - **Trigger & `OWNERS.toml` Evaluation on Shelve:** Whenever `niebla shelve` is run, `ShelveCL` resolves `OWNERS.toml` (`agents = [...]`) and `.niebla/agents.toml` (`trigger_paths`), auto-assigns matching agents in `cl_reviewers`, materializes the touched files into an isolated workspace, and dispatches `Executor.Execute` asynchronously in the background.
+   - **Dual Output Contract (Compiler Diagnostics OR Structured JSON Suggestions):** Agents can emit either standard `path:line:col: message` lines or a structured `AgentReviewReport` JSON containing `suggestion_code`, which automatically populates one-click **`✓ Apply Suggestion`** blocks in Cotejo.
+   - **Verdict Voting:** Passing checks automatically grant `lgtm` (when `auto_approve = true`); failing checks register `changes_requested`.
 
 ### File Review Tracking & Status
 

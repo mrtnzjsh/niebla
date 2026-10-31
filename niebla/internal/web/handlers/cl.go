@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"niebla/internal/web/views"
 	"niebla/pkg/cas"
 	"niebla/pkg/events"
+	"niebla/pkg/owners"
 	"niebla/pkg/tree"
 )
 
@@ -540,9 +542,12 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 
 	reqApprovals := 0
 	allowUnresolved := false
+	requireGreen := false
+	var requiredCIRunners []string
 	if h.config != nil {
 		reqApprovals = h.config.Critique.GetRequiredApprovals()
 		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
 	}
 
 	var clStatus string
@@ -561,6 +566,7 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		needsRebase = cl.NeedsRebase
 		approvalsCount, _ = h.db.CountApprovals(ctx, clID)
 		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
+		reqApprovals, allowUnresolved, requireGreen, requiredCIRunners = h.resolveCLPolicy(ctx, cl)
 	} else {
 		demoCLStatusMu.RLock()
 		clStatus = demoCLStatusStore[clID]
@@ -617,10 +623,6 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		log.Printf("CL %d: approval requirement overridden by %q with justification: %q", clID, h.resolveReviewer(r), justification)
 	}
 
-	requireGreen := false
-	if h.config != nil {
-		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
-	}
 	if requireGreen {
 		var green bool
 		var total, pending, failed int
@@ -662,6 +664,26 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			log.Printf("CL %d: CI green check runs requirement overridden by %q with justification: %q", clID, h.resolveReviewer(r), justification)
+		} else if h.db != nil && len(requiredCIRunners) > 0 && justification == "" {
+			runs, rErr := h.db.ListCheckRunsForPatchset(r.Context(), clID, psNum)
+			if rErr == nil {
+				greenRunners := make(map[string]bool, len(runs))
+				for _, run := range runs {
+					if run.Status == "passed" || run.Status == "skipped" {
+						greenRunners[strings.ToLower(strings.TrimSpace(run.RunnerName))] = true
+					}
+				}
+				var missingRunners []string
+				for _, reqRunner := range requiredCIRunners {
+					if !greenRunners[strings.ToLower(strings.TrimSpace(reqRunner))] {
+						missingRunners = append(missingRunners, reqRunner)
+					}
+				}
+				if len(missingRunners) > 0 {
+					http.Error(w, fmt.Sprintf("CL %d requires OWNERS.toml CI runner(s) to pass before submission: %s", clID, strings.Join(missingRunners, ", ")), http.StatusBadRequest)
+					return
+				}
+			}
 		}
 	}
 
@@ -718,6 +740,7 @@ func (h *CLHandler) renderActionsBar(w http.ResponseWriter, r *http.Request, clI
 		ctx := r.Context()
 		if cl, err := h.db.GetCL(ctx, clID); err == nil && cl != nil {
 			clStatus = cl.Status
+			reqApprovals, allowUnresolved, _, _ = h.resolveCLPolicy(ctx, cl)
 		}
 		approvals, _ = h.db.ListApprovals(ctx, clID)
 		reviewers, _ = h.db.ListReviewers(ctx, clID)
@@ -1184,12 +1207,8 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 	}
 	approvedCount, _ := h.db.CountApprovals(ctx, clID)
 
-	reqApprovals := 0
-	allowUnresolved := false
-	if h.config != nil {
-		reqApprovals = h.config.Critique.GetRequiredApprovals()
-		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
-	}
+	reqApprovals, allowUnresolved, _, requiredCIRunners := h.resolveCLPolicy(ctx, cl)
+	ciRunners := h.buildCIRunnerItems(ctx, clID, currentPS, requiredCIRunners)
 
 	data := views.CLDetailData{
 		CL:                        cl,
@@ -1210,11 +1229,69 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		ReviewedFilesCount:        reviewedCount,
 		DraftCommentsCount:        len(drafts),
 		DraftComments:             drafts,
+		CIRunners:                 ciRunners,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	component := views.CLDetail(data)
 	_ = component.Render(ctx, w)
+}
+
+func (h *CLHandler) resolveCLPolicy(ctx context.Context, cl *db.Changelist) (reqApprovals int, allowUnresolved bool, requireGreen bool, ciRunners []string) {
+	if h.config != nil {
+		reqApprovals = h.config.Critique.GetRequiredApprovals()
+		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
+	}
+	if h.db == nil || h.cas == nil || cl == nil || len(cl.RootTreeHash) == 0 {
+		return reqApprovals, allowUnresolved, requireGreen, nil
+	}
+
+	baseTree := tree.EmptyTreeHash
+	if cl.ParentCL != nil && *cl.ParentCL > 0 {
+		if parentCL, err := h.db.GetCL(ctx, *cl.ParentCL); err == nil && parentCL != nil && len(parentCL.RootTreeHash) > 0 {
+			baseTree = parentCL.RootTreeHash
+		}
+	}
+
+	fetchTree := func(hash []byte) ([]tree.Entry, error) {
+		return h.db.GetTreeEntries(ctx, hash)
+	}
+	touchedFiles, err := tree.DiffTreeFiles(baseTree, cl.RootTreeHash, fetchTree)
+	if err != nil || len(touchedFiles) == 0 {
+		return reqApprovals, allowUnresolved, requireGreen, nil
+	}
+
+	ownersProvider := func(dir string) ([]byte, error) {
+		ownersPath := "OWNERS.toml"
+		if dir != "" {
+			ownersPath = dir + "/OWNERS.toml"
+		}
+		entry, err := tree.ResolvePath(cl.RootTreeHash, ownersPath, fetchTree)
+		if err != nil || entry == nil || entry.IsDir() || len(entry.BlobSHA256) == 0 {
+			return nil, os.ErrNotExist
+		}
+		return h.readBlobBytes(entry.BlobSHA256)
+	}
+
+	evaluator := owners.NewEvaluator(ownersProvider, nil)
+	policy, err := evaluator.ResolvePolicy(touchedFiles)
+	if err != nil || policy == nil {
+		return reqApprovals, allowUnresolved, requireGreen, nil
+	}
+
+	if policy.RequiredApprovals != nil && *policy.RequiredApprovals > reqApprovals {
+		reqApprovals = *policy.RequiredApprovals
+	}
+	if policy.AllowUnresolvedComments != nil {
+		if !*policy.AllowUnresolvedComments || h.config == nil {
+			allowUnresolved = *policy.AllowUnresolvedComments
+		}
+	}
+	if policy.RequireGreenCI != nil && *policy.RequireGreenCI {
+		requireGreen = true
+	}
+	return reqApprovals, allowUnresolved, requireGreen, policy.CIRunners
 }
 
 func (h *CLHandler) readBlobBytes(sha256Bytes []byte) ([]byte, error) {
@@ -1412,6 +1489,8 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
 	}
 
+	ciRunners := h.buildCIRunnerItems(r.Context(), demoCL.CLID, currentPS, nil)
+
 	data := views.CLDetailData{
 		CL:                        demoCL,
 		Patchsets:                 patchsets,
@@ -1431,6 +1510,7 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 		ReviewedFilesCount:        reviewedCount,
 		DraftCommentsCount:        len(reviewerDrafts),
 		DraftComments:             reviewerDrafts,
+		CIRunners:                 ciRunners,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1866,4 +1946,87 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 		detail.ModBlobHex = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4"
 	}
 	return detail, err
+}
+
+func (h *CLHandler) buildCIRunnerItems(ctx context.Context, clID int64, patchsetNum int, requiredCIRunners []string) []views.CIRunnerItem {
+	var checkRuns []db.CheckRun
+	if h.db != nil {
+		rList, err := h.db.ListCheckRunsForPatchset(ctx, clID, patchsetNum)
+		if err == nil {
+			checkRuns = rList
+		}
+	} else {
+		demoCheckRunsMu.RLock()
+		key := fmt.Sprintf("%d:%d", clID, patchsetNum)
+		checkRuns = demoCheckRunsStore[key]
+		demoCheckRunsMu.RUnlock()
+	}
+
+	reqSet := make(map[string]bool, len(requiredCIRunners))
+	for _, r := range requiredCIRunners {
+		reqSet[strings.ToLower(strings.TrimSpace(r))] = true
+	}
+
+	seenRunners := make(map[string]bool)
+	var runnerItems []views.CIRunnerItem
+
+	for _, cr := range checkRuns {
+		norm := strings.ToLower(strings.TrimSpace(cr.RunnerName))
+		seenRunners[norm] = true
+
+		var durationStr string
+		if cr.StartedAt != nil {
+			if cr.CompletedAt != nil {
+				durationStr = cr.CompletedAt.Sub(*cr.StartedAt).Round(time.Millisecond * 100).String()
+			} else {
+				durationStr = time.Since(*cr.StartedAt).Round(time.Second).String()
+			}
+		}
+
+		var logHex string
+		if len(cr.LogBlobSHA256) > 0 {
+			logHex = hex.EncodeToString(cr.LogBlobSHA256)
+		}
+
+		provider := cr.Provider
+		if (provider == "" || provider == "local") && h.config != nil && h.config.CI.Runners != nil {
+			if rCfg, ok := h.config.CI.Runners[cr.RunnerName]; ok && rCfg.Provider != "" {
+				provider = rCfg.Provider
+			}
+		}
+		if provider == "" {
+			provider = "local"
+		}
+
+		runnerItems = append(runnerItems, views.CIRunnerItem{
+			RunnerName:  cr.RunnerName,
+			Provider:    provider,
+			Status:      strings.ToLower(cr.Status),
+			IsRequired:  reqSet[norm],
+			ExternalURL: cr.ExternalURL,
+			LogBlobHex:  logHex,
+			Duration:    durationStr,
+		})
+	}
+
+	// For any required runner from OWNERS.toml that hasn't reported a check run yet:
+	for _, reqName := range requiredCIRunners {
+		norm := strings.ToLower(strings.TrimSpace(reqName))
+		if !seenRunners[norm] {
+			provider := "local"
+			if h.config != nil && h.config.CI.Runners != nil {
+				if rCfg, ok := h.config.CI.Runners[reqName]; ok && rCfg.Provider != "" {
+					provider = rCfg.Provider
+				}
+			}
+			runnerItems = append(runnerItems, views.CIRunnerItem{
+				RunnerName: reqName,
+				Provider:   provider,
+				Status:     "queued",
+				IsRequired: true,
+			})
+		}
+	}
+
+	return runnerItems
 }

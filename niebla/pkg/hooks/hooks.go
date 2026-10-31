@@ -1,11 +1,15 @@
 package hooks
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -40,6 +44,8 @@ type ServerHook struct {
 	Name           string        `toml:"name"`
 	Type           string        `toml:"type"` // "metadata", "tree_scan", "cas_binary", "in_tree", "exec"
 	Blocking       *bool         `toml:"blocking"`
+	OptIn          bool          `toml:"opt_in"`
+	TriggerPaths   []string      `toml:"trigger_paths"`
 	Description    string        `toml:"description"`
 	TimeoutSeconds int           `toml:"timeout_seconds"`
 	Metadata       *MetadataRule `toml:"metadata"`
@@ -216,17 +222,52 @@ func EvaluateTreeScan(hook ServerHook, touched []TouchedFile) []HookFailure {
 	return failures
 }
 
+// ServerPresubmitOptions provides execution context for server-side presubmit hooks,
+// including explicit hook names from OWNERS.toml and CAS binary resolution.
+type ServerPresubmitOptions struct {
+	ExplicitHooks     []string
+	WorkspaceDir      string
+	CASBinaryResolver func(sha256Hex string) (string, error)
+}
+
 // EvaluateServerPresubmit evaluates all configured server-side presubmit hooks.
 func EvaluateServerPresubmit(hooks []ServerHook, meta CLMetadata, touched []TouchedFile) EvaluationResult {
+	return EvaluateServerPresubmitWithOptions(hooks, meta, touched, ServerPresubmitOptions{})
+}
+
+// EvaluateServerPresubmitWithOptions evaluates server-side presubmit hooks matching either
+// global/trigger_paths rules or explicit OWNERS.toml presubmit_hooks references.
+func EvaluateServerPresubmitWithOptions(hooks []ServerHook, meta CLMetadata, touched []TouchedFile, opts ServerPresubmitOptions) EvaluationResult {
 	result := EvaluationResult{Passed: true}
 
+	explicitMap := make(map[string]bool, len(opts.ExplicitHooks))
+	for _, name := range opts.ExplicitHooks {
+		trimmed := strings.ToLower(strings.TrimSpace(name))
+		if trimmed != "" {
+			explicitMap[trimmed] = true
+		}
+	}
+
 	for _, hook := range hooks {
+		isExplicit := explicitMap[strings.ToLower(strings.TrimSpace(hook.Name))]
+		if !isExplicit {
+			if hook.OptIn {
+				continue
+			}
+			if len(hook.TriggerPaths) > 0 && !hookMatchesTouched(hook.TriggerPaths, touched) {
+				continue
+			}
+		}
+
 		switch hook.Type {
 		case "metadata":
 			fails := EvaluateMetadata(hook, meta)
 			result.Failures = append(result.Failures, fails...)
 		case "tree_scan":
 			fails := EvaluateTreeScan(hook, touched)
+			result.Failures = append(result.Failures, fails...)
+		case "cas_binary", "in_tree", "exec":
+			fails := evaluateProcessHook(hook, meta, touched, opts)
 			result.Failures = append(result.Failures, fails...)
 		}
 	}
@@ -239,6 +280,100 @@ func EvaluateServerPresubmit(hooks []ServerHook, meta CLMetadata, touched []Touc
 	}
 
 	return result
+}
+
+func hookMatchesTouched(patterns []string, touched []TouchedFile) bool {
+	for _, f := range touched {
+		for _, p := range patterns {
+			if matchPathPattern(p, f.Path) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func evaluateProcessHook(hook ServerHook, meta CLMetadata, touched []TouchedFile, opts ServerPresubmitOptions) []HookFailure {
+	timeout := 60 * time.Second
+	if hook.TimeoutSeconds > 0 {
+		timeout = time.Duration(hook.TimeoutSeconds) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	switch hook.Type {
+	case "cas_binary":
+		if opts.CASBinaryResolver == nil {
+			return nil
+		}
+		binPath, err := opts.CASBinaryResolver(hook.CasSHA256)
+		if err != nil {
+			return []HookFailure{{
+				HookName: hook.Name,
+				Type:     hook.Type,
+				Message:  fmt.Sprintf("failed to resolve CAS binary %s: %v", hook.CasSHA256, err),
+				Blocking: hook.IsBlocking(),
+			}}
+		}
+		cmd = exec.CommandContext(ctx, binPath, hook.Args...)
+	case "in_tree":
+		if opts.WorkspaceDir == "" {
+			return nil
+		}
+		entryPath := filepath.Join(opts.WorkspaceDir, hook.Entrypoint)
+		info, err := os.Stat(entryPath)
+		if err != nil {
+			return []HookFailure{{
+				HookName: hook.Name,
+				Type:     hook.Type,
+				Message:  fmt.Sprintf("in_tree hook entrypoint %s not found: %v", hook.Entrypoint, err),
+				Blocking: hook.IsBlocking(),
+			}}
+		}
+		if info.Mode().Perm()&0111 == 0 {
+			_ = os.Chmod(entryPath, 0755)
+		}
+		cmd = exec.CommandContext(ctx, entryPath, hook.Args...)
+	case "exec":
+		if strings.TrimSpace(hook.Command) == "" {
+			return nil
+		}
+		cmd = exec.CommandContext(ctx, "sh", "-c", hook.Command)
+	default:
+		return nil
+	}
+
+	if opts.WorkspaceDir != "" {
+		cmd.Dir = opts.WorkspaceDir
+	}
+	var touchedPaths []string
+	for _, tf := range touched {
+		if tf.Status != "deleted" {
+			touchedPaths = append(touchedPaths, tf.Path)
+		}
+	}
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("NIEBLA_CL_ID=%d", meta.CLID),
+		fmt.Sprintf("NIEBLA_AUTHOR=%s", meta.Author),
+		fmt.Sprintf("NIEBLA_DESCRIPTION=%s", meta.Description),
+		fmt.Sprintf("NIEBLA_TOUCHED_FILES=%s", strings.Join(touchedPaths, ",")),
+	)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return []HookFailure{{
+			HookName: hook.Name,
+			Type:     hook.Type,
+			Message:  msg,
+			Blocking: hook.IsBlocking(),
+		}}
+	}
+	return nil
 }
 
 // matchPathPattern matches a pattern against a slash-separated file path.

@@ -2,6 +2,7 @@ package agents
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -21,12 +22,14 @@ type Config struct {
 type AgentDef struct {
 	Name                  string   `toml:"name"`
 	DisplayName           string   `toml:"display_name"`
-	Type                  string   `toml:"type"` // "in_tree", "cas_binary", "exec"
+	Type                  string   `toml:"type"` // "ai", "in_tree", "cas_binary", "exec"
 	Entrypoint            string   `toml:"entrypoint"`
 	CasSHA256             string   `toml:"cas_sha256"`
+	PromptFile            string   `toml:"prompt_file"`
 	Args                  []string `toml:"args"`
 	Command               string   `toml:"command"`
 	TriggerPaths          []string `toml:"trigger_paths"`
+	OptIn                 bool     `toml:"opt_in"`
 	Blocking              *bool    `toml:"blocking"`
 	AutoApprove           bool     `toml:"auto_approve"`
 	CaptureLogs           bool     `toml:"capture_logs"`
@@ -44,12 +47,36 @@ func (a *AgentDef) IsBlocking() bool {
 
 // DiagnosticComment represents an inline code diagnostic extracted from tool output.
 type DiagnosticComment struct {
-	Path      string `json:"path"`
-	LineStart int    `json:"line_start"`
-	LineEnd   int    `json:"line_end"`
-	Column    int    `json:"column,omitempty"`
-	Severity  string `json:"severity"` // "error", "warning", "info"
-	Message   string `json:"message"`
+	Path                string `json:"path"`
+	LineStart           int    `json:"line_start"`
+	LineEnd             int    `json:"line_end"`
+	Column              int    `json:"column,omitempty"`
+	Severity            string `json:"severity"` // "error", "warning", "info"
+	Message             string `json:"message"`
+	SuggestionStartLine int    `json:"suggestion_start_line,omitempty"`
+	SuggestionEndLine   int    `json:"suggestion_end_line,omitempty"`
+	SuggestionCode      string `json:"suggestion_code,omitempty"`
+}
+
+// AgentReviewComment represents a structured inline comment (with optional code suggestion)
+// produced by an AI or static analysis review agent.
+type AgentReviewComment struct {
+	Path                string `json:"path"`
+	LineStart           int    `json:"line_start"`
+	LineEnd             int    `json:"line_end,omitempty"`
+	Column              int    `json:"column,omitempty"`
+	Severity            string `json:"severity,omitempty"` // "error", "warning", "info"
+	Message             string `json:"message"`
+	SuggestionStartLine int    `json:"suggestion_start_line,omitempty"`
+	SuggestionEndLine   int    `json:"suggestion_end_line,omitempty"`
+	SuggestionCode      string `json:"suggestion_code,omitempty"`
+}
+
+// AgentReviewReport represents the structured JSON output contract for review agents.
+type AgentReviewReport struct {
+	Verdict  string               `json:"verdict,omitempty"` // "lgtm", "approved", "changes_requested", "comment"
+	Summary  string               `json:"summary,omitempty"`
+	Comments []AgentReviewComment `json:"comments,omitempty"`
 }
 
 // ParseTOML parses the .niebla/agents.toml configuration file.
@@ -63,8 +90,29 @@ func ParseTOML(data []byte) (*Config, error) {
 
 // MatchAgents filters agents based on touched file paths in a changelist.
 func MatchAgents(agents []AgentDef, touchedFiles []string) []AgentDef {
+	return MatchAgentsWithExplicit(agents, touchedFiles, nil)
+}
+
+// MatchAgentsWithExplicit filters agents based on touched file paths OR explicit agent names
+// requested by subtree OWNERS.toml policies.
+func MatchAgentsWithExplicit(agents []AgentDef, touchedFiles []string, explicitNames []string) []AgentDef {
+	explicitMap := make(map[string]bool, len(explicitNames))
+	for _, name := range explicitNames {
+		trimmed := strings.ToLower(strings.TrimSpace(name))
+		if trimmed != "" {
+			explicitMap[trimmed] = true
+		}
+	}
+
 	var matched []AgentDef
 	for _, a := range agents {
+		if explicitMap[strings.ToLower(strings.TrimSpace(a.Name))] {
+			matched = append(matched, a)
+			continue
+		}
+		if a.OptIn {
+			continue
+		}
 		if len(a.TriggerPaths) == 0 {
 			matched = append(matched, a)
 			continue
@@ -187,4 +235,66 @@ func ParseDiagnostics(output string) []DiagnosticComment {
 	}
 
 	return diagnostics
+}
+
+// ParseReviewOutput parses either a structured JSON AgentReviewReport (emitting multi-line
+// comments and one-click code suggestions) or standard compiler/linter diagnostic lines.
+func ParseReviewOutput(output string) (*AgentReviewReport, []DiagnosticComment) {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	if jsonBlob := extractJSONObject(trimmed); jsonBlob != "" {
+		var report AgentReviewReport
+		if err := json.Unmarshal([]byte(jsonBlob), &report); err == nil {
+			if report.Verdict != "" || report.Summary != "" || len(report.Comments) > 0 {
+				var diags []DiagnosticComment
+				for i := range report.Comments {
+					c := &report.Comments[i]
+					c.Path = path.Clean(strings.TrimSpace(c.Path))
+					if c.LineStart <= 0 {
+						c.LineStart = 1
+					}
+					if c.LineEnd < c.LineStart {
+						c.LineEnd = c.LineStart
+					}
+					if c.Severity == "" {
+						c.Severity = "warning"
+					}
+					if c.SuggestionCode != "" {
+						if c.SuggestionStartLine <= 0 {
+							c.SuggestionStartLine = c.LineStart
+						}
+						if c.SuggestionEndLine < c.SuggestionStartLine {
+							c.SuggestionEndLine = c.LineEnd
+						}
+					}
+					diags = append(diags, DiagnosticComment{
+						Path:                c.Path,
+						LineStart:           c.LineStart,
+						LineEnd:             c.LineEnd,
+						Column:              c.Column,
+						Severity:            c.Severity,
+						Message:             c.Message,
+						SuggestionStartLine: c.SuggestionStartLine,
+						SuggestionEndLine:   c.SuggestionEndLine,
+						SuggestionCode:      c.SuggestionCode,
+					})
+				}
+				return &report, diags
+			}
+		}
+	}
+
+	return nil, ParseDiagnostics(output)
+}
+
+func extractJSONObject(s string) string {
+	start := strings.IndexByte(s, '{')
+	end := strings.LastIndexByte(s, '}')
+	if start == -1 || end == -1 || end <= start {
+		return ""
+	}
+	return s[start : end+1]
 }

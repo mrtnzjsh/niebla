@@ -2,12 +2,15 @@ package agents
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"niebla/internal/config"
 	"niebla/internal/db"
 	pkgagents "niebla/pkg/agents"
 	"niebla/pkg/cas"
@@ -230,5 +233,74 @@ exit 1
 	}
 	if !strings.Contains(c1.Body, "ValidateExpiration") {
 		t.Errorf("comment body missing diagnostic message: %s", c1.Body)
+	}
+}
+
+func TestExecutor_AIPersonaWithStructuredSuggestion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testcontainers integration test in short mode")
+	}
+
+	database, casStorage, toolsDir, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	clID, err := database.CreateShelvedCL(ctx, "dev", "add form input", []byte{0x03}, 0)
+	if err != nil {
+		t.Fatalf("failed to create CL: %v", err)
+	}
+
+	mockOpenAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices": [{
+				"message": {
+					"role": "assistant",
+					"content": "{\"verdict\":\"changes_requested\",\"summary\":\"Missing aria-label on input\",\"comments\":[{\"path\":\"internal/web/views/form.templ\",\"line_start\":3,\"line_end\":3,\"severity\":\"warning\",\"message\":\"Add aria-label for screen readers.\",\"suggestion_code\":\"<input type=\\\"text\\\" name=\\\"q\\\" aria-label=\\\"Search\\\" />\"}]}"
+				}
+			}]
+		}`))
+	}))
+	defer mockOpenAI.Close()
+
+	wsDir := t.TempDir()
+	viewDir := filepath.Join(wsDir, "internal", "web", "views")
+	_ = os.MkdirAll(viewDir, 0755)
+	_ = os.WriteFile(filepath.Join(viewDir, "form.templ"), []byte("package views\ntempl Form() {\n\t<input type=\"text\" name=\"q\" />\n}\n"), 0644)
+
+	aiCfg := &config.CritiqueAIConfig{
+		Enabled:  true,
+		Endpoint: mockOpenAI.URL,
+		Model:    "gpt-4o-mini",
+	}
+
+	executor := NewExecutor(database, casStorage, toolsDir).WithAIConfig(aiCfg)
+	res, err := executor.Execute(ctx, ExecutionRequest{
+		CLID:         clID,
+		Patchset:     1,
+		WorkspaceDir: wsDir,
+		TouchedFiles: []string{"internal/web/views/form.templ"},
+		Agent: pkgagents.AgentDef{
+			Name:                  "a11y-bot",
+			DisplayName:           "Accessibility Review Bot",
+			Type:                  "ai",
+			PostInlineDiagnostics: true,
+			CaptureLogs:           true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("executor.Execute failed: %v", err)
+	}
+	if res.Passed {
+		t.Fatalf("expected changes_requested verdict to mark execution as failed")
+	}
+
+	comments, err := database.ListAllComments(ctx, clID)
+	if err != nil || len(comments) != 1 {
+		t.Fatalf("expected 1 inline comment with suggestion, got %d (err: %v)", len(comments), err)
+	}
+	if !comments[0].HasSuggestion || !strings.Contains(comments[0].SuggestionCode, "aria-label=\"Search\"") {
+		t.Errorf("expected comment to have suggestion_code populated, got: %+v", comments[0])
 	}
 }

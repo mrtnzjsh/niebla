@@ -113,10 +113,10 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// GenerateHint queries the OpenAI-compatible endpoint with the system prompt and code context.
-func (c *Client) GenerateHint(ctx context.Context, req HintRequest) (*HintResponse, error) {
-	userPrompt := buildUserPrompt(req)
-	sysPrompt := strings.TrimSpace(req.SystemPrompt)
+// CompletePrompt sends a system prompt and user prompt to the OpenAI-compatible chat completion API
+// and returns the raw assistant response content (stripped of optional markdown code fences).
+func (c *Client) CompletePrompt(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	sysPrompt := strings.TrimSpace(systemPrompt)
 	if sysPrompt == "" {
 		sysPrompt = DefaultSystemPrompt
 	}
@@ -132,44 +132,53 @@ func (c *Client) GenerateHint(ctx context.Context, req HintRequest) (*HintRespon
 
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal chat completion request: %w", err)
+		return "", fmt.Errorf("failed to marshal chat completion request: %w", err)
 	}
 
 	url := strings.TrimRight(c.cfg.Endpoint, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("AI endpoint request failed: %w", err)
+		return "", fmt.Errorf("AI endpoint request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read AI endpoint response: %w", err)
+		return "", fmt.Errorf("failed to read AI endpoint response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("AI endpoint returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBytes)))
+		return "", fmt.Errorf("AI endpoint returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBytes)))
 	}
 
 	var completionResp chatCompletionResponse
 	if err := json.Unmarshal(respBytes, &completionResp); err != nil {
-		return nil, fmt.Errorf("failed to decode chat completion response: %w", err)
+		return "", fmt.Errorf("failed to decode chat completion response: %w", err)
 	}
 	if completionResp.Error != nil && completionResp.Error.Message != "" {
-		return nil, fmt.Errorf("AI endpoint error: %s", completionResp.Error.Message)
+		return "", fmt.Errorf("AI endpoint error: %s", completionResp.Error.Message)
 	}
 	if len(completionResp.Choices) == 0 {
-		return nil, fmt.Errorf("AI endpoint returned zero choices")
+		return "", fmt.Errorf("AI endpoint returned zero choices")
 	}
 
-	rawContent := cleanJSONResponse(completionResp.Choices[0].Message.Content)
+	return cleanJSONResponse(completionResp.Choices[0].Message.Content), nil
+}
+
+// GenerateHint queries the OpenAI-compatible endpoint with the system prompt and code context.
+func (c *Client) GenerateHint(ctx context.Context, req HintRequest) (*HintResponse, error) {
+	userPrompt := buildUserPrompt(req)
+	rawContent, err := c.CompletePrompt(ctx, req.SystemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
 	var hint HintResponse
 	if err := json.Unmarshal([]byte(rawContent), &hint); err != nil {
 		return nil, fmt.Errorf("failed to parse AI hint JSON (%s): %w", rawContent, err)

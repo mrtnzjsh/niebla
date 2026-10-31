@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 	"strings"
 
+	internalagents "niebla/internal/agents"
 	"niebla/internal/config"
 	"niebla/internal/db"
 	internalevents "niebla/internal/events"
@@ -362,7 +364,7 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 		}
 	}
 
-	// Auto-assign Review Agent Personas from .niebla/agents.toml
+	// Auto-assign Reviewers & Review Agent Personas from OWNERS.toml and .niebla/agents.toml
 	fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
 		return s.getTreeEntries(ctx, treeHash)
 	}
@@ -373,12 +375,29 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 		}
 	}
 	touchedFiles, _ := tree.DiffTreeFiles(baseTree, req.RootTreeHash, fetchTree)
+
+	var explicitAgents []string
+	if len(touchedFiles) > 0 {
+		ownersEval := s.newOwnersEvaluator(ctx, req.RootTreeHash, fetchTree)
+		if policy, pErr := ownersEval.ResolvePolicy(touchedFiles); pErr == nil && policy != nil {
+			explicitAgents = policy.Agents
+			var ownersReviewers []string
+			ownersReviewers = append(ownersReviewers, policy.Reviewers...)
+			ownersReviewers = append(ownersReviewers, policy.Agents...)
+			if len(ownersReviewers) > 0 {
+				if err := s.db.AddReviewers(ctx, clID, ownersReviewers); err != nil {
+					log.Printf("warning: failed to auto-assign OWNERS reviewers/agents to CL %d: %v", clID, err)
+				}
+			}
+		}
+	}
+
 	if agentsEntry, err := tree.ResolvePath(req.RootTreeHash, ".niebla/agents.toml", fetchTree); err == nil && agentsEntry != nil && !agentsEntry.IsDir() && len(agentsEntry.BlobSHA256) > 0 {
 		if f, _, err := s.casStorage.OpenBlob(agentsEntry.BlobSHA256); err == nil {
 			defer f.Close()
 			if agentsData, rErr := io.ReadAll(f); rErr == nil {
 				if agentsCfg, pErr := agents.ParseTOML(agentsData); pErr == nil && agentsCfg != nil && len(agentsCfg.Agents) > 0 {
-					matched := agents.MatchAgents(agentsCfg.Agents, touchedFiles)
+					matched := agents.MatchAgentsWithExplicit(agentsCfg.Agents, touchedFiles, explicitAgents)
 					var agentNames []string
 					for _, a := range matched {
 						agentNames = append(agentNames, a.Name)
@@ -387,6 +406,11 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 						if err := s.db.AddReviewers(ctx, clID, agentNames); err != nil {
 							log.Printf("warning: failed to auto-assign review agents to CL %d: %v", clID, err)
 						}
+						rootTreeCopy := append([]byte(nil), req.RootTreeHash...)
+						touchedCopy := append([]string(nil), touchedFiles...)
+						matchedCopy := append([]agents.AgentDef(nil), matched...)
+						psNum := patchsetNumber
+						go s.dispatchReviewAgents(clID, psNum, rootTreeCopy, touchedCopy, matchedCopy)
 					}
 				}
 			}
@@ -441,6 +465,35 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 				req.ClId)
 		}
 
+		// Diff touched files and resolve hierarchical OWNERS.toml approvals & subtree governance policy
+		baseTree := tree.EmptyTreeHash
+		if clInfo.ParentCL != nil && *clInfo.ParentCL > 0 {
+			if parentCL, err := s.db.GetCL(ctx, *clInfo.ParentCL); err == nil && parentCL != nil {
+				baseTree = parentCL.RootTreeHash
+			}
+		}
+
+		fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
+			return s.getTreeEntries(ctx, treeHash)
+		}
+
+		touchedFiles, err := tree.DiffTreeFiles(baseTree, clInfo.RootTreeHash, fetchTree)
+		if err != nil {
+			log.Printf("warning: failed to diff tree files for CL %d: %v", req.ClId, err)
+		}
+
+		var ownersEval *owners.EvaluationResult
+		if len(touchedFiles) > 0 {
+			evaluator := s.newOwnersEvaluator(ctx, clInfo.RootTreeHash, fetchTree)
+			approvedReviewers, _ := s.db.GetApprovedReviewers(ctx, req.ClId)
+			evalRes, evalErr := evaluator.Evaluate(touchedFiles, approvedReviewers)
+			if evalErr != nil {
+				log.Printf("warning: failed to evaluate OWNERS for CL %d: %v", req.ClId, evalErr)
+			} else {
+				ownersEval = evalRes
+			}
+		}
+
 		// 1. Guard: Check unresolved comments if policy forbids submitting with them
 		unresolved, err := s.db.CountUnresolvedComments(ctx, req.ClId)
 		if err != nil {
@@ -450,6 +503,11 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 			if s.toolchainConfig != nil {
 				allowUnresolved = s.toolchainConfig.Critique.GetAllowSubmitWithUnresolvedComments()
 			}
+			if ownersEval != nil && ownersEval.Policy.AllowUnresolvedComments != nil {
+				if !*ownersEval.Policy.AllowUnresolvedComments || s.toolchainConfig == nil {
+					allowUnresolved = *ownersEval.Policy.AllowUnresolvedComments
+				}
+			}
 			if !allowUnresolved {
 				return nil, status.Errorf(codes.FailedPrecondition,
 					"cannot submit CL %d: %d unresolved comment thread(s) pending. Resolve all comments before submitting to trunk",
@@ -457,10 +515,15 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 			}
 		}
 
-		// 2. Guard: Check required approvals
+		// 2. Guard: Check required approvals (combining global config and subtree OWNERS.toml required_approvals)
 		requiredApprovals := 0
 		if s.toolchainConfig != nil {
 			requiredApprovals = s.toolchainConfig.Critique.GetRequiredApprovals()
+		}
+		if ownersEval != nil && ownersEval.Policy.RequiredApprovals != nil {
+			if *ownersEval.Policy.RequiredApprovals > requiredApprovals {
+				requiredApprovals = *ownersEval.Policy.RequiredApprovals
+			}
 		}
 		if requiredApprovals > 0 {
 			approvals, err := s.db.CountApprovals(ctx, req.ClId)
@@ -473,10 +536,13 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 			}
 		}
 
-		// 3. Guard: Check CI check runs if policy requires green check runs
+		// 3. Guard: Check CI check runs if global or subtree OWNERS.toml policy requires green check runs
 		requireGreen := false
 		if s.toolchainConfig != nil {
 			requireGreen = s.toolchainConfig.Critique.GetRequireGreenCheckRuns()
+		}
+		if ownersEval != nil && ownersEval.Policy.RequireGreenCI != nil && *ownersEval.Policy.RequireGreenCI {
+			requireGreen = true
 		}
 		if requireGreen {
 			latestPS, err := s.db.GetLatestPatchsetNumber(ctx, req.ClId)
@@ -497,67 +563,44 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 					"cannot submit CL %d: CI check runs not passing for patchset %d (%d pending/running, %d failed out of %d total)",
 					req.ClId, latestPS, pending, failed, total)
 			}
-		}
 
-		// 4. Guard: Check OWNERS approval policy
-		baseTree := tree.EmptyTreeHash
-		if clInfo.ParentCL != nil && *clInfo.ParentCL > 0 {
-			if parentCL, err := s.db.GetCL(ctx, *clInfo.ParentCL); err == nil && parentCL != nil {
-				baseTree = parentCL.RootTreeHash
-			}
-		}
-
-		fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
-			return s.getTreeEntries(ctx, treeHash)
-		}
-
-		touchedFiles, err := tree.DiffTreeFiles(baseTree, clInfo.RootTreeHash, fetchTree)
-		if err != nil {
-			log.Printf("warning: failed to diff tree files for CL %d: %v", req.ClId, err)
-		} else if len(touchedFiles) > 0 {
-			ownersProvider := func(dir string) ([]byte, error) {
-				ownersPath := "OWNERS.toml"
-				if dir != "" {
-					ownersPath = dir + "/OWNERS.toml"
+			// Verify any specific ci_runners required by touched OWNERS.toml subtrees
+			if ownersEval != nil && len(ownersEval.Policy.CIRunners) > 0 {
+				runs, rErr := s.db.ListCheckRunsForPatchset(ctx, req.ClId, latestPS)
+				if rErr == nil {
+					greenRunners := make(map[string]bool, len(runs))
+					for _, run := range runs {
+						if run.Status == "passed" || run.Status == "skipped" {
+							greenRunners[strings.ToLower(strings.TrimSpace(run.RunnerName))] = true
+						}
+					}
+					var missingRunners []string
+					for _, reqRunner := range ownersEval.Policy.CIRunners {
+						if !greenRunners[strings.ToLower(strings.TrimSpace(reqRunner))] {
+							missingRunners = append(missingRunners, reqRunner)
+						}
+					}
+					if len(missingRunners) > 0 {
+						return nil, status.Errorf(codes.FailedPrecondition,
+							"cannot submit CL %d: required OWNERS.toml CI runner(s) not passing for patchset %d: %s",
+							req.ClId, latestPS, strings.Join(missingRunners, ", "))
+					}
 				}
-				entry, err := tree.ResolvePath(clInfo.RootTreeHash, ownersPath, fetchTree)
-				if err != nil || entry == nil || entry.IsDir() || len(entry.BlobSHA256) == 0 {
-					return nil, os.ErrNotExist
-				}
-				f, _, err := s.casStorage.OpenBlob(entry.BlobSHA256)
-				if err != nil {
-					return nil, err
-				}
-				defer f.Close()
-				return io.ReadAll(f)
-			}
-
-			var groupResolver owners.GroupResolver
-			if s.toolchainConfig != nil && s.toolchainConfig.Critique.Groups.Mode == "static" {
-				groupResolver = func(group string) []string {
-					groupKey := strings.TrimPrefix(group, "@")
-					return s.toolchainConfig.Critique.Groups.Static[groupKey]
-				}
-			}
-
-			evaluator := owners.NewEvaluator(ownersProvider, groupResolver)
-			approvedReviewers, _ := s.db.GetApprovedReviewers(ctx, req.ClId)
-
-			evalResult, err := evaluator.Evaluate(touchedFiles, approvedReviewers)
-			if err != nil {
-				log.Printf("warning: failed to evaluate OWNERS for CL %d: %v", req.ClId, err)
-			} else if !evalResult.Satisfied {
-				var missingDesc []string
-				for _, m := range evalResult.Missing {
-					missingDesc = append(missingDesc, fmt.Sprintf("%s (%s owners: %s)", m.Path, m.Directory, strings.Join(m.Approvers, ", ")))
-				}
-				return nil, status.Errorf(codes.FailedPrecondition,
-					"cannot submit CL %d: missing required OWNERS approval for: %s",
-					req.ClId, strings.Join(missingDesc, "; "))
 			}
 		}
 
-		// 5. Guard: Check Presubmit Hooks (.niebla/hooks.toml)
+		// 4. Guard: Check OWNERS approval satisfaction
+		if ownersEval != nil && !ownersEval.Satisfied {
+			var missingDesc []string
+			for _, m := range ownersEval.Missing {
+				missingDesc = append(missingDesc, fmt.Sprintf("%s (%s owners: %s)", m.Path, m.Directory, strings.Join(m.Approvers, ", ")))
+			}
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"cannot submit CL %d: missing required OWNERS approval for: %s",
+				req.ClId, strings.Join(missingDesc, "; "))
+		}
+
+		// 5. Guard: Check Presubmit Hooks (.niebla/hooks.toml + OWNERS.toml presubmit_hooks)
 		hooksEntry, err := tree.ResolvePath(clInfo.RootTreeHash, ".niebla/hooks.toml", fetchTree)
 		if err == nil && hooksEntry != nil && !hooksEntry.IsDir() && len(hooksEntry.BlobSHA256) > 0 {
 			f, _, err := s.casStorage.OpenBlob(hooksEntry.BlobSHA256)
@@ -598,7 +641,28 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 							Status:    status,
 						})
 					}
-					evalRes := hooks.EvaluateServerPresubmit(hooksCfg.Server.Presubmit, clMeta, touched)
+
+					var explicitHooks []string
+					if ownersEval != nil {
+						explicitHooks = ownersEval.Policy.PresubmitHooks
+					}
+					var wsDir string
+					var cleanupWS func()
+					for _, hk := range hooksCfg.Server.Presubmit {
+						if hk.Type == "in_tree" || hk.Type == "cas_binary" || hk.Type == "exec" {
+							wsDir, cleanupWS, _ = s.materializeWorkspaceForExecution(ctx, clInfo.RootTreeHash, touchedFiles)
+							break
+						}
+					}
+					if cleanupWS != nil {
+						defer cleanupWS()
+					}
+
+					evalRes := hooks.EvaluateServerPresubmitWithOptions(hooksCfg.Server.Presubmit, clMeta, touched, hooks.ServerPresubmitOptions{
+						ExplicitHooks:     explicitHooks,
+						WorkspaceDir:      wsDir,
+						CASBinaryResolver: s.resolveCASBinaryPath,
+					})
 					if !evalRes.Passed {
 						var failureMsgs []string
 						for _, fail := range evalRes.Failures {
@@ -867,4 +931,155 @@ func (s *Server) SyncCL(ctx context.Context, req *nieblav1.SyncCLRequest) (*nieb
 // ReportCheckRun records or updates a check run status for a changelist patchset.
 func (s *Server) ReportCheckRun(ctx context.Context, run db.CheckRun) (*db.CheckRun, error) {
 	return s.db.UpsertCheckRun(ctx, run)
+}
+
+func (s *Server) newOwnersEvaluator(ctx context.Context, rootTreeHash []byte, fetchTree tree.FetchTreeFunc) *owners.Evaluator {
+	ownersProvider := func(dir string) ([]byte, error) {
+		ownersPath := "OWNERS.toml"
+		if dir != "" {
+			ownersPath = dir + "/OWNERS.toml"
+		}
+		entry, err := tree.ResolvePath(rootTreeHash, ownersPath, fetchTree)
+		if err != nil || entry == nil || entry.IsDir() || len(entry.BlobSHA256) == 0 {
+			return nil, os.ErrNotExist
+		}
+		f, _, err := s.casStorage.OpenBlob(entry.BlobSHA256)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return io.ReadAll(f)
+	}
+
+	var groupResolver owners.GroupResolver
+	if s.toolchainConfig != nil && s.toolchainConfig.Critique.Groups.Mode == "static" {
+		groupResolver = func(group string) []string {
+			groupKey := strings.TrimPrefix(group, "@")
+			return s.toolchainConfig.Critique.Groups.Static[groupKey]
+		}
+	}
+
+	return owners.NewEvaluator(ownersProvider, groupResolver)
+}
+
+func (s *Server) dispatchReviewAgents(clID int64, patchset int, rootTreeHash []byte, touchedFiles []string, matchedAgents []agents.AgentDef) {
+	ctx := context.Background()
+	wsDir, cleanup, err := s.materializeWorkspaceForExecution(ctx, rootTreeHash, touchedFiles)
+	if err != nil {
+		log.Printf("warning: failed to materialize workspace for review agents on CL %d: %v", clID, err)
+		return
+	}
+	defer cleanup()
+
+	var aiCfg *config.CritiqueAIConfig
+	if s.toolchainConfig != nil {
+		aiCfg = &s.toolchainConfig.Critique.AI
+	}
+
+	executor := internalagents.NewExecutor(s.db, s.casStorage, "").WithAIConfig(aiCfg)
+	for _, agentDef := range matchedAgents {
+		if strings.TrimSpace(agentDef.Type) == "" && strings.TrimSpace(agentDef.Command) == "" {
+			continue
+		}
+		_, err := executor.Execute(ctx, internalagents.ExecutionRequest{
+			CLID:         clID,
+			Patchset:     patchset,
+			Agent:        agentDef,
+			WorkspaceDir: wsDir,
+			TouchedFiles: touchedFiles,
+		})
+		if err != nil {
+			log.Printf("warning: review agent %s execution error on CL %d: %v", agentDef.Name, clID, err)
+		}
+	}
+}
+
+func (s *Server) materializeWorkspaceForExecution(ctx context.Context, rootTreeHash []byte, touchedFiles []string) (string, func(), error) {
+	wsDir, err := os.MkdirTemp("", "niebla-exec-ws-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(wsDir)
+	}
+
+	fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
+		return s.getTreeEntries(ctx, treeHash)
+	}
+
+	allPaths, err := tree.DiffTreeFiles(tree.EmptyTreeHash, rootTreeHash, fetchTree)
+	if err != nil {
+		return wsDir, cleanup, nil
+	}
+
+	touchedSet := make(map[string]bool, len(touchedFiles))
+	for _, tf := range touchedFiles {
+		touchedSet[tf] = true
+	}
+
+	for _, relPath := range allPaths {
+		if !touchedSet[relPath] && !strings.HasPrefix(relPath, ".niebla/") && !strings.HasPrefix(relPath, "tools/agents/") {
+			continue
+		}
+		entry, rErr := tree.ResolvePath(rootTreeHash, relPath, fetchTree)
+		if rErr != nil || entry == nil || entry.IsDir() || len(entry.BlobSHA256) == 0 {
+			continue
+		}
+		destPath := filepath.Join(wsDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			continue
+		}
+		f, _, err := s.casStorage.OpenBlob(entry.BlobSHA256)
+		if err != nil {
+			continue
+		}
+		data, rErr := io.ReadAll(f)
+		f.Close()
+		if rErr != nil {
+			continue
+		}
+		perm := os.FileMode(0644)
+		if entry.Mode&0111 != 0 || strings.HasPrefix(relPath, "tools/agents/") {
+			perm = 0755
+		}
+		_ = os.WriteFile(destPath, data, perm)
+	}
+
+	return wsDir, cleanup, nil
+}
+
+func (s *Server) resolveCASBinaryPath(shaHex string) (string, error) {
+	shaBytes, err := hex.DecodeString(strings.TrimSpace(shaHex))
+	if err != nil || len(shaBytes) != 32 {
+		return "", fmt.Errorf("invalid sha256 hex string: %s", shaHex)
+	}
+	home, _ := os.UserHomeDir()
+	toolsDir := filepath.Join(home, ".cache", "niebla", "tools")
+	_ = os.MkdirAll(toolsDir, 0755)
+	destPath := filepath.Join(toolsDir, shaHex)
+	if _, err := os.Stat(destPath); err == nil {
+		return destPath, nil
+	}
+
+	f, _, err := s.casStorage.OpenBlob(shaBytes)
+	if err != nil {
+		return "", fmt.Errorf("blob %s not found in CAS storage: %w", shaHex, err)
+	}
+	defer f.Close()
+
+	tmpPath := destPath + ".tmp"
+	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, f); err != nil {
+		out.Close()
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	out.Close()
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return "", err
+	}
+	return destPath, nil
 }

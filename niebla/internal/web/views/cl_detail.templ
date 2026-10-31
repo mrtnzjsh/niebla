@@ -8,6 +8,17 @@ import (
 	"niebla/internal/web/diff"
 )
 
+// CIRunnerItem represents a CI runner assigned or reporting for a CL patchset.
+type CIRunnerItem struct {
+	RunnerName  string
+	Provider    string
+	Status      string // queued, running, passed, failed, canceled, skipped
+	IsRequired  bool
+	ExternalURL string
+	LogBlobHex  string
+	Duration    string
+}
+
 // CLDetailData contains all context needed to render a changelist review page.
 type CLDetailData struct {
 	CL                        *db.Changelist
@@ -28,6 +39,7 @@ type CLDetailData struct {
 	ReviewedFilesCount        int
 	DraftCommentsCount        int
 	DraftComments             []db.Comment
+	CIRunners                 []CIRunnerItem
 }
 
 templ CLDetail(data CLDetailData) {
@@ -160,6 +172,9 @@ templ CLDetail(data CLDetailData) {
 					</div>
 				</div>
 			</div>
+
+			<!-- CI Runners & Checks Block -->
+			@CIRunnersBlock(data)
 
 			<!-- Changed Files Table -->
 			<div class="bg-[#0b101d] border-b border-slate-800 px-6 py-3">
@@ -832,5 +847,184 @@ func sanitizeHTMLID(s string) string {
 	res = strings.ReplaceAll(res, ".", "-")
 	res = strings.ReplaceAll(res, "_", "-")
 	return res
+}
+
+templ CIRunnersBlock(data CLDetailData) {
+	<div id="ci-runners-block" class="bg-[#080d1a] border-b border-slate-800 px-6 py-3">
+		<div class="flex items-center justify-between mb-2">
+			<div class="flex items-center space-x-2">
+				<span class="flex items-center space-x-1.5 text-xs font-bold uppercase tracking-wider text-cyan-400">
+					<svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+					</svg>
+					<span>CI Runners</span>
+				</span>
+				<span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-cyan-950/80 text-cyan-300 border border-cyan-800/40">
+					{ strconv.Itoa(len(data.CIRunners)) }
+				</span>
+			</div>
+			if len(data.CIRunners) > 0 {
+				<div class="flex items-center space-x-2 text-xs">
+					@CIRunnerAggregateBadge(data.CIRunners)
+				</div>
+			}
+		</div>
+
+		if len(data.CIRunners) == 0 {
+			<div class="py-4 text-center text-xs text-slate-500 font-mono bg-[#0c1222]/40 rounded-lg border border-slate-800/60">
+				No CI runners assigned or required for this changelist.
+			</div>
+		} else {
+			<div class="overflow-x-auto rounded-lg border border-slate-800/80 bg-[#0c1322]">
+				<table class="w-full text-left font-mono text-xs">
+					<thead class="bg-slate-900/80 text-slate-400 border-b border-slate-800 text-[11px] uppercase">
+						<tr>
+							<th class="w-28 px-3 py-2 text-center">Status</th>
+							<th class="px-3 py-2">Runner Name / ID</th>
+							<th class="w-32 px-3 py-2 text-center">Provider</th>
+							<th class="w-32 px-3 py-2 text-right">Duration</th>
+							<th class="w-36 px-3 py-2 text-center">Output</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-800/50">
+						for _, r := range data.CIRunners {
+							<tr class="hover:bg-slate-800/50 transition">
+								<td class="w-28 px-3 py-2 text-center">
+									@CIRunnerStatusBadge(r.Status)
+								</td>
+								<td class="px-3 py-2">
+									<div class="flex items-center space-x-2">
+										<span class="text-slate-200 font-semibold">{ r.RunnerName }</span>
+										if r.IsRequired {
+											<span class="px-1.5 py-0.5 rounded text-[10px] font-sans font-bold bg-indigo-950/80 text-indigo-300 border border-indigo-700/60" title="Required to pass before SubmitCL">
+												Required
+											</span>
+										}
+									</div>
+								</td>
+								<td class="w-32 px-3 py-2 text-center">
+									<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700/60">
+										{ r.Provider }
+									</span>
+								</td>
+								<td class="w-32 px-3 py-2 text-right font-mono text-[11px] text-slate-400">
+									if r.Duration != "" {
+										<span>{ r.Duration }</span>
+									} else {
+										<span class="text-slate-600">—</span>
+									}
+								</td>
+								<td class="w-36 px-3 py-2 text-center">
+									<div class="flex items-center justify-center space-x-2">
+										if r.LogBlobHex != "" {
+											<a
+												href={ templ.SafeURL(fmt.Sprintf("/cl/%d/raw?hash=%s", data.CL.CLID, r.LogBlobHex)) }
+												target="_blank"
+												class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 transition"
+												title="View CAS raw log output"
+											>
+												View Log ↗
+											</a>
+										}
+										if r.ExternalURL != "" {
+											<a
+												href={ templ.SafeURL(r.ExternalURL) }
+												target="_blank"
+												rel="noopener noreferrer"
+												class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition"
+												title="Open external provider build"
+											>
+												External ↗
+											</a>
+										}
+										if r.LogBlobHex == "" && r.ExternalURL == "" {
+											<span class="text-slate-600 text-[10px]">—</span>
+										}
+									</div>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
+}
+
+templ CIRunnerStatusBadge(status string) {
+	switch strings.ToLower(status) {
+		case "passed":
+			<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+				<span>✓</span>
+				<span>Passed</span>
+			</span>
+		case "running":
+			<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/30">
+				<span class="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
+				<span>Running</span>
+			</span>
+		case "failed":
+			<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+				<span>✕</span>
+				<span>Failed</span>
+			</span>
+		case "queued", "pending":
+			<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+				<span>◷</span>
+				<span>Queued</span>
+			</span>
+		case "skipped":
+			<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-700/30 text-slate-400 border border-slate-600/30">
+				<span>—</span>
+				<span>Skipped</span>
+			</span>
+		case "canceled", "cancelled":
+			<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-700/30 text-zinc-400 border border-zinc-600/30">
+				<span>⊘</span>
+				<span>Canceled</span>
+			</span>
+		default:
+			<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
+				<span>{ status }</span>
+			</span>
+	}
+}
+
+templ CIRunnerAggregateBadge(runners []CIRunnerItem) {
+	{{
+		passedCount := 0
+		failedCount := 0
+		runningCount := 0
+		queuedCount := 0
+		for _, r := range runners {
+			switch strings.ToLower(r.Status) {
+			case "passed":
+				passedCount++
+			case "failed":
+				failedCount++
+			case "running":
+				runningCount++
+			case "queued", "pending":
+				queuedCount++
+			}
+		}
+	}}
+	if failedCount > 0 {
+		<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950/70 text-rose-400 border border-rose-800/40">
+			{ fmt.Sprintf("%d Failed ✕", failedCount) }
+		</span>
+	} else if runningCount > 0 {
+		<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-950/70 text-sky-400 border border-sky-800/40 animate-pulse">
+			{ fmt.Sprintf("%d Running ●", runningCount) }
+		</span>
+	} else if queuedCount > 0 {
+		<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/70 text-amber-300 border border-amber-800/40">
+			{ fmt.Sprintf("%d Queued ◷", queuedCount) }
+		</span>
+	} else if passedCount == len(runners) && len(runners) > 0 {
+		<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950/70 text-emerald-400 border border-emerald-800/40">
+			All checks passed ✓
+		</span>
+	}
 }
 

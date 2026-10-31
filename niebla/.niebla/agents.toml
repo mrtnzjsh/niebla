@@ -1,6 +1,8 @@
 # ==============================================================================
-# Niebla Review Agent Personas (.niebla/agents.toml)
+# Niebla Review Agent Personas Catalog (.niebla/agents.toml)
 # ==============================================================================
+# Agents can be triggered globally via `trigger_paths` globs or opted into per
+# subtree via `OWNERS.toml` (`agents = ["a11y-bot", "sec-bot"]`).
 
 [[agent]]
 name = "ai-hint-agent"
@@ -8,8 +10,32 @@ display_name = "AI Code Review Hint Assistant"
 type = "in_tree"
 entrypoint = "tools/agents/ai-hint-agent/main.go"
 args = ["--prompt", ".niebla/prompts/comment_hint.md"]
+opt_in = true
 blocking = false
 auto_approve = false
 capture_logs = true
 timeout_seconds = 30
 
+[[agent]]
+name = "a11y-bot"
+display_name = "Accessibility Review Agent"
+type = "ai"
+prompt_file = ".niebla/prompts/accessibility.md"
+trigger_paths = ["internal/web/views/**/*.templ"]
+blocking = false
+auto_approve = false
+capture_logs = true
+post_inline_diagnostics = true
+timeout_seconds = 45
+
+[[agent]]
+name = "sec-bot"
+display_name = "Security Review Agent"
+type = "ai"
+prompt_file = ".niebla/prompts/security.md"
+trigger_paths = ["internal/web/auth/**", "internal/grpc/auth*", "pkg/httpclient/**"]
+blocking = true
+auto_approve = true
+capture_logs = true
+post_inline_diagnostics = true
+timeout_seconds = 60

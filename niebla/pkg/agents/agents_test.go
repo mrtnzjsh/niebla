@@ -132,3 +132,69 @@ some random log line that does not match
 		t.Errorf("unexpected d4: %+v", d4)
 	}
 }
+
+func TestMatchAgentsWithExplicitAndOptIn(t *testing.T) {
+	agents := []AgentDef{
+		{
+			Name:         "a11y-bot",
+			Type:         "ai",
+			PromptFile:   ".niebla/prompts/accessibility.md",
+			TriggerPaths: []string{"internal/web/views/**/*.templ"},
+		},
+		{
+			Name:  "fips-audit-bot",
+			Type:  "ai",
+			OptIn: true, // Only runs when explicitly referenced by OWNERS.toml
+		},
+	}
+
+	// 1. Touching a backend file without explicit OWNERS.toml agents -> 0 matched
+	m1 := MatchAgentsWithExplicit(agents, []string{"pkg/cas/storage.go"}, nil)
+	if len(m1) != 0 {
+		t.Fatalf("expected 0 matched agents, got %+v", m1)
+	}
+
+	// 2. Touching a backend file where OWNERS.toml explicitly requests fips-audit-bot -> 1 matched
+	m2 := MatchAgentsWithExplicit(agents, []string{"pkg/auth/crypto.go"}, []string{"fips-audit-bot"})
+	if len(m2) != 1 || m2[0].Name != "fips-audit-bot" {
+		t.Fatalf("expected fips-audit-bot matched via explicit OWNERS list, got %+v", m2)
+	}
+}
+
+func TestParseReviewOutput_StructuredJSONReport(t *testing.T) {
+	jsonOutput := "```json\n" + `{
+  "verdict": "changes_requested",
+  "summary": "Found 1 accessibility issue in inline comment form.",
+  "comments": [
+    {
+      "path": "internal/web/views/comment_box.templ",
+      "line_start": 172,
+      "line_end": 175,
+      "severity": "warning",
+      "message": "Input element should include an explicit aria-label for screen readers.",
+      "suggestion_code": "<input type=\"text\" name=\"author\" aria-label=\"Comment Author\" />"
+    }
+  ]
+}` + "\n```"
+
+	report, diags := ParseReviewOutput(jsonOutput)
+	if report == nil {
+		t.Fatalf("expected non-nil AgentReviewReport")
+	}
+	if report.Verdict != "changes_requested" {
+		t.Errorf("expected verdict changes_requested, got %q", report.Verdict)
+	}
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic comment, got %d", len(diags))
+	}
+	d := diags[0]
+	if d.Path != "internal/web/views/comment_box.templ" || d.LineStart != 172 || d.LineEnd != 175 {
+		t.Errorf("unexpected diagnostic location: %+v", d)
+	}
+	if d.SuggestionStartLine != 172 || d.SuggestionEndLine != 175 {
+		t.Errorf("expected suggestion range 172-175, got %d-%d", d.SuggestionStartLine, d.SuggestionEndLine)
+	}
+	if d.SuggestionCode == "" {
+		t.Errorf("expected non-empty SuggestionCode")
+	}
+}

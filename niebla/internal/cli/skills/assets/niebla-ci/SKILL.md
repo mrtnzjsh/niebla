@@ -3,7 +3,8 @@ name: niebla-ci
 description: >-
   Workflows, runner configuration, workflow authoring, and status reporting for the Niebla CI
   orchestration system (niebla-ci). Use when configuring local, Forgejo, GitHub Actions, or webhook
-  runners, authoring CI workflow YAML, running niebla ci exec or report, or troubleshooting check runs.
+  runners, authoring CI workflow YAML, binding subtree CI runners in OWNERS.toml, running niebla ci exec
+  or report, or troubleshooting check runs.
 ---
 
 # Niebla CI Runner Orchestration (`niebla-ci`)
@@ -22,14 +23,14 @@ Niebla decouples VCS state and code review from build execution via **compositio
    Because Niebla is a trunk-based Merkle VCS rather than Git, runners cannot `git clone`. Instead, any runner materializes an exact snapshot in milliseconds using `niebla export --cl <id> --patchset <n> --dest ./src`. Local or container runners mounting a shared CAS cache volume achieve zero-copy hardlinking (`os.Link`) without consuming network bandwidth.
 3. **Execution Wrapper (`niebla ci exec`):**
    Any arbitrary build command (`go test ./...`, `npm test`, `cargo test`) can be wrapped with `niebla ci exec`. It automatically reports `running` at startup, captures stdout/stderr, saves the log blob to Content-Addressable Storage (CAS), and reports `passed` or `failed` back to Cotejo.
-4. **Trunk Submit Gate (`require_green_to_submit`):**
-   When enabled in `~/.config/niebla/config.toml`, `niebla submit` and Cotejo block submissions to trunk unless all check runs for the active patchset are green (`passed` or `skipped`). Emergency overrides can be executed with `niebla submit --force` or an override justification in the web UI.
+4. **Trunk Submit Gate (`require_green_to_submit` & `OWNERS.toml` `require_green_ci`):**
+   When enabled globally in `~/.config/niebla/config.toml` (`require_green_to_submit = true`) or per-subtree in `OWNERS.toml` (`require_green_ci = true` / `ci_runners = [...]`), `niebla submit` and Cotejo block submissions to trunk unless all required check runs for the active patchset are green (`passed` or `skipped`). Emergency overrides can be executed with `niebla submit --force` or an override justification in the web UI.
 
 ---
 
-## 2. Declarative Runner Configuration (`config.toml`)
+## 2. Declarative Runner Configuration (`config.toml` / `ci.toml`)
 
-Runners are declared in `~/.config/niebla/config.toml` under the `[ci]` section. By default, Niebla uses the zero-infrastructure **`local`** runner.
+Runners are declared in `~/.config/niebla/config.toml` (or modular `~/.config/niebla/ci.toml`) under the `[ci]` section. By default, Niebla uses the zero-infrastructure **`local`** runner.
 
 ```toml
 [ci]
@@ -86,7 +87,30 @@ secret_env = "NIEBLA_WEBHOOK_SECRET" # Injects X-Critique-Signature-256 header
 
 ---
 
-## 3. CLI Command Reference
+## 3. Subtree CI Governance (`OWNERS.toml`)
+
+Subtree owners can require green CI and bind specific named CI runners (`ci_runners = [...]`) to their directory or file globs in `OWNERS.toml`, even if global `require_green_to_submit` is disabled:
+
+```toml
+inherited = true
+approvers = ["@payments-core"]
+
+# Enforce green CI for any CL touching this subtree:
+require_green_ci = true
+
+# Require these specific CI runners to report "passed" (or "skipped") on the active patchset:
+ci_runners = ["local", "fips-compliance-runner"]
+
+# Per-file CI runner overrides:
+[per_file]
+"*.sql" = { approvers = ["@dba-team"], ci_runners = ["sql-migration-runner"] }
+```
+
+* **Multi-Subtree Union Rule:** If a CL modifies files across multiple subtrees, `niebla-server` and Cotejo compute the union of all `ci_runners` across touched subtrees and verify that every required runner has reported `passed` (or `skipped`) on the active patchset before allowing `SubmitCL`.
+
+---
+
+## 4. CLI Command Reference
 
 ### Wrap and Execute a Build Command (`niebla ci exec`)
 
@@ -115,7 +139,7 @@ niebla ci report --cl <id> [--patchset <n>] --runner <name> --status <status> [-
 
 ---
 
-## 4. Authoring Remote CI Workflows
+## 5. Authoring Remote CI Workflows
 
 ### Forgejo Actions Workflow (`.forgejo/workflows/ci.yaml`)
 
@@ -186,11 +210,10 @@ jobs:
 
 ---
 
-## 5. Troubleshooting & FAQ
+## 6. Troubleshooting & FAQ
 
-* **Why is `niebla submit` failing with `CI check runs not passing`?**
-  Your monorepo has `require_green_to_submit = true` configured. Run `niebla ci exec` (or wait for remote runners to report `passed`). If you need to push an emergency trunk fix immediately, use `niebla submit --force`.
+* **Why is `niebla submit` failing with `CI check runs not passing` or `required CI runner "<name>" has not reported a check run`?**
+  Either your monorepo has `require_green_to_submit = true` configured or a touched subtree's `OWNERS.toml` specifies `require_green_ci = true` / `ci_runners = ["<name>"]`. Run `niebla ci exec --cl <id> --runner <name> -- <cmd>` (or wait for remote runners to report `passed`). If you need to push an emergency trunk fix immediately, use `niebla submit --force`.
 * **How do I inspect check runs for a CL?**
   * In the Cotejo Web UI: Open `http://127.0.0.1:7331/cl/<id>` to view check run badges and log output links.
   * Via REST API: `curl http://127.0.0.1:7331/api/v1/ci/status?cl_id=<id>&patchset=<n>`.
-

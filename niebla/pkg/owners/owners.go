@@ -6,38 +6,130 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
 
+// PerFileRule represents a pattern-scoped ownership and governance rule inside [per_file].
+// In OWNERS.toml, a [per_file] entry can be either a simple list of approver strings:
+//
+//	"*.proto" = ["@api-governance", "grace"]
+//
+// or an inline table with granular overrides:
+//
+//	"*.templ" = { approvers = ["@design-system"], set_noparent = true, required_approvals = 2, agents = ["a11y-bot"] }
+type PerFileRule struct {
+	SetNoParent             bool     `toml:"set_noparent" json:"set_noparent,omitempty"`
+	Approvers               []string `toml:"approvers" json:"approvers,omitempty"`
+	Reviewers               []string `toml:"reviewers" json:"reviewers,omitempty"`
+	RequiredApprovals       *int     `toml:"required_approvals" json:"required_approvals,omitempty"`
+	RequireGreenCI          *bool    `toml:"require_green_ci" json:"require_green_ci,omitempty"`
+	AllowUnresolvedComments *bool    `toml:"allow_unresolved_comments" json:"allow_unresolved_comments,omitempty"`
+	Agents                  []string `toml:"agents" json:"agents,omitempty"`
+	PresubmitHooks          []string `toml:"presubmit_hooks" json:"presubmit_hooks,omitempty"`
+	CIRunners               []string `toml:"ci_runners" json:"ci_runners,omitempty"`
+}
+
 // Config represents a parsed OWNERS.toml configuration file.
 type Config struct {
-	SetNoParent bool                `toml:"set_noparent"`
-	Approvers   []string            `toml:"approvers"`
-	Reviewers   []string            `toml:"reviewers"`
-	PerFile     map[string][]string `toml:"per_file"`
+	SetNoParent             bool                   `toml:"set_noparent"`
+	Approvers               []string               `toml:"approvers"`
+	Reviewers               []string               `toml:"reviewers"`
+	RequiredApprovals       *int                   `toml:"required_approvals"`
+	RequireGreenCI          *bool                  `toml:"require_green_ci"`
+	AllowUnresolvedComments *bool                  `toml:"allow_unresolved_comments"`
+	Agents                  []string               `toml:"agents"`
+	PresubmitHooks          []string               `toml:"presubmit_hooks"`
+	CIRunners               []string               `toml:"ci_runners"`
+	PerFile                 map[string][]string    `toml:"-"`
+	PerFileRules            map[string]PerFileRule `toml:"-"`
+}
+
+type rawOwnersConfig struct {
+	SetNoParent             bool           `toml:"set_noparent"`
+	Approvers               []string       `toml:"approvers"`
+	Reviewers               []string       `toml:"reviewers"`
+	RequiredApprovals       *int           `toml:"required_approvals"`
+	RequireGreenCI          *bool          `toml:"require_green_ci"`
+	AllowUnresolvedComments *bool          `toml:"allow_unresolved_comments"`
+	Agents                  []string       `toml:"agents"`
+	PresubmitHooks          []string       `toml:"presubmit_hooks"`
+	CIRunners               []string       `toml:"ci_runners"`
+	PerFile                 map[string]any `toml:"per_file"`
 }
 
 // ParseTOML parses raw TOML data into an Owners Config.
 func ParseTOML(data []byte) (*Config, error) {
-	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	var raw rawOwnersConfig
+	if err := toml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse OWNERS.toml: %w", err)
 	}
 
-	// Normalize approvers and reviewers
-	cfg.Approvers = cleanStringSlice(cfg.Approvers)
-	cfg.Reviewers = cleanStringSlice(cfg.Reviewers)
-	if cfg.PerFile != nil {
-		cleanedPerFile := make(map[string][]string, len(cfg.PerFile))
-		for pattern, owners := range cfg.PerFile {
-			cleanedPerFile[pattern] = cleanStringSlice(owners)
+	cfg := Config{
+		SetNoParent:             raw.SetNoParent,
+		Approvers:               cleanStringSlice(raw.Approvers),
+		Reviewers:               cleanStringSlice(raw.Reviewers),
+		RequiredApprovals:       raw.RequiredApprovals,
+		RequireGreenCI:          raw.RequireGreenCI,
+		AllowUnresolvedComments: raw.AllowUnresolvedComments,
+		Agents:                  cleanStringSlice(raw.Agents),
+		PresubmitHooks:          cleanStringSlice(raw.PresubmitHooks),
+		CIRunners:               cleanStringSlice(raw.CIRunners),
+	}
+
+	if raw.PerFile != nil {
+		cfg.PerFile = make(map[string][]string, len(raw.PerFile))
+		cfg.PerFileRules = make(map[string]PerFileRule, len(raw.PerFile))
+		for pattern, rawVal := range raw.PerFile {
+			rule, err := parsePerFileEntry(pattern, rawVal)
+			if err != nil {
+				return nil, err
+			}
+			cfg.PerFile[pattern] = rule.Approvers
+			cfg.PerFileRules[pattern] = rule
 		}
-		cfg.PerFile = cleanedPerFile
 	}
 
 	return &cfg, nil
+}
+
+func parsePerFileEntry(pattern string, rawVal any) (PerFileRule, error) {
+	switch v := rawVal.(type) {
+	case []any:
+		var approvers []string
+		for _, item := range v {
+			str, ok := item.(string)
+			if !ok {
+				return PerFileRule{}, fmt.Errorf("failed to parse OWNERS.toml: per_file[%q] array elements must be strings", pattern)
+			}
+			approvers = append(approvers, str)
+		}
+		cleaned := cleanStringSlice(approvers)
+		return PerFileRule{Approvers: cleaned}, nil
+	case []string:
+		cleaned := cleanStringSlice(v)
+		return PerFileRule{Approvers: cleaned}, nil
+	case map[string]any:
+		// Re-marshal the inline table and unmarshal into PerFileRule for strict typing
+		buf, err := toml.Marshal(v)
+		if err != nil {
+			return PerFileRule{}, fmt.Errorf("failed to parse OWNERS.toml per_file[%q]: %w", pattern, err)
+		}
+		var rule PerFileRule
+		if err := toml.Unmarshal(buf, &rule); err != nil {
+			return PerFileRule{}, fmt.Errorf("failed to parse OWNERS.toml per_file[%q]: %w", pattern, err)
+		}
+		rule.Approvers = cleanStringSlice(rule.Approvers)
+		rule.Reviewers = cleanStringSlice(rule.Reviewers)
+		rule.Agents = cleanStringSlice(rule.Agents)
+		rule.PresubmitHooks = cleanStringSlice(rule.PresubmitHooks)
+		rule.CIRunners = cleanStringSlice(rule.CIRunners)
+		return rule, nil
+	default:
+		return PerFileRule{}, fmt.Errorf("failed to parse OWNERS.toml: per_file[%q] must be an array of strings or an inline table", pattern)
+	}
 }
 
 func cleanStringSlice(slice []string) []string {
@@ -69,12 +161,26 @@ type Requirement struct {
 	ApprovedBy string   `json:"approved_by,omitempty"`
 }
 
-// EvaluationResult aggregates whether all touched paths have valid owner approvals.
+// SubtreePolicy represents the aggregated governance policies, reviewers, agents, hooks,
+// and CI runners resolved across all touched subtrees in a changelist.
+type SubtreePolicy struct {
+	RequiredApprovals       *int     `json:"required_approvals,omitempty"`
+	RequireGreenCI          *bool    `json:"require_green_ci,omitempty"`
+	AllowUnresolvedComments *bool    `json:"allow_unresolved_comments,omitempty"`
+	Reviewers               []string `json:"reviewers,omitempty"`
+	Agents                  []string `json:"agents,omitempty"`
+	PresubmitHooks          []string `json:"presubmit_hooks,omitempty"`
+	CIRunners               []string `json:"ci_runners,omitempty"`
+}
+
+// EvaluationResult aggregates whether all touched paths have valid owner approvals
+// and the effective subtree governance policy across all touched directories.
 type EvaluationResult struct {
 	Satisfied  bool          `json:"satisfied"`
 	TotalPaths int           `json:"total_paths"`
 	Approved   []Requirement `json:"approved,omitempty"`
 	Missing    []Requirement `json:"missing,omitempty"`
+	Policy     SubtreePolicy `json:"policy"`
 }
 
 // Evaluator evaluates changelist file diffs against hierarchical OWNERS.toml files.
@@ -173,25 +279,36 @@ func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 				governingDir = dir
 			}
 
-			// 1. Check per-file pattern match in this directory
+			// 1. Check per-file pattern match in this directory (sorted for determinism)
 			var perFileMatched bool
-			for pattern, owners := range cfg.PerFile {
+			var perFileStopParent bool
+			patterns := make([]string, 0, len(cfg.PerFile))
+			for pattern := range cfg.PerFile {
+				patterns = append(patterns, pattern)
+			}
+			sort.Strings(patterns)
+
+			for _, pattern := range patterns {
+				owners := cfg.PerFile[pattern]
 				matched, matchErr := path.Match(pattern, fileName)
 				if matchErr == nil && matched {
 					perFileMatched = true
 					rule = fmt.Sprintf("per_file: %s", pattern)
 					accumulatedApprovers = append(accumulatedApprovers, owners...)
+					if pfRule, ok := cfg.PerFileRules[pattern]; ok && pfRule.SetNoParent {
+						perFileStopParent = true
+					}
 					break
 				}
 			}
 
-			// 2. If no per-file pattern matched, collect directory approvers
-			if !perFileMatched && len(cfg.Approvers) > 0 {
+			// 2. If no per-file pattern matched (or per-file rule had no explicit approvers), collect directory approvers
+			if (!perFileMatched || len(accumulatedApprovers) == 0) && len(cfg.Approvers) > 0 {
 				accumulatedApprovers = append(accumulatedApprovers, cfg.Approvers...)
 			}
 
-			// 3. If set_noparent is true, stop ascending
-			if cfg.SetNoParent {
+			// 3. If set_noparent is true on either the per_file rule or directory config, stop ascending
+			if perFileStopParent || cfg.SetNoParent {
 				break
 			}
 		}
@@ -220,9 +337,148 @@ func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 	}, nil
 }
 
-// Evaluate checks whether the provided approvals satisfy all required owners for the touched paths.
+// ResolvePolicy resolves and aggregates subtree governance policies, reviewers, agents,
+// presubmit hooks, and CI runners across all touched file paths in a changelist.
+//
+// Aggregation rules:
+//   - RequiredApprovals: maximum across all touched OWNERS.toml chains and matching [per_file] rules.
+//   - RequireGreenCI: true if any touched OWNERS.toml / [per_file] sets require_green_ci = true or specifies ci_runners.
+//   - AllowUnresolvedComments: false (strictest wins) if any touched OWNERS.toml / [per_file] sets false.
+//   - Reviewers, Agents, PresubmitHooks, CIRunners: deduplicated union across all touched hierarchies (stopping at set_noparent = true).
+func (e *Evaluator) ResolvePolicy(touchedPaths []string) (*SubtreePolicy, error) {
+	policy := &SubtreePolicy{}
+	var reviewers, agents, hooks, runners []string
+
+	mergeIntMax := func(dst **int, src *int) {
+		if src == nil {
+			return
+		}
+		v := *src
+		if *dst == nil || v > **dst {
+			*dst = &v
+		}
+	}
+	mergeBoolOr := func(dst **bool, src *bool) {
+		if src == nil {
+			return
+		}
+		v := *src
+		if *dst == nil {
+			*dst = &v
+		} else if v && !**dst {
+			t := true
+			*dst = &t
+		}
+	}
+	mergeBoolAnd := func(dst **bool, src *bool) {
+		if src == nil {
+			return
+		}
+		v := *src
+		if *dst == nil {
+			*dst = &v
+		} else if !v && **dst {
+			f := false
+			*dst = &f
+		}
+	}
+
+	for _, p := range touchedPaths {
+		cleanPath := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(p)), "/")
+		if cleanPath == "" || cleanPath == "." {
+			continue
+		}
+
+		currDir := path.Dir(cleanPath)
+		if currDir == "." {
+			currDir = ""
+		}
+		fileName := path.Base(cleanPath)
+
+		dir := currDir
+		for {
+			cfg, err := e.getConfig(dir)
+			if err != nil {
+				return nil, err
+			}
+
+			if cfg != nil {
+				var stopParent bool
+
+				// 1. Check matching [per_file] rules in deterministic order
+				patterns := make([]string, 0, len(cfg.PerFileRules))
+				for pattern := range cfg.PerFileRules {
+					patterns = append(patterns, pattern)
+				}
+				sort.Strings(patterns)
+
+				for _, pattern := range patterns {
+					matched, matchErr := path.Match(pattern, fileName)
+					if matchErr == nil && matched {
+						pfRule := cfg.PerFileRules[pattern]
+						mergeIntMax(&policy.RequiredApprovals, pfRule.RequiredApprovals)
+						mergeBoolOr(&policy.RequireGreenCI, pfRule.RequireGreenCI)
+						mergeBoolAnd(&policy.AllowUnresolvedComments, pfRule.AllowUnresolvedComments)
+						reviewers = append(reviewers, pfRule.Reviewers...)
+						agents = append(agents, pfRule.Agents...)
+						hooks = append(hooks, pfRule.PresubmitHooks...)
+						runners = append(runners, pfRule.CIRunners...)
+						if len(pfRule.CIRunners) > 0 {
+							t := true
+							mergeBoolOr(&policy.RequireGreenCI, &t)
+						}
+						if pfRule.SetNoParent {
+							stopParent = true
+						}
+					}
+				}
+
+				// 2. Collect directory-level policy & automation
+				mergeIntMax(&policy.RequiredApprovals, cfg.RequiredApprovals)
+				mergeBoolOr(&policy.RequireGreenCI, cfg.RequireGreenCI)
+				mergeBoolAnd(&policy.AllowUnresolvedComments, cfg.AllowUnresolvedComments)
+				reviewers = append(reviewers, cfg.Reviewers...)
+				agents = append(agents, cfg.Agents...)
+				hooks = append(hooks, cfg.PresubmitHooks...)
+				runners = append(runners, cfg.CIRunners...)
+				if len(cfg.CIRunners) > 0 {
+					t := true
+					mergeBoolOr(&policy.RequireGreenCI, &t)
+				}
+
+				if stopParent || cfg.SetNoParent {
+					break
+				}
+			}
+
+			if dir == "" {
+				break
+			}
+			parentDir := path.Dir(dir)
+			if parentDir == "." || parentDir == dir {
+				dir = ""
+			} else {
+				dir = parentDir
+			}
+		}
+	}
+
+	policy.Reviewers = deduplicate(reviewers)
+	policy.Agents = deduplicate(agents)
+	policy.PresubmitHooks = deduplicate(hooks)
+	policy.CIRunners = deduplicate(runners)
+
+	return policy, nil
+}
+
+// Evaluate checks whether the provided approvals satisfy all required owners for the touched paths
+// and resolves the aggregated subtree governance policy.
 func (e *Evaluator) Evaluate(touchedPaths []string, approvedBy []string) (*EvaluationResult, error) {
 	requirements, err := e.ResolveRequirements(touchedPaths)
+	if err != nil {
+		return nil, err
+	}
+	policy, err := e.ResolvePolicy(touchedPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +486,9 @@ func (e *Evaluator) Evaluate(touchedPaths []string, approvedBy []string) (*Evalu
 	result := &EvaluationResult{
 		Satisfied:  true,
 		TotalPaths: len(touchedPaths),
+	}
+	if policy != nil {
+		result.Policy = *policy
 	}
 
 	// Normalize approved usernames
