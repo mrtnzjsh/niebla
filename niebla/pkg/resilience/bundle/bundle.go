@@ -33,6 +33,50 @@ type PackOptions struct {
 	Blobs        map[string]io.Reader // sha256 hex -> reader
 }
 
+func writeTarEntry(tw *tar.Writer, name string, mode int64, data []byte, modTime time.Time) error {
+	header := &tar.Header{
+		Name:    name,
+		Mode:    mode,
+		Size:    int64(len(data)),
+		ModTime: modTime,
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		return fmt.Errorf("failed to write %s tar header: %w", name, err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("failed to write %s to tar: %w", name, err)
+	}
+	return nil
+}
+
+func writeTarPayload(tarWriter *tar.Writer, opts PackOptions, manifestJSON []byte) error {
+	if err := writeTarEntry(tarWriter, "manifest.json", 0600, manifestJSON, opts.Manifest.CreatedAt); err != nil {
+		return err
+	}
+
+	if opts.DBDumpReader != nil {
+		dumpBytes, err := io.ReadAll(opts.DBDumpReader)
+		if err != nil {
+			return fmt.Errorf("failed to read database dump: %w", err)
+		}
+		if err := writeTarEntry(tarWriter, "database.sql", 0600, dumpBytes, opts.Manifest.CreatedAt); err != nil {
+			return err
+		}
+	}
+
+	for sha, r := range opts.Blobs {
+		blobBytes, err := io.ReadAll(r)
+		if err != nil {
+			return fmt.Errorf("failed to read blob %s: %w", sha, err)
+		}
+		if err := writeTarEntry(tarWriter, fmt.Sprintf("blobs/%s", sha), 0644, blobBytes, opts.Manifest.CreatedAt); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Pack creates an authenticated, envelope-encrypted .nieblabak archive stream.
 func Pack(ctx context.Context, w io.Writer, opts PackOptions) error {
 	dek, err := crypto.GenerateDEK()
@@ -103,86 +147,11 @@ func Pack(ctx context.Context, w io.Writer, opts PackOptions) error {
 	}
 
 	tarWriter := tar.NewWriter(zstdWriter)
-
-	// A. Write manifest.json inside tar
-	manifestHeader := &tar.Header{
-		Name:    "manifest.json",
-		Mode:    0600,
-		Size:    int64(len(manifestJSON)),
-		ModTime: opts.Manifest.CreatedAt,
-	}
-	if err := tarWriter.WriteHeader(manifestHeader); err != nil {
+	if err := writeTarPayload(tarWriter, opts, manifestJSON); err != nil {
 		_ = tarWriter.Close()
 		_ = zstdWriter.Close()
 		_ = pw.Close()
-		return fmt.Errorf("failed to write manifest tar header: %w", err)
-	}
-	if _, err := tarWriter.Write(manifestJSON); err != nil {
-		_ = tarWriter.Close()
-		_ = zstdWriter.Close()
-		_ = pw.Close()
-		return fmt.Errorf("failed to write manifest tar body: %w", err)
-	}
-
-	// B. Write database dump if provided
-	if opts.DBDumpReader != nil {
-		// Read dump into memory or pipe to determine size
-		dumpBytes, err := io.ReadAll(opts.DBDumpReader)
-		if err != nil {
-			_ = tarWriter.Close()
-			_ = zstdWriter.Close()
-			_ = pw.Close()
-			return fmt.Errorf("failed to read database dump: %w", err)
-		}
-
-		dbHeader := &tar.Header{
-			Name:    "database.sql",
-			Mode:    0600,
-			Size:    int64(len(dumpBytes)),
-			ModTime: opts.Manifest.CreatedAt,
-		}
-		if err := tarWriter.WriteHeader(dbHeader); err != nil {
-			_ = tarWriter.Close()
-			_ = zstdWriter.Close()
-			_ = pw.Close()
-			return fmt.Errorf("failed to write database tar header: %w", err)
-		}
-		if _, err := tarWriter.Write(dumpBytes); err != nil {
-			_ = tarWriter.Close()
-			_ = zstdWriter.Close()
-			_ = pw.Close()
-			return fmt.Errorf("failed to write database dump to tar: %w", err)
-		}
-	}
-
-	// C. Write CAS blobs
-	for sha, r := range opts.Blobs {
-		blobBytes, err := io.ReadAll(r)
-		if err != nil {
-			_ = tarWriter.Close()
-			_ = zstdWriter.Close()
-			_ = pw.Close()
-			return fmt.Errorf("failed to read blob %s: %w", sha, err)
-		}
-
-		bHeader := &tar.Header{
-			Name:    fmt.Sprintf("blobs/%s", sha),
-			Mode:    0644,
-			Size:    int64(len(blobBytes)),
-			ModTime: opts.Manifest.CreatedAt,
-		}
-		if err := tarWriter.WriteHeader(bHeader); err != nil {
-			_ = tarWriter.Close()
-			_ = zstdWriter.Close()
-			_ = pw.Close()
-			return fmt.Errorf("failed to write blob %s tar header: %w", sha, err)
-		}
-		if _, err := tarWriter.Write(blobBytes); err != nil {
-			_ = tarWriter.Close()
-			_ = zstdWriter.Close()
-			_ = pw.Close()
-			return fmt.Errorf("failed to write blob %s to tar: %w", sha, err)
-		}
+		return err
 	}
 
 	// Flush and close tar and zstd writers

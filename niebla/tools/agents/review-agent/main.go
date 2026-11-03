@@ -17,6 +17,59 @@ import (
 	"niebla/pkg/httpclient"
 )
 
+func resolveTargetFiles(filesFlag string) []string {
+	rawFiles := strings.TrimSpace(filesFlag)
+	if rawFiles == "" {
+		rawFiles = strings.TrimSpace(os.Getenv("NIEBLA_TOUCHED_FILES"))
+	}
+	var targetFiles []string
+	for _, f := range strings.Split(rawFiles, ",") {
+		trimmed := strings.TrimSpace(f)
+		if trimmed != "" {
+			targetFiles = append(targetFiles, trimmed)
+		}
+	}
+	return targetFiles
+}
+
+func resolveSystemPrompt(cfg *config.Config, promptFlag string) string {
+	sysPrompt := internalagents.DefaultAIReviewSystemPrompt
+	promptPath := strings.TrimSpace(promptFlag)
+	if promptPath == "" {
+		promptPath = strings.TrimSpace(cfg.Critique.AI.SystemPromptPath)
+	}
+	if promptPath != "" {
+		if data, rErr := os.ReadFile(promptPath); rErr == nil && len(strings.TrimSpace(string(data))) > 0 {
+			sysPrompt = string(data) + "\n\n" + internalagents.DefaultAIReviewSystemPrompt
+		}
+	}
+	return sysPrompt
+}
+
+func buildReviewUserPrompt(targetFiles []string, maxLines int) string {
+	if maxLines <= 0 {
+		maxLines = 1200
+	}
+	var userPrompt strings.Builder
+	userPrompt.WriteString("Review the following modified files and return a JSON AgentReviewReport:\n\n")
+	for _, relPath := range targetFiles {
+		contentBytes, readErr := os.ReadFile(filepath.FromSlash(relPath))
+		if readErr != nil {
+			continue
+		}
+		lines := strings.Split(string(contentBytes), "\n")
+		if len(lines) > maxLines {
+			lines = lines[:maxLines]
+		}
+		fmt.Fprintf(&userPrompt, "=== FILE: %s ===\n", relPath)
+		for i, line := range lines {
+			fmt.Fprintf(&userPrompt, "%4d | %s\n", i+1, line)
+		}
+		userPrompt.WriteString("\n")
+	}
+	return userPrompt.String()
+}
+
 func main() {
 	promptFlag := flag.String("prompt", "", "Path to domain system prompt (.niebla/prompts/<domain>.md)")
 	filesFlag := flag.String("files", "", "Comma-separated list of file paths to review (defaults to NIEBLA_TOUCHED_FILES)")
@@ -44,28 +97,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	sysPrompt := internalagents.DefaultAIReviewSystemPrompt
-	promptPath := strings.TrimSpace(*promptFlag)
-	if promptPath == "" {
-		promptPath = strings.TrimSpace(cfg.Critique.AI.SystemPromptPath)
-	}
-	if promptPath != "" {
-		if data, rErr := os.ReadFile(promptPath); rErr == nil && len(strings.TrimSpace(string(data))) > 0 {
-			sysPrompt = string(data) + "\n\n" + internalagents.DefaultAIReviewSystemPrompt
-		}
-	}
-
-	rawFiles := strings.TrimSpace(*filesFlag)
-	if rawFiles == "" {
-		rawFiles = strings.TrimSpace(os.Getenv("NIEBLA_TOUCHED_FILES"))
-	}
-	var targetFiles []string
-	for _, f := range strings.Split(rawFiles, ",") {
-		trimmed := strings.TrimSpace(f)
-		if trimmed != "" {
-			targetFiles = append(targetFiles, trimmed)
-		}
-	}
+	sysPrompt := resolveSystemPrompt(cfg, *promptFlag)
+	targetFiles := resolveTargetFiles(*filesFlag)
 
 	if len(targetFiles) == 0 {
 		report := agents.AgentReviewReport{
@@ -76,28 +109,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	maxLines := cfg.Critique.AI.MaxContextLines
-	if maxLines <= 0 {
-		maxLines = 1200
-	}
-
-	var userPrompt strings.Builder
-	userPrompt.WriteString("Review the following modified files and return a JSON AgentReviewReport:\n\n")
-	for _, relPath := range targetFiles {
-		contentBytes, readErr := os.ReadFile(filepath.FromSlash(relPath))
-		if readErr != nil {
-			continue
-		}
-		lines := strings.Split(string(contentBytes), "\n")
-		if len(lines) > maxLines {
-			lines = lines[:maxLines]
-		}
-		fmt.Fprintf(&userPrompt, "=== FILE: %s ===\n", relPath)
-		for i, line := range lines {
-			fmt.Fprintf(&userPrompt, "%4d | %s\n", i+1, line)
-		}
-		userPrompt.WriteString("\n")
-	}
+	userPrompt := buildReviewUserPrompt(targetFiles, cfg.Critique.AI.MaxContextLines)
 
 	client, err := ai.NewClient(ai.Config{
 		Endpoint:       cfg.Critique.AI.Endpoint,

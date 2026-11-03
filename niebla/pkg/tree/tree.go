@@ -273,6 +273,53 @@ func filepathClean(p string) string {
 	return strings.Join(out, "/")
 }
 
+func fetchEntryMap(hash []byte, fetchTree FetchTreeFunc) (map[string]Entry, error) {
+	entryMap := make(map[string]Entry)
+	if len(hash) > 0 && !bytes.Equal(hash, EmptyTreeHash) {
+		entries, err := fetchTree(hash)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			entryMap[e.Name] = e
+		}
+	}
+	return entryMap, nil
+}
+
+func compareDiffEntry(relPath string, oldE, newE Entry, inOld, inNew bool, walk func(string, []byte, []byte) error, touched *[]string) error {
+	if inOld && inNew {
+		if oldE.IsDir() && newE.IsDir() {
+			if !bytes.Equal(oldE.SubTreeHash, newE.SubTreeHash) {
+				return walk(relPath, oldE.SubTreeHash, newE.SubTreeHash)
+			}
+			return nil
+		}
+		if !oldE.IsDir() && !newE.IsDir() {
+			if !bytes.Equal(oldE.BlobSHA256, newE.BlobSHA256) {
+				*touched = append(*touched, relPath)
+			}
+			return nil
+		}
+		*touched = append(*touched, relPath)
+		return nil
+	}
+	if inNew {
+		if newE.IsDir() {
+			return walk(relPath, EmptyTreeHash, newE.SubTreeHash)
+		}
+		*touched = append(*touched, relPath)
+		return nil
+	}
+	if inOld {
+		if oldE.IsDir() {
+			return walk(relPath, oldE.SubTreeHash, EmptyTreeHash)
+		}
+		*touched = append(*touched, relPath)
+	}
+	return nil
+}
+
 // DiffTreeFiles recursively walks and compares oldTree and newTree, returning the slice of relative
 // file paths that were added, modified, or deleted.
 func DiffTreeFiles(oldTree, newTree []byte, fetchTree FetchTreeFunc) ([]string, error) {
@@ -288,30 +335,16 @@ func DiffTreeFiles(oldTree, newTree []byte, fetchTree FetchTreeFunc) ([]string, 
 			return nil
 		}
 
-		oldEntriesMap := make(map[string]Entry)
-		if len(oldHash) > 0 && !bytes.Equal(oldHash, EmptyTreeHash) {
-			entries, err := fetchTree(oldHash)
-			if err != nil {
-				return err
-			}
-			for _, e := range entries {
-				oldEntriesMap[e.Name] = e
-			}
+		oldEntriesMap, err := fetchEntryMap(oldHash, fetchTree)
+		if err != nil {
+			return err
+		}
+		newEntriesMap, err := fetchEntryMap(newHash, fetchTree)
+		if err != nil {
+			return err
 		}
 
-		newEntriesMap := make(map[string]Entry)
-		if len(newHash) > 0 && !bytes.Equal(newHash, EmptyTreeHash) {
-			entries, err := fetchTree(newHash)
-			if err != nil {
-				return err
-			}
-			for _, e := range entries {
-				newEntriesMap[e.Name] = e
-			}
-		}
-
-		// Union of all entry names
-		allNames := make(map[string]bool)
+		allNames := make(map[string]bool, len(oldEntriesMap)+len(newEntriesMap))
 		for n := range oldEntriesMap {
 			allNames[n] = true
 		}
@@ -324,43 +357,10 @@ func DiffTreeFiles(oldTree, newTree []byte, fetchTree FetchTreeFunc) ([]string, 
 			if dirPath != "" {
 				relPath = dirPath + "/" + name
 			}
-
 			oldE, inOld := oldEntriesMap[name]
 			newE, inNew := newEntriesMap[name]
-
-			if inOld && inNew {
-				if oldE.IsDir() && newE.IsDir() {
-					if !bytes.Equal(oldE.SubTreeHash, newE.SubTreeHash) {
-						if err := walk(relPath, oldE.SubTreeHash, newE.SubTreeHash); err != nil {
-							return err
-						}
-					}
-				} else if !oldE.IsDir() && !newE.IsDir() {
-					if !bytes.Equal(oldE.BlobSHA256, newE.BlobSHA256) {
-						touched = append(touched, relPath)
-					}
-				} else {
-					// Type change (file <-> dir)
-					touched = append(touched, relPath)
-				}
-			} else if inNew {
-				// Added in new
-				if newE.IsDir() {
-					if err := walk(relPath, EmptyTreeHash, newE.SubTreeHash); err != nil {
-						return err
-					}
-				} else {
-					touched = append(touched, relPath)
-				}
-			} else if inOld {
-				// Deleted in new
-				if oldE.IsDir() {
-					if err := walk(relPath, oldE.SubTreeHash, EmptyTreeHash); err != nil {
-						return err
-					}
-				} else {
-					touched = append(touched, relPath)
-				}
+			if err := compareDiffEntry(relPath, oldE, newE, inOld, inNew, walk, &touched); err != nil {
+				return err
 			}
 		}
 		return nil

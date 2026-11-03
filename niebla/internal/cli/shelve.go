@@ -37,6 +37,159 @@ type ShelveOutput struct {
 	FilesShelved int    `json:"files_shelved"`
 }
 
+func uploadChangesToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, changes []FileChange) (map[string]uploadedBlob, error) {
+	uploads := make(map[string]uploadedBlob)
+	for _, change := range changes {
+		if change.Type == ChangeDeleted {
+			continue
+		}
+
+		blobInfo, err := uploadFileToCAS(ctx, client, change.DiskPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to upload blob for %s: %w", change.Path, err)
+		}
+		uploads[change.Path] = blobInfo
+	}
+	return uploads, nil
+}
+
+func resolveShelveReviewers(ctx context.Context, reviewers string) ([]string, error) {
+	if strings.TrimSpace(reviewers) == "" {
+		return nil, nil
+	}
+	toolchainCfg, err := toolchainconfig.Load()
+	if err != nil {
+		toolchainCfg = toolchainconfig.DefaultConfig()
+	}
+	resolver := groups.NewResolver(toolchainCfg.Critique.Groups)
+	resolved, err := groups.ExpandReviewers(ctx, resolver, []string{reviewers})
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand reviewers %q: %w", reviewers, err)
+	}
+	return resolved, nil
+}
+
+func executeShelve(
+	cmd *cobra.Command,
+	rootFlags *RootFlags,
+	description string,
+	parentCL, targetCL int64,
+	newCL bool,
+	reviewers string,
+) error {
+	if strings.TrimSpace(description) == "" {
+		return fmt.Errorf("a changelist description is required (-m \"<description>\")")
+	}
+
+	mgr, err := config.NewManager(rootFlags.ConfigDir)
+	if err != nil {
+		return err
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current working directory: %w", err)
+	}
+
+	ws, err := mgr.ResolveWorkspace(rootFlags.Workspace, cwd)
+	if err != nil {
+		return err
+	}
+
+	serverAddr := ResolveServerAddr(rootFlags.Server)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+
+	conn, client, err := DialGRPC(ctx, serverAddr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	rootTreeHash, err := hex.DecodeString(ws.RootTreeHash)
+	if err != nil {
+		return fmt.Errorf("invalid root tree hash in workspace config: %w", err)
+	}
+
+	fetchTree := makeTreeFetcher(ctx, client)
+	changes, err := ScanWorkspaceChanges(ws, rootTreeHash, fetchTree)
+	if err != nil {
+		return fmt.Errorf("failed to scan workspace changes: %w", err)
+	}
+
+	if len(changes) == 0 {
+		return fmt.Errorf("no changes to shelve in workspace %q", ws.Name)
+	}
+
+	uploads, err := uploadChangesToCAS(ctx, client, changes)
+	if err != nil {
+		return err
+	}
+
+	writeTree := func(treeHash []byte, entries []tree.Entry) error {
+		manifest, err := tree.MarshalManifest(entries)
+		if err != nil {
+			return err
+		}
+		_, _, err = uploadBytesToCAS(ctx, client, manifest)
+		return err
+	}
+	newRootTreeHash, err := BuildUpdatedTree(rootTreeHash, changes, uploads, fetchTree, writeTree)
+	if err != nil {
+		return fmt.Errorf("failed to compute updated Merkle tree: %w", err)
+	}
+
+	effectiveParentCL := parentCL
+	if effectiveParentCL <= 0 {
+		effectiveParentCL = ws.BaseCL
+	}
+
+	resolvedReviewers, err := resolveShelveReviewers(ctx, reviewers)
+	if err != nil {
+		return err
+	}
+
+	effectiveCLID := targetCL
+	if !newCL && effectiveCLID <= 0 && ws.ActiveCL > 0 {
+		effectiveCLID = ws.ActiveCL
+	}
+
+	author := getCurrentUsername()
+	shelveResp, err := client.ShelveCL(ctx, &nieblav1.ShelveCLRequest{
+		WorkspaceId:  ws.WorkspaceID,
+		Author:       author,
+		Description:  description,
+		RootTreeHash: newRootTreeHash,
+		ParentCl:     effectiveParentCL,
+		Reviewers:    resolvedReviewers,
+		ClId:         effectiveCLID,
+	})
+	if err != nil {
+		return fmt.Errorf("server failed to shelve changelist: %w", err)
+	}
+
+	newTreeHex := hex.EncodeToString(newRootTreeHash)
+	ws.ActiveCL = shelveResp.ClId
+	ws.RootTreeHash = newTreeHex
+	if err := mgr.Save(ws); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update workspace active CL metadata: %v\n", err)
+	}
+
+	if rootFlags.JSON {
+		return writeJSON(cmd.OutOrStdout(), ShelveOutput{
+			Workspace:    ws.Name,
+			CLID:         shelveResp.ClId,
+			ParentCL:     effectiveParentCL,
+			Description:  description,
+			RootTreeHash: newTreeHex,
+			FilesShelved: len(changes),
+		})
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Shelved CL %d: %q\n", shelveResp.ClId, description)
+	return nil
+}
+
 // NewShelveCmd constructs the 'shelve' command.
 func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 	var description string
@@ -50,140 +203,7 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 		Short: "Shelve pending workspace changes into a new Changelist",
 		Long:  "Uploads modified/added scratch files to CAS, recomputes the Merkle tree, and creates a shelved CL.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(description) == "" {
-				return fmt.Errorf("a changelist description is required (-m \"<description>\")")
-			}
-
-			mgr, err := config.NewManager(rootFlags.ConfigDir)
-			if err != nil {
-				return err
-			}
-
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("failed to get current working directory: %w", err)
-			}
-
-			ws, err := mgr.ResolveWorkspace(rootFlags.Workspace, cwd)
-			if err != nil {
-				return err
-			}
-
-			serverAddr := ResolveServerAddr(rootFlags.Server)
-			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-			defer cancel()
-
-			conn, client, err := DialGRPC(ctx, serverAddr)
-			if err != nil {
-				return err
-			}
-			defer conn.Close()
-
-			rootTreeHash, err := hex.DecodeString(ws.RootTreeHash)
-			if err != nil {
-				return fmt.Errorf("invalid root tree hash in workspace config: %w", err)
-			}
-
-			fetchTree := makeTreeFetcher(ctx, client)
-			changes, err := ScanWorkspaceChanges(ws, rootTreeHash, fetchTree)
-			if err != nil {
-				return fmt.Errorf("failed to scan workspace changes: %w", err)
-			}
-
-			if len(changes) == 0 {
-				return fmt.Errorf("no changes to shelve in workspace %q", ws.Name)
-			}
-
-			// 1. Upload all modified and added files to CAS
-			uploads := make(map[string]uploadedBlob)
-			for _, change := range changes {
-				if change.Type == ChangeDeleted {
-					continue
-				}
-
-				blobInfo, err := uploadFileToCAS(ctx, client, change.DiskPath)
-				if err != nil {
-					return fmt.Errorf("failed to upload blob for %s: %w", change.Path, err)
-				}
-				uploads[change.Path] = blobInfo
-			}
-
-			// 2. Recompute the Merkle tree hierarchy up to the root and persist new tree manifests
-			writeTree := func(treeHash []byte, entries []tree.Entry) error {
-				manifest, err := tree.MarshalManifest(entries)
-				if err != nil {
-					return err
-				}
-				_, _, err = uploadBytesToCAS(ctx, client, manifest)
-				return err
-			}
-			newRootTreeHash, err := BuildUpdatedTree(rootTreeHash, changes, uploads, fetchTree, writeTree)
-			if err != nil {
-				return fmt.Errorf("failed to compute updated Merkle tree: %w", err)
-			}
-
-			// Determine parent CL: explicit flag or fallback to ws.BaseCL
-			effectiveParentCL := parentCL
-			if effectiveParentCL <= 0 {
-				effectiveParentCL = ws.BaseCL
-			}
-
-			// Resolve reviewers if specified (expanding user groups if present)
-			var resolvedReviewers []string
-			if strings.TrimSpace(reviewers) != "" {
-				toolchainCfg, err := toolchainconfig.Load()
-				if err != nil {
-					toolchainCfg = toolchainconfig.DefaultConfig()
-				}
-				resolver := groups.NewResolver(toolchainCfg.Critique.Groups)
-				resolvedReviewers, err = groups.ExpandReviewers(ctx, resolver, []string{reviewers})
-				if err != nil {
-					return fmt.Errorf("failed to expand reviewers %q: %w", reviewers, err)
-				}
-			}
-
-			// 3. Determine if shelving to an existing CL or creating new
-			effectiveCLID := targetCL
-			if !newCL && effectiveCLID <= 0 && ws.ActiveCL > 0 {
-				effectiveCLID = ws.ActiveCL
-			}
-
-			// 4. Call ShelveCL on niebla-server
-			author := getCurrentUsername()
-			shelveResp, err := client.ShelveCL(ctx, &nieblav1.ShelveCLRequest{
-				WorkspaceId:  ws.WorkspaceID,
-				Author:       author,
-				Description:  description,
-				RootTreeHash: newRootTreeHash,
-				ParentCl:     effectiveParentCL,
-				Reviewers:    resolvedReviewers,
-				ClId:         effectiveCLID,
-			})
-			if err != nil {
-				return fmt.Errorf("server failed to shelve changelist: %w", err)
-			}
-
-			// 5. Update workspace metadata with active CL and updated tree hash
-			newTreeHex := hex.EncodeToString(newRootTreeHash)
-			ws.ActiveCL = shelveResp.ClId
-			ws.RootTreeHash = newTreeHex
-			if err := mgr.Save(ws); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update workspace active CL metadata: %v\n", err)
-			}
-
-			if rootFlags.JSON {
-				return writeJSON(cmd.OutOrStdout(), ShelveOutput{
-					Workspace:    ws.Name,
-					CLID:         shelveResp.ClId,
-					ParentCL:     effectiveParentCL,
-					Description:  description,
-					RootTreeHash: newTreeHex,
-					FilesShelved: len(changes),
-				})
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Shelved CL %d: %q\n", shelveResp.ClId, description)
-			return nil
+			return executeShelve(cmd, rootFlags, description, parentCL, targetCL, newCL, reviewers)
 		},
 	}
 

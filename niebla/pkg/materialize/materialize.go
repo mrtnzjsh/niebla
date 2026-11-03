@@ -51,30 +51,14 @@ type fileJob struct {
 	entry    tree.Entry
 }
 
-// MaterializeTree walks the Merkle tree rooted at rootTreeHash and populates destDir.
-func MaterializeTree(
+func collectMaterializationJobs(
 	ctx context.Context,
 	rootTreeHash []byte,
 	destDir string,
 	fetchTree tree.FetchTreeFunc,
-	fetchBlob BlobFetcher,
-	opts Options,
-) (*Stats, error) {
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
-	}
-
-	stats := &Stats{}
-	if len(rootTreeHash) == 0 || bytes.Equal(rootTreeHash, tree.EmptyTreeHash) {
-		return stats, nil
-	}
-
-	concurrency := opts.Concurrency
-	if concurrency <= 0 {
-		concurrency = DefaultConcurrency
-	}
-
-	// 1. Walk the Merkle tree hierarchy to create directories and collect file jobs.
+	filter ignore.Matcher,
+	stats *Stats,
+) ([]fileJob, error) {
 	var jobs []fileJob
 	var walk func(treeHash []byte, relPrefix string) error
 	walk = func(treeHash []byte, relPrefix string) error {
@@ -96,7 +80,7 @@ func MaterializeTree(
 				relPath = relPrefix + "/" + entry.Name
 			}
 
-			if opts.Filter != nil && opts.Filter.Match(relPath, entry.IsDir()) {
+			if filter != nil && filter.Match(relPath, entry.IsDir()) {
 				continue
 			}
 
@@ -123,12 +107,17 @@ func MaterializeTree(
 	if err := walk(rootTreeHash, ""); err != nil {
 		return nil, err
 	}
+	return jobs, nil
+}
 
-	if len(jobs) == 0 {
-		return stats, nil
-	}
-
-	// 2. Materialize files concurrently using a bounded worker pool.
+func executeMaterializationJobs(
+	ctx context.Context,
+	jobs []fileJob,
+	concurrency int,
+	fetchBlob BlobFetcher,
+	hardlinkCAS *cas.Storage,
+	stats *Stats,
+) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -159,7 +148,7 @@ func MaterializeTree(
 				if ctx.Err() != nil {
 					return
 				}
-				nBytes, hardlinked, err := materializeFile(ctx, job, fetchBlob, opts.HardlinkCAS)
+				nBytes, hardlinked, err := materializeFile(ctx, job, fetchBlob, hardlinkCAS)
 				if err != nil {
 					errOnce.Do(func() {
 						firstErr = err
@@ -178,12 +167,51 @@ func MaterializeTree(
 
 	wg.Wait()
 	if firstErr != nil {
-		return nil, firstErr
+		return firstErr
 	}
 
 	stats.FilesMaterialized = int(filesCount.Load())
 	stats.HardlinkedFiles = int(hardlinkCount.Load())
 	stats.BytesWritten = bytesWritten.Load()
+	return nil
+}
+
+// MaterializeTree walks the Merkle tree rooted at rootTreeHash and populates destDir.
+func MaterializeTree(
+	ctx context.Context,
+	rootTreeHash []byte,
+	destDir string,
+	fetchTree tree.FetchTreeFunc,
+	fetchBlob BlobFetcher,
+	opts Options,
+) (*Stats, error) {
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
+	}
+
+	stats := &Stats{}
+	if len(rootTreeHash) == 0 || bytes.Equal(rootTreeHash, tree.EmptyTreeHash) {
+		return stats, nil
+	}
+
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = DefaultConcurrency
+	}
+
+	jobs, err := collectMaterializationJobs(ctx, rootTreeHash, destDir, fetchTree, opts.Filter, stats)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(jobs) == 0 {
+		return stats, nil
+	}
+
+	if err := executeMaterializationJobs(ctx, jobs, concurrency, fetchBlob, opts.HardlinkCAS, stats); err != nil {
+		return nil, err
+	}
+
 	return stats, nil
 }
 

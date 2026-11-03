@@ -1,0 +1,674 @@
+package handlers
+
+import (
+	"context"
+	"encoding/hex"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"niebla/internal/config"
+	"niebla/internal/db"
+	"niebla/internal/web/diff"
+	"niebla/internal/web/views"
+	"niebla/pkg/owners"
+	"niebla/pkg/tree"
+)
+
+// parsePatchsetQueryParams extracts ?ps= and ?base_ps= from request with defaults.
+func parsePatchsetQueryParams(r *http.Request, defaultCurrentPS int) (currentPS, basePS int) {
+	currentPS = defaultCurrentPS
+	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
+		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
+			currentPS = parsed
+		}
+	}
+
+	basePS = 0
+	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
+		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
+			basePS = parsed
+		}
+	}
+	return currentPS, basePS
+}
+
+// resolveTreeHashes retrieves the base and modified Merkle root tree hashes for given patchsets.
+func (h *CLHandler) resolveTreeHashes(ctx context.Context, cl *db.Changelist, currentPS, basePS int) (baseTreeHash, modTreeHash []byte) {
+	if psObj, psErr := h.db.GetPatchset(ctx, cl.CLID, currentPS); psErr == nil && len(psObj.RootTreeHash) > 0 {
+		modTreeHash = psObj.RootTreeHash
+	} else {
+		modTreeHash = cl.RootTreeHash
+	}
+
+	if basePS == 0 {
+		if cl.ParentCL != nil && *cl.ParentCL > 0 {
+			if parentCL, parentErr := h.db.GetCL(ctx, *cl.ParentCL); parentErr == nil && len(parentCL.RootTreeHash) > 0 {
+				baseTreeHash = parentCL.RootTreeHash
+			}
+		}
+		if len(baseTreeHash) == 0 {
+			baseTreeHash = tree.EmptyTreeHash
+		}
+	} else {
+		if basePSObj, basePSErr := h.db.GetPatchset(ctx, cl.CLID, basePS); basePSErr == nil && len(basePSObj.RootTreeHash) > 0 {
+			baseTreeHash = basePSObj.RootTreeHash
+		} else {
+			baseTreeHash = tree.EmptyTreeHash
+		}
+	}
+	return baseTreeHash, modTreeHash
+}
+
+// resolveFileDiffDetail computes the side-by-side diff for targetFile between two trees.
+func (h *CLHandler) resolveFileDiffDetail(ctx context.Context, targetFile string, baseTreeHash, modTreeHash []byte) (*diff.FileDiffDetail, error) {
+	fetchTree := func(hash []byte) ([]tree.Entry, error) {
+		return h.db.GetTreeEntries(ctx, hash)
+	}
+
+	baseEntry, _ := tree.ResolvePath(baseTreeHash, targetFile, fetchTree)
+	modEntry, _ := tree.ResolvePath(modTreeHash, targetFile, fetchTree)
+
+	changeType := "M"
+	var baseBlobSHA, modBlobSHA []byte
+	if baseEntry == nil && modEntry != nil {
+		changeType = "A"
+		modBlobSHA = modEntry.BlobSHA256
+	} else if baseEntry != nil && modEntry == nil {
+		changeType = "D"
+		baseBlobSHA = baseEntry.BlobSHA256
+	} else if baseEntry != nil && modEntry != nil {
+		baseBlobSHA = baseEntry.BlobSHA256
+		modBlobSHA = modEntry.BlobSHA256
+	}
+
+	baseData, _ := h.readBlobBytes(baseBlobSHA)
+	modData, _ := h.readBlobBytes(modBlobSHA)
+
+	detail, err := diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
+	if err == nil && detail != nil {
+		if len(baseBlobSHA) > 0 {
+			detail.BaseBlobHex = hex.EncodeToString(baseBlobSHA)
+		}
+		if len(modBlobSHA) > 0 {
+			detail.ModBlobHex = hex.EncodeToString(modBlobSHA)
+		}
+	}
+	return detail, err
+}
+
+// getFileCommentsByLine retrieves published comments and author's drafts anchored to lines.
+func (h *CLHandler) getFileCommentsByLine(ctx context.Context, clID int64, targetFile, reviewer string) map[int][]db.Comment {
+	commentsByLine := make(map[int][]db.Comment)
+	if targetFile == "" || h.db == nil {
+		return commentsByLine
+	}
+	fileComments, err := h.db.ListComments(ctx, clID, targetFile)
+	if err == nil {
+		for _, c := range fileComments {
+			if !c.IsDraft || c.Author == reviewer {
+				anchorLine := c.EndLineNumber
+				if anchorLine <= 0 {
+					anchorLine = c.LineNumber
+				}
+				commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+			}
+		}
+	}
+	return commentsByLine
+}
+
+// populateFileDiffStats computes diff stats and reviewed flags for changed files.
+func (h *CLHandler) populateFileDiffStats(files []diff.FileDiffSummary, commentsPerFile map[string]int, reviewedMap map[string]bool) int {
+	reviewedCount := 0
+	for i := range files {
+		files[i].UnresolvedComments = commentsPerFile[files[i].Path]
+		files[i].Reviewed = reviewedMap[files[i].Path]
+		if files[i].Reviewed {
+			reviewedCount++
+		}
+		baseData, _ := h.readBlobBytes(files[i].BaseBlobSHA)
+		modData, _ := h.readBlobBytes(files[i].ModifiedBlobSHA)
+		d, err := diff.ComputeSideBySideDiff(files[i].Path, baseData, modData, files[i].Type)
+		if err == nil && d != nil {
+			files[i].Additions = d.Additions
+			files[i].Deletions = d.Deletions
+		}
+	}
+	return reviewedCount
+}
+
+// fetchIndexData queries changelists and assigned CL IDs for current user.
+func (h *CLHandler) fetchIndexData(ctx context.Context, currentUser string) ([]db.Changelist, map[int64]bool) {
+	assignedCLIDs := make(map[int64]bool)
+	if h.db == nil {
+		demoReviewersMu.RLock()
+		for clID, revs := range demoReviewersStore {
+			for _, rev := range revs {
+				if strings.EqualFold(rev.Reviewer, currentUser) || strings.EqualFold(rev.Reviewer, "@"+currentUser) {
+					assignedCLIDs[clID] = true
+				}
+			}
+		}
+		demoReviewersMu.RUnlock()
+		if len(assignedCLIDs) == 0 {
+			assignedCLIDs[2] = true
+		}
+		return []db.Changelist{
+			{
+				CLID:        1,
+				Author:      "alice@corp",
+				Description: "feat(critique): implement fast server-authoritative code review web UI and Myers diff engine",
+				Status:      "shelved",
+				CommittedAt: time.Now().Add(-2 * time.Hour),
+			},
+			{
+				CLID:        2,
+				Author:      "developer@corp",
+				Description: "cas: optimize chunk streaming and LRU tree node caching",
+				Status:      "shelved",
+				CommittedAt: time.Now().Add(-5 * time.Hour),
+			},
+			{
+				CLID:        3,
+				Author:      "agent/linter-bot",
+				Description: "fix: apply automated gofmt and lint repairs across repository",
+				Status:      "shelved",
+				CommittedAt: time.Now().Add(-1 * time.Hour),
+			},
+			{
+				CLID:        4,
+				Author:      "developer@corp",
+				Description: "resilience: add native ZFS snapshot streaming driver",
+				Status:      "submitted",
+				CommittedAt: time.Now().Add(-24 * time.Hour),
+			},
+		}, assignedCLIDs
+	}
+
+	cls, err := h.db.ListCLs(ctx, 100)
+	if err != nil {
+		log.Printf("error listing changelists: %v", err)
+	}
+
+	var userGroups []string
+	if h.groups != nil {
+		groups, _ := h.groups.GetUserGroups(ctx, currentUser)
+		userGroups = groups
+	}
+	if assigned, err := h.db.GetAssignedCLIDsForUser(ctx, currentUser, userGroups); err == nil {
+		assignedCLIDs = assigned
+	}
+	return cls, assignedCLIDs
+}
+
+// classifyInboxRows categorizes changelists into partitioned inbox queues.
+func (h *CLHandler) classifyInboxRows(allCLs []db.Changelist, currentUser string, assignedCLIDs map[int64]bool) (
+	myReviews, outgoing, agents, submitted, all []views.CLRowData, counts views.InboxCounts,
+) {
+	counts.All = len(allCLs)
+	isAgentAuthor := func(author string) bool {
+		if h.config != nil {
+			return h.config.Critique.IsAgentAuthor(author)
+		}
+		return config.MatchAgentAuthor(author, config.DefaultAgentAuthorPatterns)
+	}
+
+	for _, cl := range allCLs {
+		isAgent := isAgentAuthor(cl.Author)
+		cleanAuthor := strings.TrimSpace(cl.Author)
+		isAuthor := strings.EqualFold(cleanAuthor, currentUser) ||
+			strings.HasPrefix(strings.ToLower(cleanAuthor), strings.ToLower(currentUser)+"@")
+		isAssigned := assignedCLIDs[cl.CLID]
+
+		row := views.CLRowData{
+			Changelist: cl,
+			IsAgent:    isAgent,
+			IsReviewer: isAssigned,
+		}
+		all = append(all, row)
+
+		if cl.Status == "submitted" {
+			counts.Submitted++
+			submitted = append(submitted, row)
+		} else if isAgent {
+			counts.Agents++
+			agents = append(agents, row)
+		} else if isAuthor {
+			counts.Outgoing++
+			outgoing = append(outgoing, row)
+		} else if isAssigned || len(assignedCLIDs) == 0 {
+			counts.MyReviews++
+			myReviews = append(myReviews, row)
+		}
+	}
+	return myReviews, outgoing, agents, submitted, all, counts
+}
+
+// resolveActiveTab determines which tab to display based on parameter and counts.
+func resolveActiveTab(tab string, counts views.InboxCounts) string {
+	if tab != "" {
+		return tab
+	}
+	if counts.MyReviews > 0 {
+		return "my-reviews"
+	}
+	if counts.Outgoing > 0 {
+		return "outgoing"
+	}
+	if counts.Agents > 0 {
+		return "agents"
+	}
+	return "all"
+}
+
+// selectActiveRows returns the slice of rows corresponding to the active tab.
+func selectActiveRows(tab string, myReviews, outgoing, agents, submitted, all []views.CLRowData) []views.CLRowData {
+	switch tab {
+	case "my-reviews":
+		return myReviews
+	case "outgoing":
+		return outgoing
+	case "agents":
+		return agents
+	case "submitted":
+		return submitted
+	default:
+		return all
+	}
+}
+
+// getSubmitCLMetadata retrieves CL status, approvals count, and policies for submission.
+func (h *CLHandler) getSubmitCLMetadata(ctx context.Context, clID int64) (
+	clStatus string, needsRebase bool, approvalsCount, unresolvedCount int,
+	reqApprovals int, allowUnresolved, requireGreen bool, requiredCIRunners []string, err error,
+) {
+	if h.config != nil {
+		reqApprovals = h.config.Critique.GetRequiredApprovals()
+		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
+	}
+
+	if h.db != nil {
+		cl, clErr := h.db.GetCL(ctx, clID)
+		if clErr != nil || cl == nil {
+			return "", false, 0, 0, 0, false, false, nil, fmt.Errorf("CL %d not found", clID)
+		}
+		clStatus = cl.Status
+		needsRebase = cl.NeedsRebase
+		approvalsCount, _ = h.db.CountApprovals(ctx, clID)
+		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
+		reqApprovals, allowUnresolved, requireGreen, requiredCIRunners = h.resolveCLPolicy(ctx, cl)
+		return clStatus, needsRebase, approvalsCount, unresolvedCount, reqApprovals, allowUnresolved, requireGreen, requiredCIRunners, nil
+	}
+
+	demoCLStatusMu.RLock()
+	clStatus = demoCLStatusStore[clID]
+	if clStatus == "" {
+		clStatus = "shelved"
+	}
+	demoCLStatusMu.RUnlock()
+
+	demoApprovalsMu.RLock()
+	for _, a := range demoApprovalsStore[clID] {
+		if a.Verdict == "approved" || a.Verdict == "lgtm" {
+			approvalsCount++
+		}
+	}
+	demoApprovalsMu.RUnlock()
+
+	demoCommentsMu.RLock()
+	for _, list := range demoCommentsStore {
+		for _, c := range list {
+			if c.CLID == clID && !c.IsDraft && !c.Resolved {
+				unresolvedCount++
+			}
+		}
+	}
+	demoCommentsMu.RUnlock()
+
+	return clStatus, false, approvalsCount, unresolvedCount, reqApprovals, allowUnresolved, requireGreen, nil, nil
+}
+
+// validateSubmitBlockers checks for rebase conflicts, shelved status, and unresolved comment blockers.
+func (h *CLHandler) validateSubmitBlockers(clID int64, clStatus string, needsRebase, allowUnresolved bool, unresolvedCount int) error {
+	if clStatus != "shelved" {
+		return fmt.Errorf("CL %d cannot be submitted because its status is %q (expected 'shelved')", clID, clStatus)
+	}
+	if needsRebase {
+		return fmt.Errorf("CL %d cannot be submitted because it has pending rebase conflicts with parent CL; run 'niebla sync' in your workspace to resolve", clID)
+	}
+	if !allowUnresolved && unresolvedCount > 0 {
+		return fmt.Errorf("CL %d has %d unresolved comment thread(s); all comments must be resolved before submission", clID, unresolvedCount)
+	}
+	return nil
+}
+
+// validateSubmitApprovals checks required approvals against count, or records an override.
+func (h *CLHandler) validateSubmitApprovals(clID int64, reqApprovals, approvalsCount int, justification, reviewer string) error {
+	if reqApprovals <= 0 || approvalsCount >= reqApprovals {
+		return nil
+	}
+	if justification == "" {
+		return fmt.Errorf("CL %d requires %d approval(s) before submission (found %d)", clID, reqApprovals, approvalsCount)
+	}
+	log.Printf("CL %d: approval requirement overridden by %q with justification: %q", clID, reviewer, justification)
+	return nil
+}
+
+// checkRequiredRunners verifies that all runners required by OWNERS.toml have passed.
+func (h *CLHandler) checkRequiredRunners(ctx context.Context, clID int64, psNum int, requiredCIRunners []string) error {
+	if h.db == nil || len(requiredCIRunners) == 0 {
+		return nil
+	}
+	runs, rErr := h.db.ListCheckRunsForPatchset(ctx, clID, psNum)
+	if rErr != nil {
+		return nil
+	}
+	greenRunners := make(map[string]bool, len(runs))
+	for _, run := range runs {
+		if run.Status == "passed" || run.Status == "skipped" {
+			greenRunners[strings.ToLower(strings.TrimSpace(run.RunnerName))] = true
+		}
+	}
+	var missing []string
+	for _, reqRunner := range requiredCIRunners {
+		if !greenRunners[strings.ToLower(strings.TrimSpace(reqRunner))] {
+			missing = append(missing, reqRunner)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("CL %d requires OWNERS.toml CI runner(s) to pass before submission: %s", clID, strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// validateSubmitCI verifies CI check runs pass or records an override.
+func (h *CLHandler) validateSubmitCI(ctx context.Context, clID int64, requireGreen bool, requiredCIRunners []string, justification, reviewer string) error {
+	if !requireGreen {
+		return nil
+	}
+
+	var green bool
+	var total, pending, failed int
+	var psNum int = 1
+
+	if h.db != nil {
+		if latestPS, err := h.db.GetLatestPatchsetNumber(ctx, clID); err == nil {
+			psNum = latestPS
+			green, total, pending, failed, _ = h.db.AreCheckRunsGreen(ctx, clID, latestPS)
+		}
+	} else {
+		demoCheckRunsMu.RLock()
+		runs := demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, 1)]
+		demoCheckRunsMu.RUnlock()
+		total = len(runs)
+		for _, r := range runs {
+			switch r.Status {
+			case "queued", "running":
+				pending++
+			case "failed", "canceled", "cancelled":
+				failed++
+			}
+		}
+		green = (total > 0 && pending == 0 && failed == 0)
+	}
+
+	if !green {
+		if justification == "" {
+			if total == 0 {
+				return fmt.Errorf("CL %d requires green CI check runs before submission (found 0 check runs for patchset %d)", clID, psNum)
+			}
+			return fmt.Errorf("CL %d requires green CI check runs before submission (%d pending, %d failed out of %d total for patchset %d)", clID, pending, failed, total, psNum)
+		}
+		log.Printf("CL %d: CI green check runs requirement overridden by %q with justification: %q", clID, reviewer, justification)
+		return nil
+	}
+
+	if justification == "" {
+		return h.checkRequiredRunners(ctx, clID, psNum, requiredCIRunners)
+	}
+	return nil
+}
+
+// publishDBReview records approval verdicts, creates review comments, and publishes drafts in DB.
+func (h *CLHandler) publishDBReview(ctx context.Context, clID int64, author, overallMsg, verdict string) {
+	if _, err := h.db.PublishDraftComments(ctx, clID, author); err != nil {
+		log.Printf("error publishing drafts: %v", err)
+	}
+	if overallMsg != "" {
+		_, _ = h.db.CreateComment(ctx, clID, 1, "", 0, 0, "modified", author, overallMsg, nil, false)
+	}
+	if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
+		_ = h.db.SetApproval(ctx, clID, author, verdict)
+	}
+}
+
+// publishDemoReview records review state in memory demo stores.
+func (h *CLHandler) publishDemoReview(clID int64, author, overallMsg, verdict string) {
+	demoCommentsMu.Lock()
+	for k, list := range demoCommentsStore {
+		for i := range list {
+			if list[i].CLID == clID && list[i].Author == author && list[i].IsDraft {
+				list[i].IsDraft = false
+			}
+		}
+		demoCommentsStore[k] = list
+	}
+	if overallMsg != "" {
+		nextCommentID++
+		c := db.Comment{
+			ID:             nextCommentID,
+			CLID:           clID,
+			PatchsetNumber: 1,
+			FilePath:       "",
+			LineNumber:     0,
+			EndLineNumber:  0,
+			Side:           "modified",
+			Author:         author,
+			Body:           overallMsg,
+			Resolved:       false,
+			IsDraft:        false,
+			CreatedAt:      time.Now(),
+		}
+		key := fmt.Sprintf("%d::0:modified", clID)
+		demoCommentsStore[key] = append(demoCommentsStore[key], c)
+	}
+	demoCommentsMu.Unlock()
+
+	if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
+		demoApprovalsMu.Lock()
+		apprs := demoApprovalsStore[clID]
+		updated := false
+		for i := range apprs {
+			if strings.EqualFold(apprs[i].Reviewer, author) {
+				apprs[i].Verdict = verdict
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			apprs = append(apprs, db.Approval{CLID: clID, Reviewer: author, Verdict: verdict, UpdatedAt: time.Now()})
+		}
+		demoApprovalsStore[clID] = apprs
+		demoApprovalsMu.Unlock()
+	}
+}
+
+// formatCheckRunDuration computes a human-readable duration for a check run.
+func formatCheckRunDuration(cr db.CheckRun) string {
+	if cr.StartedAt == nil {
+		return ""
+	}
+	if cr.CompletedAt != nil {
+		return cr.CompletedAt.Sub(*cr.StartedAt).Round(time.Millisecond * 100).String()
+	}
+	return time.Since(*cr.StartedAt).Round(time.Second).String()
+}
+
+// resolveRunnerProvider determines runner provider, checking toolchain config fallback.
+func (h *CLHandler) resolveRunnerProvider(name, rawProvider string) string {
+	provider := rawProvider
+	if (provider == "" || provider == "local") && h.config != nil && h.config.CI.Runners != nil {
+		if rCfg, ok := h.config.CI.Runners[name]; ok && rCfg.Provider != "" {
+			provider = rCfg.Provider
+		}
+	}
+	if provider == "" {
+		provider = "local"
+	}
+	return provider
+}
+
+// consolidateReviewersWithApprovals merges review assignments with latest recorded verdicts.
+func consolidateReviewersWithApprovals(rawReviewers []db.ReviewerAssignment, approvals []db.Approval, clID int64) []db.ReviewerAssignment {
+	verdictMap := make(map[string]string, len(approvals))
+	for _, a := range approvals {
+		verdictMap[a.Reviewer] = a.Verdict
+	}
+	found := make(map[string]bool, len(rawReviewers)+len(approvals))
+	var list []db.ReviewerAssignment
+	for _, rev := range rawReviewers {
+		if v, ok := verdictMap[rev.Reviewer]; ok {
+			rev.Verdict = v
+		}
+		list = append(list, rev)
+		found[rev.Reviewer] = true
+	}
+	for _, a := range approvals {
+		if !found[a.Reviewer] {
+			list = append(list, db.ReviewerAssignment{
+				CLID:      clID,
+				Reviewer:  a.Reviewer,
+				Verdict:   a.Verdict,
+				UpdatedAt: a.UpdatedAt,
+			})
+		}
+	}
+	return list
+}
+
+// countApprovedVerdicts counts how many approvals have approved or lgtm verdicts.
+func countApprovedVerdicts(approvals []db.Approval) int {
+	cnt := 0
+	for _, a := range approvals {
+		if a.Verdict == "approved" || a.Verdict == "lgtm" {
+			cnt++
+		}
+	}
+	return cnt
+}
+
+// resolveDemoCLComments filters comments for a demo CL, counting unresolved threads and reviewer drafts.
+func resolveDemoCLComments(clID int64, targetFile, reviewer string) (map[int][]db.Comment, int, []db.Comment) {
+	demoCommentsMu.RLock()
+	defer demoCommentsMu.RUnlock()
+
+	commentsByLine := make(map[int][]db.Comment)
+	unresolvedCount := 0
+	var reviewerDrafts []db.Comment
+
+	for key, list := range demoCommentsStore {
+		for _, c := range list {
+			if c.CLID != clID {
+				continue
+			}
+			if c.Author == reviewer && c.IsDraft {
+				reviewerDrafts = append(reviewerDrafts, c)
+			}
+			if !c.IsDraft && !c.Resolved {
+				unresolvedCount++
+			}
+			if targetFile != "" && strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
+				if !c.IsDraft || c.Author == reviewer {
+					anchor := c.EndLineNumber
+					if anchor <= 0 {
+						anchor = c.LineNumber
+					}
+					commentsByLine[anchor] = append(commentsByLine[anchor], c)
+				}
+			}
+		}
+	}
+	return commentsByLine, unresolvedCount, reviewerDrafts
+}
+
+// mergeOwnersPolicy updates approval and CI gates according to an evaluated policy.
+func mergeOwnersPolicy(policy *owners.SubtreePolicy, reqApprovals int, allowUnresolved, requireGreen bool) (int, bool, bool) {
+	if policy == nil {
+		return reqApprovals, allowUnresolved, requireGreen
+	}
+	if policy.RequiredApprovals != nil && *policy.RequiredApprovals > reqApprovals {
+		reqApprovals = *policy.RequiredApprovals
+	}
+	if policy.AllowUnresolvedComments != nil {
+		allowUnresolved = *policy.AllowUnresolvedComments
+	}
+	if policy.RequireGreenCI != nil && *policy.RequireGreenCI {
+		requireGreen = true
+	}
+	return reqApprovals, allowUnresolved, requireGreen
+}
+
+// fetchActionsBarData loads all stats and policies needed to render the actions bar.
+func (h *CLHandler) fetchActionsBarData(ctx context.Context, clID int64, author string) (
+	clStatus string, approvals []db.Approval, reviewers []db.ReviewerAssignment,
+	approvedCount, unresolvedCount, draftCount int, reqApprovals int, allowUnresolved bool,
+) {
+	clStatus = "shelved"
+	if h.config != nil {
+		reqApprovals = h.config.Critique.GetRequiredApprovals()
+		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+	}
+
+	if h.db != nil {
+		if cl, err := h.db.GetCL(ctx, clID); err == nil && cl != nil {
+			clStatus = cl.Status
+			reqApprovals, allowUnresolved, _, _ = h.resolveCLPolicy(ctx, cl)
+		}
+		approvals, _ = h.db.ListApprovals(ctx, clID)
+		reviewers, _ = h.db.ListReviewers(ctx, clID)
+		approvedCount, _ = h.db.CountApprovals(ctx, clID)
+		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
+		drafts, _ := h.db.ListDraftComments(ctx, clID, author)
+		draftCount = len(drafts)
+		return
+	}
+
+	demoCLStatusMu.RLock()
+	if s, ok := demoCLStatusStore[clID]; ok && s != "" {
+		clStatus = s
+	}
+	demoCLStatusMu.RUnlock()
+
+	demoApprovalsMu.RLock()
+	approvals = demoApprovalsStore[clID]
+	demoApprovalsMu.RUnlock()
+	approvedCount = countApprovedVerdicts(approvals)
+
+	demoReviewersMu.RLock()
+	rawReviewers := demoReviewersStore[clID]
+	demoReviewersMu.RUnlock()
+	reviewers = consolidateReviewersWithApprovals(rawReviewers, approvals, clID)
+
+	demoCommentsMu.RLock()
+	for _, list := range demoCommentsStore {
+		for _, c := range list {
+			if c.CLID == clID {
+				if c.IsDraft && c.Author == author {
+					draftCount++
+				}
+				if !c.IsDraft && !c.Resolved {
+					unresolvedCount++
+				}
+			}
+		}
+	}
+	demoCommentsMu.RUnlock()
+	return
+}
+
+

@@ -42,6 +42,51 @@ func getEnvInt(key string, defaultVal int) int {
 	return defaultVal
 }
 
+func loadCotejoConfig(configFlag, hostFlag, dbURLFlag, blobPathFlag string, portFlag int) *config.Config {
+	var cfg *config.Config
+	var err error
+	if configFlag != "" {
+		cfg, err = config.LoadFromPath(configFlag)
+	} else {
+		cfg, err = config.Load()
+	}
+	if err != nil {
+		log.Fatalf("❌ Configuration error:\n%v", err)
+	}
+
+	if hostFlag != "" {
+		cfg.Critique.Host = hostFlag
+	}
+	if portFlag != 0 {
+		cfg.Critique.Port = portFlag
+	}
+	if dbURLFlag != "" {
+		cfg.Server.DBURL = dbURLFlag
+	}
+	if blobPathFlag != "" {
+		cfg.Server.BlobPath = blobPathFlag
+	}
+
+	if err := config.Validate(cfg); err != nil {
+		log.Fatalf("❌ Configuration validation error:\n%v", err)
+	}
+	return cfg
+}
+
+func initCASStorage(blobPath string) *cas.Storage {
+	casStorage, err := cas.NewStorage(blobPath)
+	if err != nil {
+		log.Printf("Warning: CAS storage initialization at %s returned: %v (will retry or use fallback)", blobPath, err)
+		fallbackDir := filepath.Join(os.TempDir(), "niebla_blobs")
+		casStorage, err = cas.NewStorage(fallbackDir)
+		if err != nil {
+			log.Fatalf("Failed to initialize CAS storage engine: %v", err)
+		}
+		log.Printf("Using fallback CAS directory: %s", fallbackDir)
+	}
+	return casStorage
+}
+
 func main() {
 	configFlag := flag.String("config", "", "Path to configuration file (defaults to ~/.config/niebla/config.toml)")
 	hostFlag := flag.String("host", "", "Host address for Cotejo web service (overrides config)")
@@ -52,35 +97,7 @@ func main() {
 	flag.Parse()
 
 	// 0. Load and validate unified configuration
-	var cfg *config.Config
-	var err error
-	if *configFlag != "" {
-		cfg, err = config.LoadFromPath(*configFlag)
-	} else {
-		cfg, err = config.Load()
-	}
-	if err != nil {
-		log.Fatalf("❌ Configuration error:\n%v", err)
-	}
-
-	// Apply explicit command line flag overrides if provided
-	if *hostFlag != "" {
-		cfg.Critique.Host = *hostFlag
-	}
-	if *portFlag != 0 {
-		cfg.Critique.Port = *portFlag
-	}
-	if *dbURLFlag != "" {
-		cfg.Server.DBURL = *dbURLFlag
-	}
-	if *blobPathFlag != "" {
-		cfg.Server.BlobPath = *blobPathFlag
-	}
-
-	// Fast-fail re-validation in case CLI flags introduced invalid parameters
-	if err := config.Validate(cfg); err != nil {
-		log.Fatalf("❌ Configuration validation error:\n%v", err)
-	}
+	cfg := loadCotejoConfig(*configFlag, *hostFlag, *dbURLFlag, *blobPathFlag, *portFlag)
 
 	// Resolve active theme and wire into Critique views & Chroma syntax highlighting
 	activeTheme := config.ResolveTheme(cfg.Critique.Theme)
@@ -97,16 +114,7 @@ func main() {
 	log.Printf("Assets directory    : %s", *assetsDirFlag)
 
 	// 1. Initialize CAS local blob storage engine
-	casStorage, err := cas.NewStorage(cfg.Server.BlobPath)
-	if err != nil {
-		log.Printf("Warning: CAS storage initialization at %s returned: %v (will retry or use fallback)", cfg.Server.BlobPath, err)
-		fallbackDir := filepath.Join(os.TempDir(), "niebla_blobs")
-		casStorage, err = cas.NewStorage(fallbackDir)
-		if err != nil {
-			log.Fatalf("Failed to initialize CAS storage engine: %v", err)
-		}
-		log.Printf("Using fallback CAS directory: %s", fallbackDir)
-	}
+	casStorage := initCASStorage(cfg.Server.BlobPath)
 
 	// 2. Connect to database & apply migrations (or fallback to UI Dev Mode)
 	ctx, cancel := context.WithCancel(context.Background())

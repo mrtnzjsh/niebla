@@ -219,28 +219,14 @@ func LoadBytes(data []byte) (*Config, error) {
 	return LoadMultiBytes([]NamedConfigBytes{{Name: "", Data: data}})
 }
 
-// LoadMultiBytes combines multiple named TOML configuration payloads into a unified Config.
-// It enforces that no header or subsection (e.g. [server], [critique.theme], [critique.ai])
-// is defined in more than one file.
-func LoadMultiBytes(files []NamedConfigBytes) (*Config, error) {
-	// 1. Initialize with baseline defaults
-	cfg := DefaultConfig()
-
-	// 2. Unmarshal base config to ensure any structured defaults are primed
-	if len(BaseConfigBytes) > 0 {
-		if err := toml.Unmarshal(BaseConfigBytes, cfg); err != nil {
-			return nil, fmt.Errorf("internal error decoding base configuration: %w", err)
-		}
-	}
-
-	// 3. Verify TOML syntax of each file and enforce header/subsection uniqueness across files
+func validateMultiFileSectionUniqueness(files []NamedConfigBytes) error {
 	claimedBy := make(map[string]SectionClaim)
 	var dupErrors ValidationErrors
 
 	for _, f := range files {
 		claims, err := ExtractTOMLSections(f.Name, f.Data)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, claim := range claims {
 			if prev, exists := claimedBy[claim.Section]; exists && prev.File != claim.File {
@@ -257,10 +243,12 @@ func LoadMultiBytes(files []NamedConfigBytes) (*Config, error) {
 	}
 
 	if len(dupErrors) > 0 {
-		return nil, dupErrors
+		return dupErrors
 	}
+	return nil
+}
 
-	// 4. Unmarshal each file in order into the unified Config struct
+func unmarshalConfigFiles(files []NamedConfigBytes, cfg *Config) error {
 	var aiEndpointConfigured bool
 	var aiExplicitEnabled *bool
 
@@ -269,9 +257,9 @@ func LoadMultiBytes(files []NamedConfigBytes) (*Config, error) {
 			var decodeErr *toml.DecodeError
 			if errors.As(err, &decodeErr) && f.Name != "" {
 				row, col := decodeErr.Position()
-				return nil, fmt.Errorf("configuration syntax error in %s (line %d, column %d):\n  %s\nHint: Verify TOML syntax (check for unclosed quotes, invalid types, or missing '=').", f.Name, row, col, decodeErr.Error())
+				return fmt.Errorf("configuration syntax error in %s (line %d, column %d):\n  %s\nHint: Verify TOML syntax (check for unclosed quotes, invalid types, or missing '=').", f.Name, row, col, decodeErr.Error())
 			}
-			return nil, err
+			return err
 		}
 
 		var rawProbe struct {
@@ -292,10 +280,34 @@ func LoadMultiBytes(files []NamedConfigBytes) (*Config, error) {
 		}
 	}
 
-	// If the user configured an AI endpoint in any TOML file and did not explicitly set enabled = false,
-	// enable the AI hint subsystem automatically.
 	if aiEndpointConfigured && aiExplicitEnabled == nil {
 		cfg.Critique.AI.Enabled = true
+	}
+	return nil
+}
+
+// LoadMultiBytes combines multiple named TOML configuration payloads into a unified Config.
+// It enforces that no header or subsection (e.g. [server], [critique.theme], [critique.ai])
+// is defined in more than one file.
+func LoadMultiBytes(files []NamedConfigBytes) (*Config, error) {
+	// 1. Initialize with baseline defaults
+	cfg := DefaultConfig()
+
+	// 2. Unmarshal base config to ensure any structured defaults are primed
+	if len(BaseConfigBytes) > 0 {
+		if err := toml.Unmarshal(BaseConfigBytes, cfg); err != nil {
+			return nil, fmt.Errorf("internal error decoding base configuration: %w", err)
+		}
+	}
+
+	// 3. Verify TOML syntax of each file and enforce header/subsection uniqueness across files
+	if err := validateMultiFileSectionUniqueness(files); err != nil {
+		return nil, err
+	}
+
+	// 4. Unmarshal each file in order into the unified Config struct
+	if err := unmarshalConfigFiles(files, cfg); err != nil {
+		return nil, err
 	}
 
 	// 5. Expand environment variables ($USER, $HOME, etc.)

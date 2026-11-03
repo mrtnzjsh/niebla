@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"niebla/internal/config"
@@ -19,6 +20,8 @@ import (
 	"niebla/pkg/cas"
 	"niebla/pkg/httpclient"
 )
+
+var agentCommentMu sync.Mutex
 
 // Executor runs review agent personas against a materialized changelist workspace.
 type Executor struct {
@@ -68,6 +71,130 @@ type ExecutionResult struct {
 	Error       error
 }
 
+func (e *Executor) prepareAgentCommand(execCtx context.Context, req ExecutionRequest) (*exec.Cmd, error) {
+	var cmd *exec.Cmd
+	switch req.Agent.Type {
+	case "in_tree":
+		entryPath := filepath.Join(req.WorkspaceDir, req.Agent.Entrypoint)
+		info, err := os.Stat(entryPath)
+		if err != nil {
+			return nil, fmt.Errorf("in_tree entrypoint %s not found: %w", req.Agent.Entrypoint, err)
+		}
+		if info.Mode().Perm()&0111 == 0 {
+			_ = os.Chmod(entryPath, 0755)
+		}
+		cmd = exec.CommandContext(execCtx, entryPath, req.Agent.Args...)
+
+	case "cas_binary":
+		binaryPath, err := e.ensureCASBinary(req.Agent.CasSHA256)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare CAS binary %s: %w", req.Agent.CasSHA256, err)
+		}
+		cmd = exec.CommandContext(execCtx, binaryPath, req.Agent.Args...)
+
+	case "exec":
+		cmd = exec.CommandContext(execCtx, "sh", "-c", req.Agent.Command)
+
+	default:
+		if req.Agent.Command != "" {
+			cmd = exec.CommandContext(execCtx, "sh", "-c", req.Agent.Command)
+		} else {
+			return nil, fmt.Errorf("unsupported agent type %q without command", req.Agent.Type)
+		}
+	}
+
+	cmd.Dir = req.WorkspaceDir
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("NIEBLA_CL_ID=%d", req.CLID),
+		fmt.Sprintf("NIEBLA_PATCHSET=%d", req.Patchset),
+		fmt.Sprintf("NIEBLA_WORKSPACE=%s", req.WorkspaceDir),
+		fmt.Sprintf("NIEBLA_TOUCHED_FILES=%s", strings.Join(req.TouchedFiles, ",")),
+	)
+	return cmd, nil
+}
+
+func (e *Executor) saveExecutionLogs(execCtx context.Context, req ExecutionRequest, output []byte) []byte {
+	if !req.Agent.CaptureLogs || len(output) == 0 || e.casStorage == nil {
+		return nil
+	}
+	hashBytes, _, size, storagePath, pErr := e.casStorage.Put(bytes.NewReader(output))
+	if pErr == nil {
+		_ = e.db.InsertBlob(execCtx, hashBytes, size, storagePath)
+		return hashBytes
+	}
+	return nil
+}
+
+func (e *Executor) postSingleDiagnostic(execCtx context.Context, req ExecutionRequest, diag agents.DiagnosticComment, displayName, logURL string, hasStructuredReport bool) {
+	agentCommentMu.Lock()
+	defer agentCommentMu.Unlock()
+
+	if existing, lErr := e.db.ListComments(execCtx, req.CLID, diag.Path); lErr == nil {
+		for _, ec := range existing {
+			if ec.PatchsetNumber == req.Patchset && ec.LineNumber == diag.LineStart && strings.EqualFold(ec.Author, req.Agent.Name) {
+				return
+			}
+		}
+	}
+
+	var body string
+	if hasStructuredReport && diag.SuggestionCode != "" {
+		body = fmt.Sprintf("🤖 **%s** (%s):\n%s", displayName, strings.ToUpper(diag.Severity), diag.Message)
+	} else {
+		body = fmt.Sprintf("⚠️ **%s** (%s):\n```\n%s\n```", displayName, strings.ToUpper(diag.Severity), diag.Message)
+	}
+	if logURL != "" {
+		body += fmt.Sprintf("\n\n[View Full Build Log](%s)", logURL)
+	}
+
+	if strings.TrimSpace(diag.SuggestionCode) != "" {
+		_, _ = e.db.CreateCommentWithSuggestion(
+			execCtx,
+			req.CLID,
+			req.Patchset,
+			diag.Path,
+			diag.LineStart,
+			diag.LineEnd,
+			"modified",
+			req.Agent.Name,
+			body,
+			nil,
+			false,
+			diag.SuggestionStartLine,
+			diag.SuggestionEndLine,
+			diag.SuggestionCode,
+		)
+	} else {
+		_, _ = e.db.CreateComment(
+			execCtx,
+			req.CLID,
+			req.Patchset,
+			diag.Path,
+			diag.LineStart,
+			diag.LineEnd,
+			"modified",
+			req.Agent.Name,
+			body,
+			nil,
+			false,
+		)
+	}
+}
+
+func (e *Executor) postInlineDiagnostics(execCtx context.Context, req ExecutionRequest, report *agents.AgentReviewReport, diags []agents.DiagnosticComment, logURL string, passed bool) {
+	shouldPost := (req.Agent.PostInlineDiagnostics || report != nil) && len(diags) > 0 && (!passed || report != nil)
+	if !shouldPost {
+		return
+	}
+	displayName := req.Agent.DisplayName
+	if displayName == "" {
+		displayName = req.Agent.Name
+	}
+	for _, diag := range diags {
+		e.postSingleDiagnostic(execCtx, req, diag, displayName, logURL, report != nil)
+	}
+}
+
 // Execute runs the agent, uploads logs to CAS, creates comments, and records approvals.
 func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*ExecutionResult, error) {
 	timeout := 60 * time.Second
@@ -81,7 +208,6 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 		req.Patchset = 1
 	}
 
-	// 1. Mark check run as running in PostgreSQL
 	_, _ = e.db.UpsertCheckRun(execCtx, db.CheckRun{
 		CLID:           req.CLID,
 		PatchsetNumber: req.Patchset,
@@ -90,7 +216,6 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 		Status:         "running",
 	})
 
-	// 2. Execute agent (either built-in AI persona or external process)
 	var output []byte
 	var runErr error
 	var passed bool
@@ -104,58 +229,19 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 				Provider:       "agent",
 				Status:         "skipped",
 			})
-			return &ExecutionResult{
-				Passed:  true,
-				Skipped: true,
-			}, nil
+			return &ExecutionResult{Passed: true, Skipped: true}, nil
 		}
 		output, runErr = e.executeAIPersona(execCtx, req)
 		passed = (runErr == nil)
 	} else {
-		var cmd *exec.Cmd
-		switch req.Agent.Type {
-		case "in_tree":
-			entryPath := filepath.Join(req.WorkspaceDir, req.Agent.Entrypoint)
-			info, err := os.Stat(entryPath)
-			if err != nil {
-				return nil, fmt.Errorf("in_tree entrypoint %s not found: %w", req.Agent.Entrypoint, err)
-			}
-			if info.Mode().Perm()&0111 == 0 {
-				_ = os.Chmod(entryPath, 0755)
-			}
-			cmd = exec.CommandContext(execCtx, entryPath, req.Agent.Args...)
-
-		case "cas_binary":
-			binaryPath, err := e.ensureCASBinary(req.Agent.CasSHA256)
-			if err != nil {
-				return nil, fmt.Errorf("failed to prepare CAS binary %s: %w", req.Agent.CasSHA256, err)
-			}
-			cmd = exec.CommandContext(execCtx, binaryPath, req.Agent.Args...)
-
-		case "exec":
-			cmd = exec.CommandContext(execCtx, "sh", "-c", req.Agent.Command)
-
-		default:
-			if req.Agent.Command != "" {
-				cmd = exec.CommandContext(execCtx, "sh", "-c", req.Agent.Command)
-			} else {
-				return nil, fmt.Errorf("unsupported agent type %q without command", req.Agent.Type)
-			}
+		cmd, prepErr := e.prepareAgentCommand(execCtx, req)
+		if prepErr != nil {
+			return nil, prepErr
 		}
-
-		cmd.Dir = req.WorkspaceDir
-		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("NIEBLA_CL_ID=%d", req.CLID),
-			fmt.Sprintf("NIEBLA_PATCHSET=%d", req.Patchset),
-			fmt.Sprintf("NIEBLA_WORKSPACE=%s", req.WorkspaceDir),
-			fmt.Sprintf("NIEBLA_TOUCHED_FILES=%s", strings.Join(req.TouchedFiles, ",")),
-		)
-
 		output, runErr = cmd.CombinedOutput()
 		passed = (runErr == nil)
 	}
 
-	// Parse output for structured JSON report OR compiler diagnostic lines
 	report, diags := agents.ParseReviewOutput(string(output))
 	if report != nil {
 		switch strings.ToLower(strings.TrimSpace(report.Verdict)) {
@@ -168,26 +254,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 		}
 	}
 
-	res := &ExecutionResult{
-		Passed:      passed,
-		Report:      report,
-		Diagnostics: diags,
-		Output:      output,
-		Error:       runErr,
-	}
-
-	// 4. Ingest logs into CAS if enabled
-	var logSHA []byte
-	if req.Agent.CaptureLogs && len(output) > 0 && e.casStorage != nil {
-		hashBytes, _, size, storagePath, pErr := e.casStorage.Put(bytes.NewReader(output))
-		if pErr == nil {
-			logSHA = hashBytes
-			_ = e.db.InsertBlob(execCtx, hashBytes, size, storagePath)
-			res.LogBlobSHA = hashBytes
-		}
-	}
-
-	// 5. Update check run terminal state
+	logSHA := e.saveExecutionLogs(execCtx, req, output)
 	runStatus := "passed"
 	if !passed {
 		runStatus = "failed"
@@ -207,82 +274,22 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 		LogBlobSHA256:  logSHA,
 	})
 
-	// 6. Post inline diagnostics / structured suggestions to Cotejo
-	shouldPostComments := (req.Agent.PostInlineDiagnostics || report != nil) && len(diags) > 0 && (!passed || report != nil)
-	if shouldPostComments {
-		displayName := req.Agent.DisplayName
-		if displayName == "" {
-			displayName = req.Agent.Name
-		}
+	e.postInlineDiagnostics(execCtx, req, report, diags, logURL, passed)
 
-		for _, diag := range diags {
-			// Avoid posting duplicate comments if the same agent runs more than once on the same patchset
-			if existing, lErr := e.db.ListComments(execCtx, req.CLID, diag.Path); lErr == nil {
-				alreadyPosted := false
-				for _, ec := range existing {
-					if ec.PatchsetNumber == req.Patchset && ec.LineNumber == diag.LineStart && strings.EqualFold(ec.Author, req.Agent.Name) {
-						alreadyPosted = true
-						break
-					}
-				}
-				if alreadyPosted {
-					continue
-				}
-			}
-
-			var body string
-			if report != nil && diag.SuggestionCode != "" {
-				body = fmt.Sprintf("🤖 **%s** (%s):\n%s", displayName, strings.ToUpper(diag.Severity), diag.Message)
-			} else {
-				body = fmt.Sprintf("⚠️ **%s** (%s):\n```\n%s\n```", displayName, strings.ToUpper(diag.Severity), diag.Message)
-			}
-			if logURL != "" {
-				body += fmt.Sprintf("\n\n[View Full Build Log](%s)", logURL)
-			}
-
-			if strings.TrimSpace(diag.SuggestionCode) != "" {
-				_, _ = e.db.CreateCommentWithSuggestion(
-					execCtx,
-					req.CLID,
-					req.Patchset,
-					diag.Path,
-					diag.LineStart,
-					diag.LineEnd,
-					"modified",
-					req.Agent.Name,
-					body,
-					nil,
-					false, // published immediately
-					diag.SuggestionStartLine,
-					diag.SuggestionEndLine,
-					diag.SuggestionCode,
-				)
-			} else {
-				_, _ = e.db.CreateComment(
-					execCtx,
-					req.CLID,
-					req.Patchset,
-					diag.Path,
-					diag.LineStart,
-					diag.LineEnd,
-					"modified",
-					req.Agent.Name,
-					body,
-					nil,
-					false, // published immediately
-				)
-			}
-		}
-	}
-
-	// 7. Cast approval verdict
 	if passed && req.Agent.AutoApprove {
 		_ = e.db.SetApproval(execCtx, req.CLID, req.Agent.Name, "lgtm")
 	} else if !passed {
 		_ = e.db.SetApproval(execCtx, req.CLID, req.Agent.Name, "changes_requested")
 	}
 
-	return res, nil
+	return &ExecutionResult{
+		Passed:      passed,
+		Report:      report,
+		Diagnostics: diags,
+		Output:      output,
+		Error:       runErr,
+		LogBlobSHA:  logSHA,
+	}, nil
 }
 
 // DefaultAIReviewSystemPrompt instructs an AI review persona to emit an AgentReviewReport JSON.
@@ -306,28 +313,11 @@ Review the provided files and return ONLY a valid JSON object matching this sche
 }
 If no issues are found, return {"verdict": "lgtm", "summary": "No issues detected.", "comments": []}.`
 
-func (e *Executor) executeAIPersona(ctx context.Context, req ExecutionRequest) ([]byte, error) {
-	aiClient, err := ai.NewClient(ai.Config{
-		Endpoint:       e.aiConfig.Endpoint,
-		APIKey:         e.aiConfig.APIKey,
-		APIKeyEnv:      e.aiConfig.APIKeyEnv,
-		Model:          e.aiConfig.Model,
-		TimeoutSeconds: e.aiConfig.TimeoutSeconds,
-		Temperature:    e.aiConfig.Temperature,
-		TLS: httpclient.TLSOptions{
-			Enabled:    e.aiConfig.TLS.Enabled,
-			CAFile:     e.aiConfig.TLS.CAFile,
-			ServerName: e.aiConfig.TLS.ServerName,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
+func resolveAIPersonaSystemPrompt(req ExecutionRequest, fallbackPromptPath string) string {
 	sysPrompt := DefaultAIReviewSystemPrompt
 	promptPath := strings.TrimSpace(req.Agent.PromptFile)
 	if promptPath == "" {
-		promptPath = strings.TrimSpace(e.aiConfig.SystemPromptPath)
+		promptPath = strings.TrimSpace(fallbackPromptPath)
 	}
 	if promptPath != "" {
 		fullPromptPath := promptPath
@@ -338,7 +328,10 @@ func (e *Executor) executeAIPersona(ctx context.Context, req ExecutionRequest) (
 			sysPrompt = string(data) + "\n\n" + DefaultAIReviewSystemPrompt
 		}
 	}
+	return sysPrompt
+}
 
+func collectReviewFiles(req ExecutionRequest) []string {
 	filesToReview := req.TouchedFiles
 	if len(filesToReview) == 0 && req.WorkspaceDir != "" {
 		_ = filepath.WalkDir(req.WorkspaceDir, func(p string, d os.DirEntry, walkErr error) error {
@@ -352,7 +345,10 @@ func (e *Executor) executeAIPersona(ctx context.Context, req ExecutionRequest) (
 			return nil
 		})
 	}
+	return filesToReview
+}
 
+func (e *Executor) formatUserReviewPrompt(req ExecutionRequest, filesToReview []string) string {
 	maxLines := e.aiConfig.MaxContextLines
 	if maxLines <= 0 {
 		maxLines = 1200
@@ -378,8 +374,32 @@ func (e *Executor) executeAIPersona(ctx context.Context, req ExecutionRequest) (
 		}
 		userPrompt.WriteString("\n")
 	}
+	return userPrompt.String()
+}
 
-	respJSON, err := aiClient.CompletePrompt(ctx, sysPrompt, userPrompt.String())
+func (e *Executor) executeAIPersona(ctx context.Context, req ExecutionRequest) ([]byte, error) {
+	aiClient, err := ai.NewClient(ai.Config{
+		Endpoint:       e.aiConfig.Endpoint,
+		APIKey:         e.aiConfig.APIKey,
+		APIKeyEnv:      e.aiConfig.APIKeyEnv,
+		Model:          e.aiConfig.Model,
+		TimeoutSeconds: e.aiConfig.TimeoutSeconds,
+		Temperature:    e.aiConfig.Temperature,
+		TLS: httpclient.TLSOptions{
+			Enabled:    e.aiConfig.TLS.Enabled,
+			CAFile:     e.aiConfig.TLS.CAFile,
+			ServerName: e.aiConfig.TLS.ServerName,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sysPrompt := resolveAIPersonaSystemPrompt(req, e.aiConfig.SystemPromptPath)
+	filesToReview := collectReviewFiles(req)
+	userPrompt := e.formatUserReviewPrompt(req, filesToReview)
+
+	respJSON, err := aiClient.CompletePrompt(ctx, sysPrompt, userPrompt)
 	if err != nil {
 		return []byte(err.Error()), err
 	}

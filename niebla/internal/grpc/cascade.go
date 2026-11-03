@@ -230,21 +230,7 @@ func (s *Server) SyncThrough(ctx context.Context, childCLID int64) error {
 		return nil
 	}
 
-	// Determine parent base tree when child was created/rebased
-	var oldParentTree []byte
-	if child.BasePatchsetNumber > 0 {
-		if pps, err := s.db.GetPatchset(ctx, parentCLID, child.BasePatchsetNumber); err == nil && pps != nil {
-			oldParentTree = pps.RootTreeHash
-		}
-	}
-	if len(oldParentTree) == 0 {
-		if pps, err := s.db.GetPatchset(ctx, parentCLID, 1); err == nil && pps != nil {
-			oldParentTree = pps.RootTreeHash
-		} else {
-			oldParentTree = parent.RootTreeHash
-		}
-	}
-
+	oldParentTree := resolveChildOldParentTree(ctx, s.db, child, parent, parentCLID)
 	newParentTree := parent.RootTreeHash
 	if bytes.Equal(oldParentTree, newParentTree) {
 		return nil

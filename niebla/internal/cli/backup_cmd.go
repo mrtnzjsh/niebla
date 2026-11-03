@@ -485,6 +485,135 @@ func newBackupVerifyCmd(rootFlags *RootFlags) *cobra.Command {
 // backup restore
 // -----------------------------------------------------------------------------
 
+func restoreZFSSnapshot(ctx context.Context, cmd *cobra.Command, cfg *config.Config, backupName string, dryRun bool) error {
+	dataset := cfg.Resilience.ZFS.LocalDataset
+	mgr := zfs.NewSnapshotManager()
+
+	snapFull := backupName
+	if !strings.Contains(backupName, "@") {
+		snapFull = fmt.Sprintf("%s@%s", dataset, backupName)
+	}
+
+	if dryRun {
+		fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Validating rollback to ZFS snapshot %s...\n", snapFull)
+		snaps, err := mgr.ListSnapshots(ctx, dataset)
+		if err != nil {
+			return fmt.Errorf("failed to query snapshots: %w", err)
+		}
+		found := false
+		for _, s := range snaps {
+			if s.Name == snapFull || strings.HasSuffix(s.Name, backupName) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("snapshot %q not found on dataset %s", backupName, dataset)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Snapshot found. Ready to roll back.\n")
+		return nil
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Rolling back dataset %s to snapshot %s...\n", dataset, snapFull)
+	if err := mgr.Rollback(ctx, snapFull); err != nil {
+		return fmt.Errorf("rollback failed: %w", err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "✓ Dataset successfully restored to snapshot %s\n", snapFull)
+	return nil
+}
+
+func writeUnpackedBackup(destDir string, res *bundle.UnpackResult) error {
+	if len(res.DBDump) > 0 {
+		dumpPath := filepath.Join(destDir, "database.dump")
+		if err := os.WriteFile(dumpPath, res.DBDump, 0640); err != nil {
+			return fmt.Errorf("failed to write database dump: %w", err)
+		}
+	}
+
+	blobDir := filepath.Join(destDir, "blobs")
+	if len(res.Blobs) > 0 {
+		if err := os.MkdirAll(blobDir, 0755); err != nil {
+			return fmt.Errorf("failed to create blob directory: %w", err)
+		}
+		for name, data := range res.Blobs {
+			bPath := filepath.Join(blobDir, filepath.Clean(name))
+			_ = os.MkdirAll(filepath.Dir(bPath), 0755)
+			if err := os.WriteFile(bPath, data, 0644); err != nil {
+				return fmt.Errorf("failed to write blob %s: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func restoreEncryptedBundle(
+	ctx context.Context,
+	cmd *cobra.Command,
+	cfg *config.Config,
+	backupName, target, destDir, customDir string,
+	dryRun bool,
+) error {
+	var r io.ReadCloser
+	if _, statErr := os.Stat(backupName); statErr == nil {
+		f, err := os.Open(backupName)
+		if err != nil {
+			return err
+		}
+		r = f
+	} else {
+		driver, err := resolveDriver(cfg, target, customDir)
+		if err != nil {
+			return err
+		}
+		r, err = driver.Download(ctx, backupName)
+		if err != nil {
+			return fmt.Errorf("failed to fetch %s from %s: %w", backupName, driver.Name(), err)
+		}
+	}
+	defer r.Close()
+
+	masterKey, _, err := resolveMasterKey(cfg)
+	if err != nil {
+		return err
+	}
+	defer crypto.WipeKey(masterKey)
+
+	if dryRun {
+		fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Verifying archive integrity and decrypting headers for %s...\n", backupName)
+		_, manifest, err := bundle.VerifyHeader(r, masterKey)
+		if err != nil {
+			return fmt.Errorf("[DRY-RUN] Decryption / header verification failed: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] ✓ Cryptographic integrity verified! Archive can be decrypted safely.\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Backup ID: %s, Database: %s, Blobs: %d\n",
+			manifest.BackupID, manifest.DatabaseName, manifest.BlobCount)
+		return nil
+	}
+
+	if destDir == "" {
+		destDir = "./restore-" + time.Now().UTC().Format("20060102-150405")
+	}
+
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Decrypting and unpacking backup %s into %s...\n", backupName, destDir)
+	res, err := bundle.Unpack(ctx, r, masterKey)
+	if err != nil {
+		return fmt.Errorf("unpack failed: %w", err)
+	}
+
+	if err := writeUnpackedBackup(destDir, res); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "✓ Successfully restored backup %s\n", res.Manifest.BackupID)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Output Directory: %s\n", destDir)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Blobs Extracted:  %d\n", len(res.Blobs))
+	return nil
+}
+
 func newBackupRestoreCmd(rootFlags *RootFlags) *cobra.Command {
 	var target string
 	var destDir string
@@ -509,119 +638,10 @@ func newBackupRestoreCmd(rootFlags *RootFlags) *cobra.Command {
 
 			t := strings.ToLower(strings.TrimSpace(target))
 			if t == "zfs" || strings.Contains(backupName, "@") {
-				dataset := cfg.Resilience.ZFS.LocalDataset
-				mgr := zfs.NewSnapshotManager()
-
-				snapFull := backupName
-				if !strings.Contains(backupName, "@") {
-					snapFull = fmt.Sprintf("%s@%s", dataset, backupName)
-				}
-
-				if dryRun {
-					fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Validating rollback to ZFS snapshot %s...\n", snapFull)
-					snaps, err := mgr.ListSnapshots(ctx, dataset)
-					if err != nil {
-						return fmt.Errorf("failed to query snapshots: %w", err)
-					}
-					found := false
-					for _, s := range snaps {
-						if s.Name == snapFull || strings.HasSuffix(s.Name, backupName) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						return fmt.Errorf("snapshot %q not found on dataset %s", backupName, dataset)
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Snapshot found. Ready to roll back.\n")
-					return nil
-				}
-
-				fmt.Fprintf(cmd.OutOrStdout(), "Rolling back dataset %s to snapshot %s...\n", dataset, snapFull)
-				if err := mgr.Rollback(ctx, snapFull); err != nil {
-					return fmt.Errorf("rollback failed: %w", err)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "✓ Dataset successfully restored to snapshot %s\n", snapFull)
-				return nil
+				return restoreZFSSnapshot(ctx, cmd, cfg, backupName, dryRun)
 			}
 
-			// Bundle restore
-			var r io.ReadCloser
-			if _, statErr := os.Stat(backupName); statErr == nil {
-				f, err := os.Open(backupName)
-				if err != nil {
-					return err
-				}
-				r = f
-			} else {
-				driver, err := resolveDriver(cfg, target, customDir)
-				if err != nil {
-					return err
-				}
-				r, err = driver.Download(ctx, backupName)
-				if err != nil {
-					return fmt.Errorf("failed to fetch %s from %s: %w", backupName, driver.Name(), err)
-				}
-			}
-			defer r.Close()
-
-			masterKey, _, err := resolveMasterKey(cfg)
-			if err != nil {
-				return err
-			}
-			defer crypto.WipeKey(masterKey)
-
-			if dryRun {
-				fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Verifying archive integrity and decrypting headers for %s...\n", backupName)
-				_, manifest, err := bundle.VerifyHeader(r, masterKey)
-				if err != nil {
-					return fmt.Errorf("[DRY-RUN] Decryption / header verification failed: %w", err)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] ✓ Cryptographic integrity verified! Archive can be decrypted safely.\n")
-				fmt.Fprintf(cmd.OutOrStdout(), "[DRY-RUN] Backup ID: %s, Database: %s, Blobs: %d\n",
-					manifest.BackupID, manifest.DatabaseName, manifest.BlobCount)
-				return nil
-			}
-
-			if destDir == "" {
-				destDir = "./restore-" + time.Now().UTC().Format("20060102-150405")
-			}
-
-			if err := os.MkdirAll(destDir, 0755); err != nil {
-				return fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Decrypting and unpacking backup %s into %s...\n", backupName, destDir)
-			res, err := bundle.Unpack(ctx, r, masterKey)
-			if err != nil {
-				return fmt.Errorf("unpack failed: %w", err)
-			}
-
-			if len(res.DBDump) > 0 {
-				dumpPath := filepath.Join(destDir, "database.dump")
-				if err := os.WriteFile(dumpPath, res.DBDump, 0640); err != nil {
-					return fmt.Errorf("failed to write database dump: %w", err)
-				}
-			}
-
-			blobDir := filepath.Join(destDir, "blobs")
-			if len(res.Blobs) > 0 {
-				if err := os.MkdirAll(blobDir, 0755); err != nil {
-					return fmt.Errorf("failed to create blob directory: %w", err)
-				}
-				for name, data := range res.Blobs {
-					bPath := filepath.Join(blobDir, filepath.Clean(name))
-					_ = os.MkdirAll(filepath.Dir(bPath), 0755)
-					if err := os.WriteFile(bPath, data, 0644); err != nil {
-						return fmt.Errorf("failed to write blob %s: %w", name, err)
-					}
-				}
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "✓ Successfully restored backup %s\n", res.Manifest.BackupID)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Output Directory: %s\n", destDir)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Blobs Extracted:  %d\n", len(res.Blobs))
-			return nil
+			return restoreEncryptedBundle(ctx, cmd, cfg, backupName, target, destDir, customDir, dryRun)
 		},
 	}
 

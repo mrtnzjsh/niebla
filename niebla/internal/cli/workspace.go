@@ -40,6 +40,167 @@ func NewWorkspaceCmd(rootFlags *RootFlags) *cobra.Command {
 	return wsCmd
 }
 
+func resolveWorkspaceMountDir(mountDir, name string) (string, error) {
+	resolved := mountDir
+	if resolved == "" {
+		defaultRoot := "/niebla/workspaces"
+		if err := os.MkdirAll(defaultRoot, 0755); err == nil {
+			resolved = filepath.Join(defaultRoot, name)
+		} else {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("failed to get user home directory: %w", err)
+			}
+			resolved = filepath.Join(home, "niebla", name)
+		}
+	}
+	var err error
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve absolute mount path: %w", err)
+	}
+
+	if err := os.MkdirAll(resolved, 0755); err != nil {
+		return "", fmt.Errorf("failed to create mount directory %s: %w", resolved, err)
+	}
+	return resolved, nil
+}
+
+func setupWorkspaceFS(
+	ctx context.Context,
+	cmd *cobra.Command,
+	noFuse bool,
+	name, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr string,
+	client nieblav1.NieblaServiceClient,
+	rootTreeHash []byte,
+) (daemonPID int, socketPath string, finalScratchDir string, err error) {
+	if noFuse {
+		finalScratchDir = resolvedMountDir
+		fetchTree := makeTreeFetcher(ctx, client)
+		fetchBlob := makeBlobFetcher(client, append([]string{cacheDir}, defaultBlobCacheDirs()...))
+		if _, err := materialize.MaterializeTree(ctx, rootTreeHash, resolvedMountDir, fetchTree, fetchBlob, materialize.Options{}); err != nil {
+			return 0, "", "", fmt.Errorf("failed to materialize workspace %q in --no-fuse mode: %w", name, err)
+		}
+		return 0, "", finalScratchDir, nil
+	}
+
+	checkDevFuse()
+	socketPath = filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
+	nieblafsBin, err := findNieblafsBinary()
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: nieblafs binary not found in PATH or next to niebla; FUSE daemon not started.\n")
+	} else {
+		pid, err := spawnNieblafs(nieblafsBin, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr, socketPath)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to spawn nieblafs daemon: %v\n", err)
+		} else {
+			daemonPID = pid
+		}
+	}
+	return daemonPID, socketPath, scratchDir, nil
+}
+
+func executeWorkspaceCreate(
+	cmd *cobra.Command,
+	rootFlags *RootFlags,
+	name string,
+	baseCL int64,
+	mountDir string,
+	noFuse bool,
+) error {
+	serverAddr := ResolveServerAddr(rootFlags.Server)
+
+	mgr, err := config.NewManager(rootFlags.ConfigDir)
+	if err != nil {
+		return err
+	}
+
+	if _, err := mgr.Load(name); err == nil {
+		return fmt.Errorf("workspace %q already exists locally in %s", name, mgr.ConfigFilePath(name))
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+
+	conn, client, err := DialGRPC(ctx, serverAddr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	owner := getCurrentUsername()
+	resp, err := client.CreateWorkspace(ctx, &nieblav1.CreateWorkspaceRequest{
+		Name:   name,
+		Owner:  owner,
+		BaseCl: baseCL,
+	})
+	if err != nil {
+		return fmt.Errorf("server failed to create workspace %q: %w", name, err)
+	}
+
+	rootTreeHashHex := hex.EncodeToString(resp.RootTreeHash)
+
+	scratchDir, cacheDir, err := provisionWorkspaceDirs(name)
+	if err != nil {
+		return fmt.Errorf("failed to provision workspace directories: %w", err)
+	}
+
+	resolvedMountDir, err := resolveWorkspaceMountDir(mountDir, name)
+	if err != nil {
+		return err
+	}
+
+	daemonPID, socketPath, finalScratchDir, err := setupWorkspaceFS(
+		ctx, cmd, noFuse, name, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr, client, resp.RootTreeHash,
+	)
+	if err != nil {
+		return err
+	}
+
+	wsConfig := &config.WorkspaceConfig{
+		WorkspaceID:  resp.WorkspaceId,
+		Name:         name,
+		BaseCL:       resp.BaseCl,
+		RootTreeHash: rootTreeHashHex,
+		MountDir:     resolvedMountDir,
+		ScratchDir:   finalScratchDir,
+		PID:          daemonPID,
+		NoFuse:       noFuse,
+		SocketPath:   socketPath,
+	}
+
+	if err := mgr.Save(wsConfig); err != nil {
+		return fmt.Errorf("failed to write workspace metadata: %w", err)
+	}
+
+	if daemonPID > 0 {
+		pollMountActive(cmd.OutOrStdout(), daemonPID, resolvedMountDir, socketPath, finalScratchDir)
+	}
+
+	go func() {
+		if hubDir, err := skills.EnsureHub(""); err == nil {
+			_, _ = skills.SyncSpokes(hubDir, false, "")
+		}
+	}()
+
+	if rootFlags.JSON {
+		return writeJSON(cmd.OutOrStdout(), wsConfig)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q created successfully.\n", name)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Base CL   : %d\n", resp.BaseCl)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Tree Hash : %s\n", rootTreeHashHex)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Mount Dir : %s\n", resolvedMountDir)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Scratch   : %s\n", finalScratchDir)
+	if noFuse {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Mode      : NO-FUSE (direct materialization)\n")
+	} else if daemonPID > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Daemon PID: %d\n", daemonPID)
+	}
+
+	return nil
+}
+
 func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 	var baseCL int64
 	var mountDir string
@@ -50,144 +211,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 		Short: "Create and mount a new Niebla virtual workspace",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			serverAddr := ResolveServerAddr(rootFlags.Server)
-
-			mgr, err := config.NewManager(rootFlags.ConfigDir)
-			if err != nil {
-				return err
-			}
-
-			// Check if already exists locally
-			if _, err := mgr.Load(name); err == nil {
-				return fmt.Errorf("workspace %q already exists locally in %s", name, mgr.ConfigFilePath(name))
-			}
-
-			// 1. Call niebla-server CreateWorkspace
-			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-			defer cancel()
-
-			conn, client, err := DialGRPC(ctx, serverAddr)
-			if err != nil {
-				return err
-			}
-			defer conn.Close()
-
-			owner := getCurrentUsername()
-			resp, err := client.CreateWorkspace(ctx, &nieblav1.CreateWorkspaceRequest{
-				Name:   name,
-				Owner:  owner,
-				BaseCl: baseCL,
-			})
-			if err != nil {
-				return fmt.Errorf("server failed to create workspace %q: %w", name, err)
-			}
-
-			rootTreeHashHex := hex.EncodeToString(resp.RootTreeHash)
-
-			// 2. Provision scratch, cache, and mount directories
-			scratchDir, cacheDir, err := provisionWorkspaceDirs(name)
-			if err != nil {
-				return fmt.Errorf("failed to provision workspace directories: %w", err)
-			}
-
-			resolvedMountDir := mountDir
-			if resolvedMountDir == "" {
-				defaultRoot := "/niebla/workspaces"
-				if err := os.MkdirAll(defaultRoot, 0755); err == nil {
-					resolvedMountDir = filepath.Join(defaultRoot, name)
-				} else {
-					home, err := os.UserHomeDir()
-					if err != nil {
-						return fmt.Errorf("failed to get user home directory: %w", err)
-					}
-					resolvedMountDir = filepath.Join(home, "niebla", name)
-				}
-			}
-			resolvedMountDir, err = filepath.Abs(resolvedMountDir)
-			if err != nil {
-				return fmt.Errorf("failed to resolve absolute mount path: %w", err)
-			}
-
-			if err := os.MkdirAll(resolvedMountDir, 0755); err != nil {
-				return fmt.Errorf("failed to create mount directory %s: %w", resolvedMountDir, err)
-			}
-
-			var daemonPID int
-			var socketPath string
-			if noFuse {
-				// Direct FUSE-less materialization into resolvedMountDir
-				scratchDir = resolvedMountDir
-				fetchTree := makeTreeFetcher(ctx, client)
-				fetchBlob := makeBlobFetcher(client, append([]string{cacheDir}, defaultBlobCacheDirs()...))
-				if _, err := materialize.MaterializeTree(ctx, resp.RootTreeHash, resolvedMountDir, fetchTree, fetchBlob, materialize.Options{}); err != nil {
-					return fmt.Errorf("failed to materialize workspace %q in --no-fuse mode: %w", name, err)
-				}
-			} else {
-				// Check /dev/fuse accessibility
-				checkDevFuse()
-
-				socketPath = filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
-
-				// 3. Spawn nieblafs daemon in background
-				nieblafsBin, err := findNieblafsBinary()
-				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: nieblafs binary not found in PATH or next to niebla; FUSE daemon not started.\n")
-				} else {
-					pid, err := spawnNieblafs(nieblafsBin, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr, socketPath)
-					if err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to spawn nieblafs daemon: %v\n", err)
-					} else {
-						daemonPID = pid
-					}
-				}
-			}
-
-			// 4. Save metadata
-			wsConfig := &config.WorkspaceConfig{
-				WorkspaceID:  resp.WorkspaceId,
-				Name:         name,
-				BaseCL:       resp.BaseCl,
-				RootTreeHash: rootTreeHashHex,
-				MountDir:     resolvedMountDir,
-				ScratchDir:   scratchDir,
-				PID:          daemonPID,
-				NoFuse:       noFuse,
-				SocketPath:   socketPath,
-			}
-
-			if err := mgr.Save(wsConfig); err != nil {
-				return fmt.Errorf("failed to write workspace metadata: %w", err)
-			}
-
-			// 5. Poll for mount activation if nieblafs was spawned
-			if daemonPID > 0 {
-				pollMountActive(cmd.OutOrStdout(), daemonPID, resolvedMountDir, socketPath, scratchDir)
-			}
-
-			// Opportunistically ensure agent harness spokes are linked for any installed harnesses
-			go func() {
-				if hubDir, err := skills.EnsureHub(""); err == nil {
-					_, _ = skills.SyncSpokes(hubDir, false, "")
-				}
-			}()
-
-			if rootFlags.JSON {
-				return writeJSON(cmd.OutOrStdout(), wsConfig)
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q created successfully.\n", name)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Base CL   : %d\n", resp.BaseCl)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Tree Hash : %s\n", rootTreeHashHex)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Mount Dir : %s\n", resolvedMountDir)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Scratch   : %s\n", scratchDir)
-			if noFuse {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Mode      : NO-FUSE (direct materialization)\n")
-			} else if daemonPID > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Daemon PID: %d\n", daemonPID)
-			}
-
-			return nil
+			return executeWorkspaceCreate(cmd, rootFlags, args[0], baseCL, mountDir, noFuse)
 		},
 	}
 

@@ -133,6 +133,83 @@ func (h *CommentsHandler) HandleGenerateAIHint(w http.ResponseWriter, r *http.Re
 	).Render(r.Context(), w)
 }
 
+func (h *CommentsHandler) handleDemoApplySuggestion(w http.ResponseWriter, r *http.Request, commentID int64, activeReviewer string) {
+	demoCommentsMu.Lock()
+	var target *db.Comment
+	for k, list := range demoCommentsStore {
+		for i := range list {
+			if list[i].ID == commentID {
+				list[i].SuggestionAppliedPS = list[i].PatchsetNumber + 1
+				list[i].Resolved = true
+				c := list[i]
+				target = &c
+			}
+		}
+		demoCommentsStore[k] = list
+	}
+	demoCommentsMu.Unlock()
+	if target == nil {
+		http.Error(w, "comment not found", http.StatusNotFound)
+		return
+	}
+	draftCount := h.countDrafts(r, target.CLID, activeReviewer)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	key := fmt.Sprintf("%d:%s:%d:%s", target.CLID, target.FilePath, target.EndLineNumber, target.Side)
+	_ = views.CommentBox(target.CLID, target.PatchsetNumber, target.FilePath, target.LineNumber, target.EndLineNumber, target.Side, demoCommentsStore[key], draftCount).Render(h.renderContext(r.Context()), w)
+}
+
+func (h *CommentsHandler) applySuggestionPatchset(ctx context.Context, clID int64, latestPS int, currentRootTree []byte, targetComment *db.Comment) (int, error) {
+	origContent, err := h.readFileFromTree(ctx, currentRootTree, targetComment.FilePath)
+	if err != nil {
+		log.Printf("error reading file %s for suggestion apply: %v", targetComment.FilePath, err)
+	}
+
+	startLine := targetComment.SuggestionStartLine
+	if startLine <= 0 {
+		startLine = targetComment.LineNumber
+	}
+	endLine := targetComment.SuggestionEndLine
+	if endLine < startLine {
+		endLine = targetComment.EndLineNumber
+	}
+
+	patchedContent, err := diff.ApplyLineRangeReplacement(origContent, startLine, endLine, targetComment.SuggestionCode)
+	if err != nil {
+		return 0, fmt.Errorf("failed to apply suggestion patch: %w", err)
+	}
+
+	newPSNum, err := h.db.GetNextPatchsetNumber(ctx, clID)
+	if err != nil || newPSNum <= latestPS {
+		newPSNum = latestPS + 1
+	}
+
+	if h.cas != nil {
+		blobHash, _, blobSize, storagePath, err := h.cas.Put(bytes.NewReader([]byte(patchedContent)))
+		if err != nil {
+			return 0, fmt.Errorf("failed to store patched blob in CAS: %w", err)
+		}
+		_ = h.db.InsertBlob(ctx, blobHash, blobSize, storagePath)
+
+		fetchTree := func(th []byte) ([]tree.Entry, error) {
+			return h.db.GetTreeEntries(ctx, th)
+		}
+		saveTree := func(th []byte, entries []tree.Entry) error {
+			return h.db.InsertTreeNodes(ctx, th, entries)
+		}
+
+		newRootHash, err := tree.UpdateFileEntry(currentRootTree, targetComment.FilePath, blobHash, uint64(blobSize), fetchTree, saveTree)
+		if err != nil {
+			return 0, fmt.Errorf("failed to update Merkle tree: %w", err)
+		}
+
+		if err := h.db.CreatePatchset(ctx, clID, newPSNum, newRootHash); err != nil {
+			return 0, fmt.Errorf("failed to create patchset %d: %w", newPSNum, err)
+		}
+		_ = h.db.UpdateCLRootTreeHash(ctx, clID, newRootHash)
+	}
+	return newPSNum, nil
+}
+
 // HandleApplySuggestion handles POST /cl/{id}/comments/{comment_id}/apply-suggestion.
 // It splices the suggested replacement code into the file, writes the new blob to CAS,
 // updates the Merkle tree, creates Patchset N+1, and auto-resolves the comment thread.
@@ -147,28 +224,7 @@ func (h *CommentsHandler) HandleApplySuggestion(w http.ResponseWriter, r *http.R
 	activeReviewer := h.resolveReviewer(r)
 
 	if h.db == nil {
-		demoCommentsMu.Lock()
-		var target *db.Comment
-		for k, list := range demoCommentsStore {
-			for i := range list {
-				if list[i].ID == commentID {
-					list[i].SuggestionAppliedPS = list[i].PatchsetNumber + 1
-					list[i].Resolved = true
-					c := list[i]
-					target = &c
-				}
-			}
-			demoCommentsStore[k] = list
-		}
-		demoCommentsMu.Unlock()
-		if target == nil {
-			http.Error(w, "comment not found", http.StatusNotFound)
-			return
-		}
-		draftCount := h.countDrafts(r, target.CLID, activeReviewer)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		key := fmt.Sprintf("%d:%s:%d:%s", target.CLID, target.FilePath, target.EndLineNumber, target.Side)
-		_ = views.CommentBox(target.CLID, target.PatchsetNumber, target.FilePath, target.LineNumber, target.EndLineNumber, target.Side, demoCommentsStore[key], draftCount).Render(h.renderContext(ctx), w)
+		h.handleDemoApplySuggestion(w, r, commentID, activeReviewer)
 		return
 	}
 
@@ -201,57 +257,10 @@ func (h *CommentsHandler) HandleApplySuggestion(w http.ResponseWriter, r *http.R
 		currentRootTree = cl.RootTreeHash
 	}
 
-	origContent, err := h.readFileFromTree(ctx, currentRootTree, targetComment.FilePath)
+	newPSNum, err := h.applySuggestionPatchset(ctx, clID, latestPS, currentRootTree, targetComment)
 	if err != nil {
-		log.Printf("error reading file %s for suggestion apply: %v", targetComment.FilePath, err)
-	}
-
-	startLine := targetComment.SuggestionStartLine
-	if startLine <= 0 {
-		startLine = targetComment.LineNumber
-	}
-	endLine := targetComment.SuggestionEndLine
-	if endLine < startLine {
-		endLine = targetComment.EndLineNumber
-	}
-
-	patchedContent, err := diff.ApplyLineRangeReplacement(origContent, startLine, endLine, targetComment.SuggestionCode)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to apply suggestion patch: %v", err), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	newPSNum, err := h.db.GetNextPatchsetNumber(ctx, clID)
-	if err != nil || newPSNum <= latestPS {
-		newPSNum = latestPS + 1
-	}
-
-	if h.cas != nil {
-		blobHash, _, blobSize, storagePath, err := h.cas.Put(bytes.NewReader([]byte(patchedContent)))
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to store patched blob in CAS: %v", err), http.StatusInternalServerError)
-			return
-		}
-		_ = h.db.InsertBlob(ctx, blobHash, blobSize, storagePath)
-
-		fetchTree := func(th []byte) ([]tree.Entry, error) {
-			return h.db.GetTreeEntries(ctx, th)
-		}
-		saveTree := func(th []byte, entries []tree.Entry) error {
-			return h.db.InsertTreeNodes(ctx, th, entries)
-		}
-
-		newRootHash, err := tree.UpdateFileEntry(currentRootTree, targetComment.FilePath, blobHash, uint64(blobSize), fetchTree, saveTree)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to update Merkle tree: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		if err := h.db.CreatePatchset(ctx, clID, newPSNum, newRootHash); err != nil {
-			http.Error(w, fmt.Sprintf("failed to create patchset %d: %v", newPSNum, err), http.StatusInternalServerError)
-			return
-		}
-		_ = h.db.UpdateCLRootTreeHash(ctx, clID, newRootHash)
 	}
 
 	if err := h.db.MarkSuggestionApplied(ctx, commentID, newPSNum); err != nil {

@@ -197,6 +197,67 @@ func ScanWorkspaceChanges(ws *config.WorkspaceConfig, rootTreeHash []byte, fetch
 	return changes, nil
 }
 
+func detectWhiteoutOriginalPath(fileName, rel string, info fs.FileInfo) (string, bool) {
+	isWhiteoutCharDev := (info.Mode() & os.ModeCharDevice) != 0
+	isPrefixWhiteout := strings.HasPrefix(fileName, ".wh.")
+	isTombstone := strings.HasSuffix(fileName, ".tombstone") || strings.HasSuffix(fileName, ".wh")
+
+	if !isWhiteoutCharDev && !isPrefixWhiteout && !isTombstone {
+		return "", false
+	}
+
+	dir := filepath.Dir(rel)
+	if isPrefixWhiteout {
+		originalName := strings.TrimPrefix(fileName, ".wh.")
+		if dir == "." {
+			return originalName, true
+		}
+		return filepath.ToSlash(filepath.Join(dir, originalName)), true
+	}
+	if isTombstone {
+		originalName := strings.TrimSuffix(strings.TrimSuffix(fileName, ".tombstone"), ".wh")
+		if dir == "." {
+			return originalName, true
+		}
+		return filepath.ToSlash(filepath.Join(dir, originalName)), true
+	}
+	return rel, true
+}
+
+func classifyRegularScratchFile(
+	diskPath, rel string,
+	info fs.FileInfo,
+	rootTreeHash []byte,
+	fetchTree tree.FetchTreeFunc,
+) *FileChange {
+	baseEntry, resolveErr := tree.ResolvePath(rootTreeHash, rel, fetchTree)
+	if resolveErr == nil && baseEntry != nil && !baseEntry.IsDir() {
+		if len(baseEntry.BlobSHA256) == 32 {
+			if data, readErr := os.ReadFile(diskPath); readErr == nil {
+				sum := sha256.Sum256(data)
+				diskExec := (info.Mode() & 0111) != 0
+				baseExec := (baseEntry.Mode & 0111) != 0
+				if bytes.Equal(sum[:], baseEntry.BlobSHA256) && diskExec == baseExec {
+					return nil
+				}
+			}
+		}
+		return &FileChange{
+			Path:      rel,
+			Type:      ChangeModified,
+			DiskPath:  diskPath,
+			BaseEntry: baseEntry,
+		}
+	}
+
+	return &FileChange{
+		Path:      rel,
+		Type:      ChangeAdded,
+		DiskPath:  diskPath,
+		BaseEntry: nil,
+	}
+}
+
 // ScanScratchChanges inspects scratchDir and compares against rootTreeHash to identify M, A, D files.
 func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.FetchTreeFunc, matchers ...ignore.Matcher) ([]FileChange, error) {
 	if _, err := os.Stat(scratchDir); os.IsNotExist(err) {
@@ -239,46 +300,19 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 			return nil
 		}
 
-		fileName := d.Name()
-
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
 
 		// Detect deletion via Linux overlayfs whiteout character device or tombstone files
-		isWhiteoutCharDev := (info.Mode() & os.ModeCharDevice) != 0
-		isPrefixWhiteout := strings.HasPrefix(fileName, ".wh.")
-		isTombstone := strings.HasSuffix(fileName, ".tombstone") || strings.HasSuffix(fileName, ".wh")
-
-		if isWhiteoutCharDev || isPrefixWhiteout || isTombstone {
-			var originalPath string
-			dir := filepath.Dir(rel)
-			if isPrefixWhiteout {
-				originalName := strings.TrimPrefix(fileName, ".wh.")
-				if dir == "." {
-					originalPath = originalName
-				} else {
-					originalPath = filepath.ToSlash(filepath.Join(dir, originalName))
-				}
-			} else if isTombstone {
-				originalName := strings.TrimSuffix(strings.TrimSuffix(fileName, ".tombstone"), ".wh")
-				if dir == "." {
-					originalPath = originalName
-				} else {
-					originalPath = filepath.ToSlash(filepath.Join(dir, originalName))
-				}
-			} else {
-				originalPath = rel
-			}
-
-			if matcher.Match(originalPath, false) {
+		if origPath, isWhiteout := detectWhiteoutOriginalPath(d.Name(), rel, info); isWhiteout {
+			if matcher.Match(origPath, false) {
 				return nil
 			}
-
-			baseEntry, _ := tree.ResolvePath(rootTreeHash, originalPath, fetchTree)
-			changeMap[originalPath] = FileChange{
-				Path:      originalPath,
+			baseEntry, _ := tree.ResolvePath(rootTreeHash, origPath, fetchTree)
+			changeMap[origPath] = FileChange{
+				Path:      origPath,
 				Type:      ChangeDeleted,
 				DiskPath:  path,
 				BaseEntry: baseEntry,
@@ -290,32 +324,8 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 			return nil
 		}
 
-		// Regular file in scratch: check if it exists in base tree
-		baseEntry, resolveErr := tree.ResolvePath(rootTreeHash, rel, fetchTree)
-		if resolveErr == nil && baseEntry != nil && !baseEntry.IsDir() {
-			if len(baseEntry.BlobSHA256) == 32 {
-				if data, readErr := os.ReadFile(path); readErr == nil {
-					sum := sha256.Sum256(data)
-					diskExec := (info.Mode() & 0111) != 0
-					baseExec := (baseEntry.Mode & 0111) != 0
-					if bytes.Equal(sum[:], baseEntry.BlobSHA256) && diskExec == baseExec {
-						return nil
-					}
-				}
-			}
-			changeMap[rel] = FileChange{
-				Path:      rel,
-				Type:      ChangeModified,
-				DiskPath:  path,
-				BaseEntry: baseEntry,
-			}
-		} else {
-			changeMap[rel] = FileChange{
-				Path:      rel,
-				Type:      ChangeAdded,
-				DiskPath:  path,
-				BaseEntry: nil,
-			}
+		if ch := classifyRegularScratchFile(path, rel, info, rootTreeHash, fetchTree); ch != nil {
+			changeMap[rel] = *ch
 		}
 
 		return nil

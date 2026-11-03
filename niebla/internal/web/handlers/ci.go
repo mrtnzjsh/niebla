@@ -158,41 +158,27 @@ func (h *CIHandler) HandlePostCheckRunStatus(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// HandleGetCheckRuns lists check runs and calculates aggregate green status for a patchset.
-// GET /api/v1/ci/status?cl_id=12&patchset=1
-// or GET /cl/{id}/checks
-func (h *CIHandler) HandleGetCheckRuns(w http.ResponseWriter, r *http.Request) {
+func (h *CIHandler) resolveCLAndPatchset(r *http.Request) (int64, int, error) {
 	var clID int64
 	var err error
-
-	// Try path param {id} if available
-	pathID := r.PathValue("id")
-	if pathID != "" {
+	if pathID := r.PathValue("id"); pathID != "" {
 		clID, err = strconv.ParseInt(pathID, 10, 64)
-	} else {
-		// Query param cl_id
-		qID := r.URL.Query().Get("cl_id")
-		if qID != "" {
-			clID, err = strconv.ParseInt(qID, 10, 64)
-		}
+	} else if qID := r.URL.Query().Get("cl_id"); qID != "" {
+		clID, err = strconv.ParseInt(qID, 10, 64)
 	}
 	if err != nil || clID <= 0 {
-		http.Error(w, "valid cl_id is required", http.StatusBadRequest)
-		return
+		return 0, 0, fmt.Errorf("valid cl_id is required")
 	}
 
 	patchsetNum := 0
-	qPS := r.URL.Query().Get("patchset")
-	if qPS != "" {
+	if qPS := r.URL.Query().Get("patchset"); qPS != "" {
 		if p, err := strconv.Atoi(qPS); err == nil && p > 0 {
 			patchsetNum = p
 		}
 	}
-
 	if patchsetNum <= 0 {
 		if h.db != nil {
-			latest, err := h.db.GetLatestPatchsetNumber(r.Context(), clID)
-			if err == nil && latest > 0 {
+			if latest, err := h.db.GetLatestPatchsetNumber(r.Context(), clID); err == nil && latest > 0 {
 				patchsetNum = latest
 			} else {
 				patchsetNum = 1
@@ -200,6 +186,40 @@ func (h *CIHandler) HandleGetCheckRuns(w http.ResponseWriter, r *http.Request) {
 		} else {
 			patchsetNum = 1
 		}
+	}
+	return clID, patchsetNum, nil
+}
+
+func evaluateDemoCheckRuns(clID int64, patchsetNum int) (runs []db.CheckRun, green bool, total, pending, failed int) {
+	demoCheckRunsMu.RLock()
+	runs = demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, patchsetNum)]
+	demoCheckRunsMu.RUnlock()
+
+	total = len(runs)
+	for _, r := range runs {
+		switch r.Status {
+		case "queued", "running":
+			pending++
+		case "failed", "canceled", "cancelled":
+			failed++
+		case "passed", "skipped":
+			// ok
+		default:
+			failed++
+		}
+	}
+	green = (total > 0 && pending == 0 && failed == 0)
+	return
+}
+
+// HandleGetCheckRuns lists check runs and calculates aggregate green status for a patchset.
+// GET /api/v1/ci/status?cl_id=12&patchset=1
+// or GET /cl/{id}/checks
+func (h *CIHandler) HandleGetCheckRuns(w http.ResponseWriter, r *http.Request) {
+	clID, patchsetNum, err := h.resolveCLAndPatchset(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	var runs []db.CheckRun
@@ -224,25 +244,7 @@ func (h *CIHandler) HandleGetCheckRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		runs = rList
 	} else {
-		demoCheckRunsMu.RLock()
-		key := fmt.Sprintf("%d:%d", clID, patchsetNum)
-		runs = demoCheckRunsStore[key]
-		demoCheckRunsMu.RUnlock()
-
-		total = len(runs)
-		for _, r := range runs {
-			switch r.Status {
-			case "queued", "running":
-				pending++
-			case "failed", "canceled", "cancelled":
-				failed++
-			case "passed", "skipped":
-				// ok
-			default:
-				failed++
-			}
-		}
-		green = (total > 0 && pending == 0 && failed == 0)
+		runs, green, total, pending, failed = evaluateDemoCheckRuns(clID, patchsetNum)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

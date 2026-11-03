@@ -253,6 +253,39 @@ func (e *Evaluator) ResolveRequirements(touchedPaths []string) ([]Requirement, e
 	return requirements, nil
 }
 
+func parentDirectory(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	parent := path.Dir(dir)
+	if parent == "." || parent == dir {
+		return ""
+	}
+	return parent
+}
+
+func matchPerFileApprovers(cfg *Config, fileName string) (matched bool, stopParent bool, rule string, approvers []string) {
+	patterns := make([]string, 0, len(cfg.PerFile))
+	for pattern := range cfg.PerFile {
+		patterns = append(patterns, pattern)
+	}
+	sort.Strings(patterns)
+
+	for _, pattern := range patterns {
+		owners := cfg.PerFile[pattern]
+		if ok, err := path.Match(pattern, fileName); err == nil && ok {
+			matched = true
+			rule = fmt.Sprintf("per_file: %s", pattern)
+			approvers = append(approvers, owners...)
+			if pfRule, ok := cfg.PerFileRules[pattern]; ok && pfRule.SetNoParent {
+				stopParent = true
+			}
+			break
+		}
+	}
+	return
+}
+
 // resolvePath traverses up from the file's directory to repo root collecting approvers.
 func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 	currDir := path.Dir(cleanPath)
@@ -279,36 +312,17 @@ func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 				governingDir = dir
 			}
 
-			// 1. Check per-file pattern match in this directory (sorted for determinism)
-			var perFileMatched bool
-			var perFileStopParent bool
-			patterns := make([]string, 0, len(cfg.PerFile))
-			for pattern := range cfg.PerFile {
-				patterns = append(patterns, pattern)
-			}
-			sort.Strings(patterns)
-
-			for _, pattern := range patterns {
-				owners := cfg.PerFile[pattern]
-				matched, matchErr := path.Match(pattern, fileName)
-				if matchErr == nil && matched {
-					perFileMatched = true
-					rule = fmt.Sprintf("per_file: %s", pattern)
-					accumulatedApprovers = append(accumulatedApprovers, owners...)
-					if pfRule, ok := cfg.PerFileRules[pattern]; ok && pfRule.SetNoParent {
-						perFileStopParent = true
-					}
-					break
-				}
+			matched, pfStop, pfRule, pfApprovers := matchPerFileApprovers(cfg, fileName)
+			if matched {
+				rule = pfRule
+				accumulatedApprovers = append(accumulatedApprovers, pfApprovers...)
 			}
 
-			// 2. If no per-file pattern matched (or per-file rule had no explicit approvers), collect directory approvers
-			if (!perFileMatched || len(accumulatedApprovers) == 0) && len(cfg.Approvers) > 0 {
+			if (!matched || len(accumulatedApprovers) == 0) && len(cfg.Approvers) > 0 {
 				accumulatedApprovers = append(accumulatedApprovers, cfg.Approvers...)
 			}
 
-			// 3. If set_noparent is true on either the per_file rule or directory config, stop ascending
-			if perFileStopParent || cfg.SetNoParent {
+			if pfStop || cfg.SetNoParent {
 				break
 			}
 		}
@@ -316,12 +330,7 @@ func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 		if dir == "" {
 			break
 		}
-		parentDir := path.Dir(dir)
-		if parentDir == "." || parentDir == dir {
-			dir = ""
-		} else {
-			dir = parentDir
-		}
+		dir = parentDirectory(dir)
 	}
 
 	if !foundAnyConfig || len(accumulatedApprovers) == 0 {
@@ -337,6 +346,103 @@ func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 	}, nil
 }
 
+type policyCollector struct {
+	policy    *SubtreePolicy
+	reviewers []string
+	agents    []string
+	hooks     []string
+	runners   []string
+}
+
+func (c *policyCollector) mergeRules(
+	reqApprovals *int,
+	requireGreenCI *bool,
+	allowUnresolved *bool,
+	revs, ags, hks, rns []string,
+) {
+	if reqApprovals != nil {
+		if c.policy.RequiredApprovals == nil || *reqApprovals > *c.policy.RequiredApprovals {
+			v := *reqApprovals
+			c.policy.RequiredApprovals = &v
+		}
+	}
+	if requireGreenCI != nil {
+		if c.policy.RequireGreenCI == nil {
+			v := *requireGreenCI
+			c.policy.RequireGreenCI = &v
+		} else if *requireGreenCI && !*c.policy.RequireGreenCI {
+			t := true
+			c.policy.RequireGreenCI = &t
+		}
+	}
+	if allowUnresolved != nil {
+		if c.policy.AllowUnresolvedComments == nil {
+			v := *allowUnresolved
+			c.policy.AllowUnresolvedComments = &v
+		} else if !*allowUnresolved && *c.policy.AllowUnresolvedComments {
+			f := false
+			c.policy.AllowUnresolvedComments = &f
+		}
+	}
+	c.reviewers = append(c.reviewers, revs...)
+	c.agents = append(c.agents, ags...)
+	c.hooks = append(c.hooks, hks...)
+	c.runners = append(c.runners, rns...)
+	if len(rns) > 0 {
+		t := true
+		c.policy.RequireGreenCI = &t
+	}
+}
+
+func (c *policyCollector) applyPerFileRules(cfg *Config, fileName string) bool {
+	var stopParent bool
+	patterns := make([]string, 0, len(cfg.PerFileRules))
+	for pattern := range cfg.PerFileRules {
+		patterns = append(patterns, pattern)
+	}
+	sort.Strings(patterns)
+
+	for _, pattern := range patterns {
+		if matched, err := path.Match(pattern, fileName); err == nil && matched {
+			pfRule := cfg.PerFileRules[pattern]
+			c.mergeRules(
+				pfRule.RequiredApprovals,
+				pfRule.RequireGreenCI,
+				pfRule.AllowUnresolvedComments,
+				pfRule.Reviewers,
+				pfRule.Agents,
+				pfRule.PresubmitHooks,
+				pfRule.CIRunners,
+			)
+			if pfRule.SetNoParent {
+				stopParent = true
+			}
+		}
+	}
+	return stopParent
+}
+
+func (c *policyCollector) applyConfig(cfg *Config, fileName string) bool {
+	stopParent := c.applyPerFileRules(cfg, fileName)
+	c.mergeRules(
+		cfg.RequiredApprovals,
+		cfg.RequireGreenCI,
+		cfg.AllowUnresolvedComments,
+		cfg.Reviewers,
+		cfg.Agents,
+		cfg.PresubmitHooks,
+		cfg.CIRunners,
+	)
+	return stopParent || cfg.SetNoParent
+}
+
+func (c *policyCollector) finalize() {
+	c.policy.Reviewers = deduplicate(c.reviewers)
+	c.policy.Agents = deduplicate(c.agents)
+	c.policy.PresubmitHooks = deduplicate(c.hooks)
+	c.policy.CIRunners = deduplicate(c.runners)
+}
+
 // ResolvePolicy resolves and aggregates subtree governance policies, reviewers, agents,
 // presubmit hooks, and CI runners across all touched file paths in a changelist.
 //
@@ -346,42 +452,7 @@ func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 //   - AllowUnresolvedComments: false (strictest wins) if any touched OWNERS.toml / [per_file] sets false.
 //   - Reviewers, Agents, PresubmitHooks, CIRunners: deduplicated union across all touched hierarchies (stopping at set_noparent = true).
 func (e *Evaluator) ResolvePolicy(touchedPaths []string) (*SubtreePolicy, error) {
-	policy := &SubtreePolicy{}
-	var reviewers, agents, hooks, runners []string
-
-	mergeIntMax := func(dst **int, src *int) {
-		if src == nil {
-			return
-		}
-		v := *src
-		if *dst == nil || v > **dst {
-			*dst = &v
-		}
-	}
-	mergeBoolOr := func(dst **bool, src *bool) {
-		if src == nil {
-			return
-		}
-		v := *src
-		if *dst == nil {
-			*dst = &v
-		} else if v && !**dst {
-			t := true
-			*dst = &t
-		}
-	}
-	mergeBoolAnd := func(dst **bool, src *bool) {
-		if src == nil {
-			return
-		}
-		v := *src
-		if *dst == nil {
-			*dst = &v
-		} else if !v && **dst {
-			f := false
-			*dst = &f
-		}
-	}
+	col := &policyCollector{policy: &SubtreePolicy{}}
 
 	for _, p := range touchedPaths {
 		cleanPath := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(p)), "/")
@@ -402,73 +473,19 @@ func (e *Evaluator) ResolvePolicy(touchedPaths []string) (*SubtreePolicy, error)
 				return nil, err
 			}
 
-			if cfg != nil {
-				var stopParent bool
-
-				// 1. Check matching [per_file] rules in deterministic order
-				patterns := make([]string, 0, len(cfg.PerFileRules))
-				for pattern := range cfg.PerFileRules {
-					patterns = append(patterns, pattern)
-				}
-				sort.Strings(patterns)
-
-				for _, pattern := range patterns {
-					matched, matchErr := path.Match(pattern, fileName)
-					if matchErr == nil && matched {
-						pfRule := cfg.PerFileRules[pattern]
-						mergeIntMax(&policy.RequiredApprovals, pfRule.RequiredApprovals)
-						mergeBoolOr(&policy.RequireGreenCI, pfRule.RequireGreenCI)
-						mergeBoolAnd(&policy.AllowUnresolvedComments, pfRule.AllowUnresolvedComments)
-						reviewers = append(reviewers, pfRule.Reviewers...)
-						agents = append(agents, pfRule.Agents...)
-						hooks = append(hooks, pfRule.PresubmitHooks...)
-						runners = append(runners, pfRule.CIRunners...)
-						if len(pfRule.CIRunners) > 0 {
-							t := true
-							mergeBoolOr(&policy.RequireGreenCI, &t)
-						}
-						if pfRule.SetNoParent {
-							stopParent = true
-						}
-					}
-				}
-
-				// 2. Collect directory-level policy & automation
-				mergeIntMax(&policy.RequiredApprovals, cfg.RequiredApprovals)
-				mergeBoolOr(&policy.RequireGreenCI, cfg.RequireGreenCI)
-				mergeBoolAnd(&policy.AllowUnresolvedComments, cfg.AllowUnresolvedComments)
-				reviewers = append(reviewers, cfg.Reviewers...)
-				agents = append(agents, cfg.Agents...)
-				hooks = append(hooks, cfg.PresubmitHooks...)
-				runners = append(runners, cfg.CIRunners...)
-				if len(cfg.CIRunners) > 0 {
-					t := true
-					mergeBoolOr(&policy.RequireGreenCI, &t)
-				}
-
-				if stopParent || cfg.SetNoParent {
-					break
-				}
+			if cfg != nil && col.applyConfig(cfg, fileName) {
+				break
 			}
 
 			if dir == "" {
 				break
 			}
-			parentDir := path.Dir(dir)
-			if parentDir == "." || parentDir == dir {
-				dir = ""
-			} else {
-				dir = parentDir
-			}
+			dir = parentDirectory(dir)
 		}
 	}
 
-	policy.Reviewers = deduplicate(reviewers)
-	policy.Agents = deduplicate(agents)
-	policy.PresubmitHooks = deduplicate(hooks)
-	policy.CIRunners = deduplicate(runners)
-
-	return policy, nil
+	col.finalize()
+	return col.policy, nil
 }
 
 // Evaluate checks whether the provided approvals satisfy all required owners for the touched paths

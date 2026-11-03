@@ -568,3 +568,76 @@ func TestValidateCritiqueAIConfig(t *testing.T) {
 		t.Fatalf("expected valid AI config to pass, got: %v", err)
 	}
 }
+
+func TestValidateHelpers_ModularInvocation(t *testing.T) {
+	// Test calling helper functions modularly
+	cfg := DefaultConfig()
+
+	// 1. validateVersion
+	cfg.Version = 0
+	var errs ValidationErrors
+	_ = validateVersion(cfg, &errs)
+	if len(errs) != 1 || errs[0].Field != "version" {
+		t.Errorf("expected 1 version error, got: %v", errs)
+	}
+
+	// 2. validateCoreSettings
+	cfg = DefaultConfig()
+	cfg.Core.ServerAddr = "invalid-address"
+	errs = nil
+	_ = validateCoreSettings(cfg, &errs)
+	if len(errs) != 1 || errs[0].Field != "core.server_addr" {
+		t.Errorf("expected 1 server_addr error, got: %v", errs)
+	}
+
+	// 3. validateServerDaemon
+	cfg = DefaultConfig()
+	cfg.Server.Port = 99999
+	errs = nil
+	_ = validateServerDaemon(cfg, &errs)
+	if len(errs) != 1 || errs[0].Field != "server.port" {
+		t.Errorf("expected 1 server.port error, got: %v", errs)
+	}
+
+	// 4. validateCritiqueHTTPServer
+	cfg = DefaultConfig()
+	cfg.Critique.Port = 80000
+	errs = nil
+	_ = validateCritiqueHTTPServer(cfg, &errs)
+	if len(errs) != 1 || errs[0].Field != "critique.port" {
+		t.Errorf("expected 1 critique.port error, got: %v", errs)
+	}
+
+	// 5. validateEvents
+	cfg = DefaultConfig()
+	cfg.Events.Enabled = true
+	cfg.Events.Sink = "invalid-sink"
+	errs = nil
+	_ = validateEvents(cfg, &errs)
+	if len(errs) != 1 || errs[0].Field != "events.sink" {
+		t.Errorf("expected 1 events.sink error, got: %v", errs)
+	}
+
+	// 6. validateResilience
+	cfg = DefaultConfig()
+	cfg.Resilience.Enabled = true
+	cfg.Resilience.DefaultMode = "invalid_mode"
+	errs = nil
+	_ = validateResilience(cfg, &errs)
+	if len(errs) != 1 || errs[0].Field != "resilience.default_mode" {
+		t.Errorf("expected 1 resilience.default_mode error, got: %v", errs)
+	}
+
+	// 7. validateCI
+	cfg = DefaultConfig()
+	cfg.CI.Enabled = true
+	cfg.CI.DefaultRunner = "broken"
+	cfg.CI.Runners = map[string]CIRunnerConfig{
+		"broken": {Provider: "invalid_provider"},
+	}
+	errs = nil
+	_ = validateCI(cfg, &errs)
+	if len(errs) != 1 || !strings.Contains(errs[0].Field, "provider") {
+		t.Errorf("expected 1 ci provider error, got: %v", errs)
+	}
+}

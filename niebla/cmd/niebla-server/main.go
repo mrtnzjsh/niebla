@@ -40,6 +40,52 @@ func getEnvInt(key string, defaultVal int) int {
 	return defaultVal
 }
 
+func buildGRPCServerOptions(cfg *config.Config, tlsFlag bool, tlsCertFlag, tlsKeyFlag, tokenFlag string) []grpc.ServerOption {
+	var grpcOpts []grpc.ServerOption
+
+	tlsEnabled := tlsFlag
+	certFile := tlsCertFlag
+	keyFile := tlsKeyFlag
+	if !tlsEnabled && cfg != nil && cfg.Server.TLS.Enabled {
+		tlsEnabled = true
+		certFile = cfg.Server.TLS.CertFile
+		keyFile = cfg.Server.TLS.KeyFile
+	}
+
+	if tlsEnabled {
+		if certFile == "" || keyFile == "" {
+			log.Fatalf("TLS enabled but certificate or key file not specified (use --tls-cert and --tls-key or server.tls in config)")
+		}
+		creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
+		if err != nil {
+			log.Fatalf("Failed to load TLS credentials: %v", err)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+		log.Printf("TLS 1.3 transport security enabled (cert: %s)", certFile)
+	} else {
+		log.Printf("Running gRPC server with insecure transport (plaintext loopback)")
+	}
+
+	var authTokens []string
+	if tokenFlag != "" {
+		authTokens = append(authTokens, tokenFlag)
+	}
+	if cfg != nil && len(cfg.Server.AuthTokens) > 0 {
+		authTokens = append(authTokens, cfg.Server.AuthTokens...)
+	}
+
+	auth := internalgrpc.NewAuthenticator(authTokens)
+	if auth.IsEnabled() {
+		grpcOpts = append(grpcOpts,
+			grpc.UnaryInterceptor(auth.UnaryServerInterceptor()),
+			grpc.StreamInterceptor(auth.StreamServerInterceptor()),
+		)
+		log.Printf("Bearer token authentication enforced (%d valid token(s) configured)", len(authTokens))
+	}
+
+	return grpcOpts
+}
+
 func main() {
 	hostFlag := flag.String("host", getEnv("NIEBLA_HOST", "0.0.0.0"), "Host address for gRPC service")
 	portFlag := flag.Int("port", getEnvInt("NIEBLA_PORT", 50051), "Port number for gRPC service")
@@ -79,49 +125,7 @@ func main() {
 	cfg, _ := config.Load()
 
 	// 4. Build gRPC server options (TLS & Bearer Token Authentication)
-	var grpcOpts []grpc.ServerOption
-
-	// Determine TLS configuration (CLI flags take precedence over config.toml)
-	tlsEnabled := *tlsFlag
-	certFile := *tlsCertFlag
-	keyFile := *tlsKeyFlag
-	if !tlsEnabled && cfg != nil && cfg.Server.TLS.Enabled {
-		tlsEnabled = true
-		certFile = cfg.Server.TLS.CertFile
-		keyFile = cfg.Server.TLS.KeyFile
-	}
-
-	if tlsEnabled {
-		if certFile == "" || keyFile == "" {
-			log.Fatalf("TLS enabled but certificate or key file not specified (use --tls-cert and --tls-key or server.tls in config)")
-		}
-		creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
-		if err != nil {
-			log.Fatalf("Failed to load TLS credentials: %v", err)
-		}
-		grpcOpts = append(grpcOpts, grpc.Creds(creds))
-		log.Printf("TLS 1.3 transport security enabled (cert: %s)", certFile)
-	} else {
-		log.Printf("Running gRPC server with insecure transport (plaintext loopback)")
-	}
-
-	// Determine Auth Tokens
-	var authTokens []string
-	if *tokenFlag != "" {
-		authTokens = append(authTokens, *tokenFlag)
-	}
-	if cfg != nil && len(cfg.Server.AuthTokens) > 0 {
-		authTokens = append(authTokens, cfg.Server.AuthTokens...)
-	}
-
-	auth := internalgrpc.NewAuthenticator(authTokens)
-	if auth.IsEnabled() {
-		grpcOpts = append(grpcOpts,
-			grpc.UnaryInterceptor(auth.UnaryServerInterceptor()),
-			grpc.StreamInterceptor(auth.StreamServerInterceptor()),
-		)
-		log.Printf("Bearer token authentication enforced (%d valid token(s) configured)", len(authTokens))
-	}
+	grpcOpts := buildGRPCServerOptions(cfg, *tlsFlag, *tlsCertFlag, *tlsKeyFlag, *tokenFlag)
 
 	grpcServer := grpc.NewServer(grpcOpts...)
 	repoServer, err := internalgrpc.NewServer(database, casStorage, *cacheSizeFlag)

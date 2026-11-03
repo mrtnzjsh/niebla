@@ -136,148 +136,11 @@ func (h *CLHandler) resolveReviewer(r *http.Request) string {
 // GET / and GET /cls
 func (h *CLHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	currentUser := h.resolveReviewer(r)
+	allCLs, assignedCLIDs := h.fetchIndexData(r.Context(), currentUser)
+	myReviews, outgoing, agents, submitted, all, counts := h.classifyInboxRows(allCLs, currentUser, assignedCLIDs)
 
-	var allCLs []db.Changelist
-	assignedCLIDs := make(map[int64]bool)
-
-	if h.db == nil {
-		allCLs = []db.Changelist{
-			{
-				CLID:        1,
-				Author:      "alice@corp",
-				Description: "feat(critique): implement fast server-authoritative code review web UI and Myers diff engine",
-				Status:      "shelved",
-				CommittedAt: time.Now().Add(-2 * time.Hour),
-			},
-			{
-				CLID:        2,
-				Author:      "developer@corp",
-				Description: "cas: optimize chunk streaming and LRU tree node caching",
-				Status:      "shelved",
-				CommittedAt: time.Now().Add(-5 * time.Hour),
-			},
-			{
-				CLID:        3,
-				Author:      "agent/linter-bot",
-				Description: "fix: apply automated gofmt and lint repairs across repository",
-				Status:      "shelved",
-				CommittedAt: time.Now().Add(-1 * time.Hour),
-			},
-			{
-				CLID:        4,
-				Author:      "developer@corp",
-				Description: "resilience: add native ZFS snapshot streaming driver",
-				Status:      "submitted",
-				CommittedAt: time.Now().Add(-24 * time.Hour),
-			},
-		}
-
-		demoReviewersMu.RLock()
-		for clID, revs := range demoReviewersStore {
-			for _, rev := range revs {
-				if strings.EqualFold(rev.Reviewer, currentUser) || strings.EqualFold(rev.Reviewer, "@"+currentUser) {
-					assignedCLIDs[clID] = true
-				}
-			}
-		}
-		demoReviewersMu.RUnlock()
-		if len(assignedCLIDs) == 0 {
-			assignedCLIDs[2] = true
-		}
-	} else {
-		cls, err := h.db.ListCLs(r.Context(), 100)
-		if err != nil {
-			log.Printf("error listing changelists: %v", err)
-		}
-		allCLs = cls
-
-		var userGroups []string
-		if h.groups != nil {
-			groups, _ := h.groups.GetUserGroups(r.Context(), currentUser)
-			userGroups = groups
-		}
-		assigned, err := h.db.GetAssignedCLIDsForUser(r.Context(), currentUser, userGroups)
-		if err != nil {
-			log.Printf("error querying assigned CLs for %s: %v", currentUser, err)
-		} else {
-			assignedCLIDs = assigned
-		}
-	}
-
-	// Classify all changelists and compute partition counts
-	var myReviews, outgoing, agents, submitted, all []views.CLRowData
-	counts := views.InboxCounts{
-		All: len(allCLs),
-	}
-
-	isAgentAuthor := func(author string) bool {
-		if h.config != nil {
-			return h.config.Critique.IsAgentAuthor(author)
-		}
-		return config.MatchAgentAuthor(author, config.DefaultAgentAuthorPatterns)
-	}
-
-	for _, cl := range allCLs {
-		isAgent := isAgentAuthor(cl.Author)
-		cleanAuthor := strings.TrimSpace(cl.Author)
-		isAuthor := strings.EqualFold(cleanAuthor, currentUser) ||
-			strings.HasPrefix(strings.ToLower(cleanAuthor), strings.ToLower(currentUser)+"@")
-		isAssigned := assignedCLIDs[cl.CLID]
-
-		row := views.CLRowData{
-			Changelist: cl,
-			IsAgent:    isAgent,
-			IsReviewer: isAssigned,
-		}
-		all = append(all, row)
-
-		if cl.Status == "submitted" {
-			counts.Submitted++
-			submitted = append(submitted, row)
-		} else {
-			if isAgent {
-				counts.Agents++
-				agents = append(agents, row)
-			} else if isAuthor {
-				counts.Outgoing++
-				outgoing = append(outgoing, row)
-			} else if isAssigned || len(assignedCLIDs) == 0 {
-				counts.MyReviews++
-				myReviews = append(myReviews, row)
-			}
-		}
-	}
-
-	// Determine active tab
-	tab := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tab")))
-	if tab == "" {
-		if counts.MyReviews > 0 {
-			tab = "my-reviews"
-		} else if counts.Outgoing > 0 {
-			tab = "outgoing"
-		} else if counts.Agents > 0 {
-			tab = "agents"
-		} else {
-			tab = "all"
-		}
-	}
-
-	var activeRows []views.CLRowData
-	switch tab {
-	case "my-reviews":
-		activeRows = myReviews
-	case "outgoing":
-		activeRows = outgoing
-	case "agents":
-		activeRows = agents
-	case "submitted":
-		activeRows = submitted
-	case "all":
-		activeRows = all
-	default:
-		tab = "all"
-		activeRows = all
-	}
+	tab := resolveActiveTab(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tab"))), counts)
+	activeRows := selectActiveRows(tab, myReviews, outgoing, agents, submitted, all)
 
 	inboxData := views.InboxViewData{
 		ActiveTab:       tab,
@@ -540,72 +403,14 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqApprovals := 0
-	allowUnresolved := false
-	requireGreen := false
-	var requiredCIRunners []string
-	if h.config != nil {
-		reqApprovals = h.config.Critique.GetRequiredApprovals()
-		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
-		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
-	}
-
-	var clStatus string
-	var approvalsCount int
-	var unresolvedCount int
-	var needsRebase bool
-
-	if h.db != nil {
-		ctx := r.Context()
-		cl, err := h.db.GetCL(ctx, clID)
-		if err != nil || cl == nil {
-			http.Error(w, fmt.Sprintf("CL %d not found", clID), http.StatusNotFound)
-			return
-		}
-		clStatus = cl.Status
-		needsRebase = cl.NeedsRebase
-		approvalsCount, _ = h.db.CountApprovals(ctx, clID)
-		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
-		reqApprovals, allowUnresolved, requireGreen, requiredCIRunners = h.resolveCLPolicy(ctx, cl)
-	} else {
-		demoCLStatusMu.RLock()
-		clStatus = demoCLStatusStore[clID]
-		if clStatus == "" {
-			clStatus = "shelved"
-		}
-		demoCLStatusMu.RUnlock()
-
-		demoApprovalsMu.RLock()
-		for _, a := range demoApprovalsStore[clID] {
-			if a.Verdict == "approved" || a.Verdict == "lgtm" {
-				approvalsCount++
-			}
-		}
-		demoApprovalsMu.RUnlock()
-
-		demoCommentsMu.RLock()
-		for _, list := range demoCommentsStore {
-			for _, c := range list {
-				if c.CLID == clID && !c.IsDraft && !c.Resolved {
-					unresolvedCount++
-				}
-			}
-		}
-		demoCommentsMu.RUnlock()
-	}
-
-	if clStatus != "shelved" {
-		http.Error(w, fmt.Sprintf("CL %d cannot be submitted because its status is %q (expected 'shelved')", clID, clStatus), http.StatusBadRequest)
+	clStatus, needsRebase, approvalsCount, unresolvedCount, reqApprovals, allowUnresolved, requireGreen, requiredCIRunners, err := h.getSubmitCLMetadata(r.Context(), clID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	if needsRebase {
-		http.Error(w, fmt.Sprintf("CL %d cannot be submitted because it has pending rebase conflicts with parent CL; run 'niebla sync' in your workspace to resolve", clID), http.StatusBadRequest)
-		return
-	}
-
-	if !allowUnresolved && unresolvedCount > 0 {
-		http.Error(w, fmt.Sprintf("CL %d has %d unresolved comment thread(s); all comments must be resolved before submission", clID, unresolvedCount), http.StatusBadRequest)
+	if err := h.validateSubmitBlockers(clID, clStatus, needsRebase, allowUnresolved, unresolvedCount); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -615,76 +420,15 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if reqApprovals > 0 && approvalsCount < reqApprovals {
-		if justification == "" {
-			http.Error(w, fmt.Sprintf("CL %d requires %d approval(s) before submission (found %d)", clID, reqApprovals, approvalsCount), http.StatusBadRequest)
-			return
-		}
-		log.Printf("CL %d: approval requirement overridden by %q with justification: %q", clID, h.resolveReviewer(r), justification)
+	reviewer := h.resolveReviewer(r)
+	if err := h.validateSubmitApprovals(clID, reqApprovals, approvalsCount, justification, reviewer); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	if requireGreen {
-		var green bool
-		var total, pending, failed int
-		var psNum int = 1
-		if h.db != nil {
-			ctx := r.Context()
-			latestPS, err := h.db.GetLatestPatchsetNumber(ctx, clID)
-			if err == nil {
-				psNum = latestPS
-				green, total, pending, failed, _ = h.db.AreCheckRunsGreen(ctx, clID, latestPS)
-			}
-		} else {
-			demoCheckRunsMu.RLock()
-			key := fmt.Sprintf("%d:%d", clID, 1)
-			runs := demoCheckRunsStore[key]
-			demoCheckRunsMu.RUnlock()
-			total = len(runs)
-			for _, r := range runs {
-				switch r.Status {
-				case "queued", "running":
-					pending++
-				case "failed", "canceled", "cancelled":
-					failed++
-				case "passed", "skipped":
-				default:
-					failed++
-				}
-			}
-			green = (total > 0 && pending == 0 && failed == 0)
-		}
-
-		if !green {
-			if justification == "" {
-				if total == 0 {
-					http.Error(w, fmt.Sprintf("CL %d requires green CI check runs before submission (found 0 check runs for patchset %d)", clID, psNum), http.StatusBadRequest)
-					return
-				}
-				http.Error(w, fmt.Sprintf("CL %d requires green CI check runs before submission (%d pending, %d failed out of %d total for patchset %d)", clID, pending, failed, total, psNum), http.StatusBadRequest)
-				return
-			}
-			log.Printf("CL %d: CI green check runs requirement overridden by %q with justification: %q", clID, h.resolveReviewer(r), justification)
-		} else if h.db != nil && len(requiredCIRunners) > 0 && justification == "" {
-			runs, rErr := h.db.ListCheckRunsForPatchset(r.Context(), clID, psNum)
-			if rErr == nil {
-				greenRunners := make(map[string]bool, len(runs))
-				for _, run := range runs {
-					if run.Status == "passed" || run.Status == "skipped" {
-						greenRunners[strings.ToLower(strings.TrimSpace(run.RunnerName))] = true
-					}
-				}
-				var missingRunners []string
-				for _, reqRunner := range requiredCIRunners {
-					if !greenRunners[strings.ToLower(strings.TrimSpace(reqRunner))] {
-						missingRunners = append(missingRunners, reqRunner)
-					}
-				}
-				if len(missingRunners) > 0 {
-					http.Error(w, fmt.Sprintf("CL %d requires OWNERS.toml CI runner(s) to pass before submission: %s", clID, strings.Join(missingRunners, ", ")), http.StatusBadRequest)
-					return
-				}
-			}
-		}
+	if err := h.validateSubmitCI(r.Context(), clID, requireGreen, requiredCIRunners, justification, reviewer); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if h.db != nil {
@@ -705,7 +449,7 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		strconv.FormatInt(clID, 10),
 		events.CLSubmittedPayload{
 			CLID:          strconv.FormatInt(clID, 10),
-			Author:        h.resolveReviewer(r),
+			Author:        reviewer,
 			URL:           h.clURL(r, clID),
 			Justification: justification,
 		},
@@ -721,92 +465,8 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CLHandler) renderActionsBar(w http.ResponseWriter, r *http.Request, clID int64) {
-	clStatus := "shelved"
-	var approvals []db.Approval
-	var reviewers []db.ReviewerAssignment
-	var approvedCount int
-	var unresolvedCount int
-	var draftCount int
 	author := h.resolveReviewer(r)
-
-	reqApprovals := 0
-	allowUnresolved := false
-	if h.config != nil {
-		reqApprovals = h.config.Critique.GetRequiredApprovals()
-		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
-	}
-
-	if h.db != nil {
-		ctx := r.Context()
-		if cl, err := h.db.GetCL(ctx, clID); err == nil && cl != nil {
-			clStatus = cl.Status
-			reqApprovals, allowUnresolved, _, _ = h.resolveCLPolicy(ctx, cl)
-		}
-		approvals, _ = h.db.ListApprovals(ctx, clID)
-		reviewers, _ = h.db.ListReviewers(ctx, clID)
-		approvedCount, _ = h.db.CountApprovals(ctx, clID)
-		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
-		drafts, _ := h.db.ListDraftComments(ctx, clID, author)
-		draftCount = len(drafts)
-	} else {
-		demoCLStatusMu.RLock()
-		if s, ok := demoCLStatusStore[clID]; ok && s != "" {
-			clStatus = s
-		}
-		demoCLStatusMu.RUnlock()
-
-		demoApprovalsMu.RLock()
-		approvals = demoApprovalsStore[clID]
-		demoApprovalsMu.RUnlock()
-
-		for _, a := range approvals {
-			if a.Verdict == "approved" || a.Verdict == "lgtm" {
-				approvedCount++
-			}
-		}
-
-		demoReviewersMu.RLock()
-		rawReviewers := demoReviewersStore[clID]
-		demoReviewersMu.RUnlock()
-
-		verdictMap := make(map[string]string)
-		for _, a := range approvals {
-			verdictMap[a.Reviewer] = a.Verdict
-		}
-		found := make(map[string]bool)
-		for _, rev := range rawReviewers {
-			if v, ok := verdictMap[rev.Reviewer]; ok {
-				rev.Verdict = v
-			}
-			reviewers = append(reviewers, rev)
-			found[rev.Reviewer] = true
-		}
-		for _, a := range approvals {
-			if !found[a.Reviewer] {
-				reviewers = append(reviewers, db.ReviewerAssignment{
-					CLID:      clID,
-					Reviewer:  a.Reviewer,
-					Verdict:   a.Verdict,
-					UpdatedAt: a.UpdatedAt,
-				})
-			}
-		}
-
-		demoCommentsMu.RLock()
-		for _, list := range demoCommentsStore {
-			for _, c := range list {
-				if c.CLID == clID {
-					if c.IsDraft && c.Author == author {
-						draftCount++
-					}
-					if !c.IsDraft && !c.Resolved {
-						unresolvedCount++
-					}
-				}
-			}
-		}
-		demoCommentsMu.RUnlock()
-	}
+	clStatus, approvals, reviewers, approvedCount, unresolvedCount, draftCount, reqApprovals, allowUnresolved := h.fetchActionsBarData(r.Context(), clID, author)
 
 	data := views.CLDetailData{
 		CL: &db.Changelist{
@@ -914,75 +574,9 @@ func (h *CLHandler) HandlePublishReview(w http.ResponseWriter, r *http.Request) 
 	verdict := strings.TrimSpace(r.FormValue("verdict"))
 
 	if h.db != nil {
-		// 1. Publish all draft comments
-		if _, err := h.db.PublishDraftComments(r.Context(), clID, author); err != nil {
-			log.Printf("error publishing drafts: %v", err)
-		}
-
-		// 2. If overall message is provided, create a top-level review comment
-		if overallMsg != "" {
-			_, _ = h.db.CreateComment(r.Context(), clID, 1, "", 0, 0, "modified", author, overallMsg, nil, false)
-		}
-
-		// 3. If a verdict was submitted, record approval
-		if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
-			_ = h.db.SetApproval(r.Context(), clID, author, verdict)
-		}
+		h.publishDBReview(r.Context(), clID, author, overallMsg, verdict)
 	} else {
-		demoCommentsMu.Lock()
-		for k, list := range demoCommentsStore {
-			for i := range list {
-				if list[i].CLID == clID && list[i].Author == author && list[i].IsDraft {
-					list[i].IsDraft = false
-				}
-			}
-			demoCommentsStore[k] = list
-		}
-
-		if overallMsg != "" {
-			nextCommentID++
-			c := db.Comment{
-				ID:             nextCommentID,
-				CLID:           clID,
-				PatchsetNumber: 1,
-				FilePath:       "",
-				LineNumber:     0,
-				EndLineNumber:  0,
-				Side:           "modified",
-				Author:         author,
-				Body:           overallMsg,
-				Resolved:       false,
-				IsDraft:        false,
-				CreatedAt:      time.Now(),
-			}
-			key := fmt.Sprintf("%d::0:modified", clID)
-			demoCommentsStore[key] = append(demoCommentsStore[key], c)
-		}
-		demoCommentsMu.Unlock()
-
-		if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
-			demoApprovalsMu.Lock()
-			list := demoApprovalsStore[clID]
-			updated := false
-			for i := range list {
-				if list[i].Reviewer == author {
-					list[i].Verdict = verdict
-					list[i].UpdatedAt = time.Now()
-					updated = true
-					break
-				}
-			}
-			if !updated {
-				list = append(list, db.Approval{
-					CLID:      clID,
-					Reviewer:  author,
-					Verdict:   verdict,
-					UpdatedAt: time.Now(),
-				})
-			}
-			demoApprovalsStore[clID] = list
-			demoApprovalsMu.Unlock()
-		}
+		h.publishDemoReview(clID, author, overallMsg, verdict)
 	}
 
 	h.emitter.Emit(r.Context(), events.New(
@@ -1021,7 +615,6 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 	}
 
 	ctx := r.Context()
-
 	cl, err := h.db.GetCL(ctx, clID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("changelist %d not found: %v", clID, err), http.StatusNotFound)
@@ -1033,66 +626,22 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		log.Printf("error listing patchsets for cl %d: %v", clID, err)
 	}
 
-	// 1. Determine active patchset and base patchset
-	currentPS := 1
+	defaultPS := 1
 	if len(patchsets) > 0 {
-		currentPS = patchsets[len(patchsets)-1].PatchsetNumber
+		defaultPS = patchsets[len(patchsets)-1].PatchsetNumber
 	}
-	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
-		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
-			currentPS = parsed
-		}
-	}
+	currentPS, basePS := parsePatchsetQueryParams(r, defaultPS)
+	baseTreeHash, modTreeHash := h.resolveTreeHashes(ctx, cl, currentPS, basePS)
 
-	basePS := 0 // 0 = Base CL
-	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
-		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
-			basePS = parsed
-		}
-	}
-
-	// 2. Resolve tree hashes for current patchset and base patchset
-	var modTreeHash []byte
-	psObj, psErr := h.db.GetPatchset(ctx, clID, currentPS)
-	if psErr == nil && len(psObj.RootTreeHash) > 0 {
-		modTreeHash = psObj.RootTreeHash
-	} else {
-		modTreeHash = cl.RootTreeHash
-	}
-
-	var baseTreeHash []byte
-	if basePS == 0 {
-		// Base CL
-		if cl.ParentCL != nil && *cl.ParentCL > 0 {
-			parentCL, parentErr := h.db.GetCL(ctx, *cl.ParentCL)
-			if parentErr == nil && len(parentCL.RootTreeHash) > 0 {
-				baseTreeHash = parentCL.RootTreeHash
-			}
-		}
-		if len(baseTreeHash) == 0 {
-			baseTreeHash = tree.EmptyTreeHash
-		}
-	} else {
-		basePSObj, basePSErr := h.db.GetPatchset(ctx, clID, basePS)
-		if basePSErr == nil && len(basePSObj.RootTreeHash) > 0 {
-			baseTreeHash = basePSObj.RootTreeHash
-		} else {
-			baseTreeHash = tree.EmptyTreeHash
-		}
-	}
-
-	// 3. Diff trees
 	fetchTree := func(hash []byte) ([]tree.Entry, error) {
 		return h.db.GetTreeEntries(ctx, hash)
 	}
-
 	files, err := diff.DiffTrees(ctx, fetchTree, baseTreeHash, modTreeHash)
 	if err != nil {
 		log.Printf("warning: error diffing trees: %v", err)
 		files = []diff.FileDiffSummary{}
 	}
 
-	// 4. Fetch all comments for CL and compute counts
 	allComments, err := h.db.ListAllComments(ctx, clID)
 	if err != nil {
 		log.Printf("error listing all comments: %v", err)
@@ -1110,93 +659,19 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		}
 	}
 
-	// 5. Select active file diff (only when explicitly requested)
 	if targetFile != "" {
 		_ = h.db.MarkFileReviewed(ctx, clID, targetFile, reviewer, true)
 	}
-
 	reviewedMap, _ := h.db.ListReviewedFiles(ctx, clID, reviewer)
-	if reviewedMap == nil {
-		reviewedMap = make(map[string]bool)
-	}
-
-	reviewedCount := 0
-	// 6. Populate file additions, deletions & reviewed status
-	for i := range files {
-		files[i].UnresolvedComments = commentsPerFile[files[i].Path]
-		files[i].Reviewed = reviewedMap[files[i].Path]
-		if files[i].Reviewed {
-			reviewedCount++
-		}
-		baseData, _ := h.readBlobBytes(files[i].BaseBlobSHA)
-		modData, _ := h.readBlobBytes(files[i].ModifiedBlobSHA)
-		d, err := diff.ComputeSideBySideDiff(files[i].Path, baseData, modData, files[i].Type)
-		if err == nil && d != nil {
-			files[i].Additions = d.Additions
-			files[i].Deletions = d.Deletions
-		}
-	}
+	reviewedCount := h.populateFileDiffStats(files, commentsPerFile, reviewedMap)
 
 	var selectedDetail *diff.FileDiffDetail
 	commentsByLine := make(map[int][]db.Comment)
-
 	if targetFile != "" {
-		var selectedSummary *diff.FileDiffSummary
-		for _, f := range files {
-			if f.Path == targetFile {
-				selectedSummary = &f
-				break
-			}
-		}
-
-		var baseBlobSHA, modBlobSHA []byte
-		changeType := "M"
-		if selectedSummary != nil {
-			baseBlobSHA = selectedSummary.BaseBlobSHA
-			modBlobSHA = selectedSummary.ModifiedBlobSHA
-			changeType = selectedSummary.Type
-		} else {
-			// Resolve manually from trees if not found in summary
-			baseEntry, _ := tree.ResolvePath(baseTreeHash, targetFile, fetchTree)
-			if baseEntry != nil {
-				baseBlobSHA = baseEntry.BlobSHA256
-			}
-			modEntry, _ := tree.ResolvePath(modTreeHash, targetFile, fetchTree)
-			if modEntry != nil {
-				modBlobSHA = modEntry.BlobSHA256
-			}
-		}
-
-		baseBytes, _ := h.readBlobBytes(baseBlobSHA)
-		modBytes, _ := h.readBlobBytes(modBlobSHA)
-
-		detail, err := diff.ComputeSideBySideDiff(targetFile, baseBytes, modBytes, changeType)
-		if err == nil && detail != nil {
-			if len(baseBlobSHA) > 0 {
-				detail.BaseBlobHex = hex.EncodeToString(baseBlobSHA)
-			}
-			if len(modBlobSHA) > 0 {
-				detail.ModBlobHex = hex.EncodeToString(modBlobSHA)
-			}
-			selectedDetail = detail
-		}
-
-		// Filter comments for this selected file (published or authored by reviewer)
-		fileComments, err := h.db.ListComments(ctx, clID, targetFile)
-		if err == nil {
-			for _, c := range fileComments {
-				if !c.IsDraft || c.Author == reviewer {
-					anchorLine := c.EndLineNumber
-					if anchorLine <= 0 {
-						anchorLine = c.LineNumber
-					}
-					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
-				}
-			}
-		}
+		selectedDetail, _ = h.resolveFileDiffDetail(ctx, targetFile, baseTreeHash, modTreeHash)
+		commentsByLine = h.getFileCommentsByLine(ctx, clID, targetFile, reviewer)
 	}
 
-	// 7. Approvals, Reviewers, and Policy Requirements
 	approvals, err := h.db.ListApprovals(ctx, clID)
 	if err != nil {
 		log.Printf("error listing approvals: %v", err)
@@ -1233,8 +708,7 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.CLDetail(data)
-	_ = component.Render(ctx, w)
+	_ = views.CLDetail(data).Render(ctx, w)
 }
 
 func (h *CLHandler) resolveCLPolicy(ctx context.Context, cl *db.Changelist) (reqApprovals int, allowUnresolved bool, requireGreen bool, ciRunners []string) {
@@ -1280,17 +754,7 @@ func (h *CLHandler) resolveCLPolicy(ctx context.Context, cl *db.Changelist) (req
 		return reqApprovals, allowUnresolved, requireGreen, nil
 	}
 
-	if policy.RequiredApprovals != nil && *policy.RequiredApprovals > reqApprovals {
-		reqApprovals = *policy.RequiredApprovals
-	}
-	if policy.AllowUnresolvedComments != nil {
-		if !*policy.AllowUnresolvedComments || h.config == nil {
-			allowUnresolved = *policy.AllowUnresolvedComments
-		}
-	}
-	if policy.RequireGreenCI != nil && *policy.RequireGreenCI {
-		requireGreen = true
-	}
+	reqApprovals, allowUnresolved, requireGreen = mergeOwnersPolicy(policy, reqApprovals, allowUnresolved, requireGreen)
 	return reqApprovals, allowUnresolved, requireGreen, policy.CIRunners
 }
 
@@ -1339,19 +803,7 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 		{PatchsetID: 2, CLID: clID, PatchsetNumber: 2, RootTreeHash: []byte{4, 5, 6}},
 	}
 
-	currentPS := 2
-	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
-		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
-			currentPS = parsed
-		}
-	}
-
-	basePS := 0
-	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
-		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
-			basePS = parsed
-		}
-	}
+	currentPS, basePS := parsePatchsetQueryParams(r, 2)
 
 	files := []diff.FileDiffSummary{
 		{Path: "internal/web/diff/engine.go", Type: "M"},
@@ -1394,30 +846,7 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 		detail, _ = computeDemoFileDiff(targetFile, changeType)
 	}
 
-	demoCommentsMu.RLock()
-	commentsByLine := make(map[int][]db.Comment)
-	unresolvedCount := 0
-	var reviewerDrafts []db.Comment
-	for key, list := range demoCommentsStore {
-		for _, c := range list {
-			if c.CLID == clID && c.Author == reviewer && c.IsDraft {
-				reviewerDrafts = append(reviewerDrafts, c)
-			}
-			if !c.IsDraft && !c.Resolved {
-				unresolvedCount++
-			}
-			if strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
-				if !c.IsDraft || c.Author == reviewer {
-					anchorLine := c.EndLineNumber
-					if anchorLine <= 0 {
-						anchorLine = c.LineNumber
-					}
-					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
-				}
-			}
-		}
-	}
-	demoCommentsMu.RUnlock()
+	commentsByLine, unresolvedCount, reviewerDrafts := resolveDemoCLComments(clID, targetFile, reviewer)
 
 	// Seed an initial demo comment if store is completely empty
 	if len(demoCommentsStore) == 0 && targetFile == "internal/web/diff/engine.go" {
@@ -1446,41 +875,12 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 	demoApprovalsMu.RLock()
 	approvals := demoApprovalsStore[clID]
 	demoApprovalsMu.RUnlock()
-
-	approvedCount := 0
-	for _, a := range approvals {
-		if a.Verdict == "approved" || a.Verdict == "lgtm" {
-			approvedCount++
-		}
-	}
+	approvedCount := countApprovedVerdicts(approvals)
 
 	demoReviewersMu.RLock()
 	rawReviewers := demoReviewersStore[clID]
 	demoReviewersMu.RUnlock()
-
-	verdictMap := make(map[string]string)
-	for _, a := range approvals {
-		verdictMap[a.Reviewer] = a.Verdict
-	}
-	found := make(map[string]bool)
-	var reviewerList []db.ReviewerAssignment
-	for _, rev := range rawReviewers {
-		if v, ok := verdictMap[rev.Reviewer]; ok {
-			rev.Verdict = v
-		}
-		reviewerList = append(reviewerList, rev)
-		found[rev.Reviewer] = true
-	}
-	for _, a := range approvals {
-		if !found[a.Reviewer] {
-			reviewerList = append(reviewerList, db.ReviewerAssignment{
-				CLID:      clID,
-				Reviewer:  a.Reviewer,
-				Verdict:   a.Verdict,
-				UpdatedAt: a.UpdatedAt,
-			})
-		}
-	}
+	reviewerList := consolidateReviewersWithApprovals(rawReviewers, approvals, clID)
 
 	reqApprovals := 0
 	allowUnresolved := false
@@ -1526,88 +926,23 @@ func (h *CLHandler) renderCLFileDiffPage(w http.ResponseWriter, r *http.Request,
 	}
 
 	patchsets, _ := h.db.ListPatchsets(ctx, clID)
-	currentPS := 1
+	defaultPS := 1
 	if len(patchsets) > 0 {
-		currentPS = patchsets[len(patchsets)-1].PatchsetNumber
+		defaultPS = patchsets[len(patchsets)-1].PatchsetNumber
 	}
-	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
-		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
-			currentPS = parsed
-		}
-	}
-
-	basePS := 0
-	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
-		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
-			basePS = parsed
-		}
-	}
-
+	currentPS, basePS := parsePatchsetQueryParams(r, defaultPS)
 	reviewer := h.resolveReviewer(r)
 	drafts, _ := h.db.ListDraftComments(ctx, clID, reviewer)
 
-	var modTreeHash []byte
-	psObj, psErr := h.db.GetPatchset(ctx, clID, currentPS)
-	if psErr == nil && len(psObj.RootTreeHash) > 0 {
-		modTreeHash = psObj.RootTreeHash
-	} else {
-		modTreeHash = cl.RootTreeHash
-	}
-
-	var baseTreeHash []byte
-	if basePS == 0 {
-		if cl.ParentCL != nil && *cl.ParentCL > 0 {
-			parentCL, parentErr := h.db.GetCL(ctx, *cl.ParentCL)
-			if parentErr == nil && len(parentCL.RootTreeHash) > 0 {
-				baseTreeHash = parentCL.RootTreeHash
-			}
-		}
-		if len(baseTreeHash) == 0 {
-			baseTreeHash = tree.EmptyTreeHash
-		}
-	} else {
-		basePSObj, basePSErr := h.db.GetPatchset(ctx, clID, basePS)
-		if basePSErr == nil && len(basePSObj.RootTreeHash) > 0 {
-			baseTreeHash = basePSObj.RootTreeHash
-		} else {
-			baseTreeHash = tree.EmptyTreeHash
-		}
-	}
-
-	fetchTree := func(hash []byte) ([]tree.Entry, error) {
-		return h.db.GetTreeEntries(ctx, hash)
-	}
-
-	baseEntry, _ := tree.ResolvePath(baseTreeHash, targetFile, fetchTree)
-	modEntry, _ := tree.ResolvePath(modTreeHash, targetFile, fetchTree)
-
-	changeType := "M"
-	var baseBlobSHA, modBlobSHA []byte
-	if baseEntry == nil && modEntry != nil {
-		changeType = "A"
-		modBlobSHA = modEntry.BlobSHA256
-	} else if baseEntry != nil && modEntry == nil {
-		changeType = "D"
-		baseBlobSHA = baseEntry.BlobSHA256
-	} else if baseEntry != nil && modEntry != nil {
-		baseBlobSHA = baseEntry.BlobSHA256
-		modBlobSHA = modEntry.BlobSHA256
-	}
-
-	baseData, _ := h.readBlobBytes(baseBlobSHA)
-	modData, _ := h.readBlobBytes(modBlobSHA)
-
-	detail, err := diff.ComputeSideBySideDiff(targetFile, baseData, modData, changeType)
+	baseTreeHash, modTreeHash := h.resolveTreeHashes(ctx, cl, currentPS, basePS)
+	detail, err := h.resolveFileDiffDetail(ctx, targetFile, baseTreeHash, modTreeHash)
 	if err != nil {
 		log.Printf("error computing side-by-side diff: %v", err)
 	}
-	if detail != nil {
-		if len(baseBlobSHA) > 0 {
-			detail.BaseBlobHex = hex.EncodeToString(baseBlobSHA)
-		}
-		if len(modBlobSHA) > 0 {
-			detail.ModBlobHex = hex.EncodeToString(modBlobSHA)
-		}
+
+	changeType := "M"
+	if detail != nil && detail.Type != "" {
+		changeType = detail.Type
 	}
 
 	if targetFile != "" {
@@ -1620,17 +955,7 @@ func (h *CLHandler) renderCLFileDiffPage(w http.ResponseWriter, r *http.Request,
 		isReviewed = reviewedMap[targetFile]
 	}
 
-	comments, _ := h.db.ListComments(ctx, clID, targetFile)
-	commentsByLine := make(map[int][]db.Comment)
-	for _, c := range comments {
-		if !c.IsDraft || c.Author == reviewer {
-			anchorLine := c.EndLineNumber
-			if anchorLine <= 0 {
-				anchorLine = c.LineNumber
-			}
-			commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
-		}
-	}
+	commentsByLine := h.getFileCommentsByLine(ctx, clID, targetFile, reviewer)
 
 	data := views.FileDiffPageData{
 		CLID:               clID,
@@ -1740,102 +1065,21 @@ func (h *CLHandler) renderCLDiffContent(w http.ResponseWriter, r *http.Request, 
 	}
 
 	patchsets, _ := h.db.ListPatchsets(ctx, clID)
-	currentPS := 1
+	defaultPS := 1
 	if len(patchsets) > 0 {
-		currentPS = patchsets[len(patchsets)-1].PatchsetNumber
+		defaultPS = patchsets[len(patchsets)-1].PatchsetNumber
 	}
-	if psQuery := r.URL.Query().Get("ps"); psQuery != "" {
-		if parsed, err := strconv.Atoi(psQuery); err == nil && parsed > 0 {
-			currentPS = parsed
-		}
-	}
+	currentPS, basePS := parsePatchsetQueryParams(r, defaultPS)
+	baseTreeHash, modTreeHash := h.resolveTreeHashes(ctx, cl, currentPS, basePS)
 
-	basePS := 0
-	if basePSQuery := r.URL.Query().Get("base_ps"); basePSQuery != "" {
-		if parsed, err := strconv.Atoi(basePSQuery); err == nil && parsed >= 0 {
-			basePS = parsed
-		}
-	}
-
-	var modTreeHash []byte
-	psObj, psErr := h.db.GetPatchset(ctx, clID, currentPS)
-	if psErr == nil && len(psObj.RootTreeHash) > 0 {
-		modTreeHash = psObj.RootTreeHash
-	} else {
-		modTreeHash = cl.RootTreeHash
-	}
-
-	var baseTreeHash []byte
-	if basePS == 0 {
-		if cl.ParentCL != nil && *cl.ParentCL > 0 {
-			parentCL, parentErr := h.db.GetCL(ctx, *cl.ParentCL)
-			if parentErr == nil && len(parentCL.RootTreeHash) > 0 {
-				baseTreeHash = parentCL.RootTreeHash
-			}
-		}
-		if len(baseTreeHash) == 0 {
-			baseTreeHash = tree.EmptyTreeHash
-		}
-	} else {
-		basePSObj, basePSErr := h.db.GetPatchset(ctx, clID, basePS)
-		if basePSErr == nil && len(basePSObj.RootTreeHash) > 0 {
-			baseTreeHash = basePSObj.RootTreeHash
-		} else {
-			baseTreeHash = tree.EmptyTreeHash
-		}
-	}
-
-	fetchTree := func(hash []byte) ([]tree.Entry, error) {
-		return h.db.GetTreeEntries(ctx, hash)
-	}
-
-	var baseBlobSHA, modBlobSHA []byte
-	changeType := "M"
-
-	baseEntry, _ := tree.ResolvePath(baseTreeHash, targetFile, fetchTree)
-	if baseEntry != nil {
-		baseBlobSHA = baseEntry.BlobSHA256
-	}
-	modEntry, _ := tree.ResolvePath(modTreeHash, targetFile, fetchTree)
-	if modEntry != nil {
-		modBlobSHA = modEntry.BlobSHA256
-	}
-
-	if baseBlobSHA == nil && modBlobSHA != nil {
-		changeType = "A"
-	} else if baseBlobSHA != nil && modBlobSHA == nil {
-		changeType = "D"
-	}
-
-	baseBytes, _ := h.readBlobBytes(baseBlobSHA)
-	modBytes, _ := h.readBlobBytes(modBlobSHA)
-
-	detail, err := diff.ComputeSideBySideDiff(targetFile, baseBytes, modBytes, changeType)
+	detail, err := h.resolveFileDiffDetail(ctx, targetFile, baseTreeHash, modTreeHash)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("error computing diff for %s: %v", targetFile, err), http.StatusInternalServerError)
 		return
 	}
-	if detail != nil {
-		if len(baseBlobSHA) > 0 {
-			detail.BaseBlobHex = hex.EncodeToString(baseBlobSHA)
-		}
-		if len(modBlobSHA) > 0 {
-			detail.ModBlobHex = hex.EncodeToString(modBlobSHA)
-		}
-	}
 
 	reviewer := h.resolveReviewer(r)
-	fileComments, _ := h.db.ListComments(ctx, clID, targetFile)
-	commentsByLine := make(map[int][]db.Comment)
-	for _, c := range fileComments {
-		if !c.IsDraft || c.Author == reviewer {
-			anchorLine := c.EndLineNumber
-			if anchorLine <= 0 {
-				anchorLine = c.LineNumber
-			}
-			commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
-		}
-	}
+	commentsByLine := h.getFileCommentsByLine(ctx, clID, targetFile, reviewer)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = views.DiffView(clID, currentPS, basePS, detail, commentsByLine).Render(r.Context(), w)
@@ -1951,14 +1195,12 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseHash, modH
 func (h *CLHandler) buildCIRunnerItems(ctx context.Context, clID int64, patchsetNum int, requiredCIRunners []string) []views.CIRunnerItem {
 	var checkRuns []db.CheckRun
 	if h.db != nil {
-		rList, err := h.db.ListCheckRunsForPatchset(ctx, clID, patchsetNum)
-		if err == nil {
+		if rList, err := h.db.ListCheckRunsForPatchset(ctx, clID, patchsetNum); err == nil {
 			checkRuns = rList
 		}
 	} else {
 		demoCheckRunsMu.RLock()
-		key := fmt.Sprintf("%d:%d", clID, patchsetNum)
-		checkRuns = demoCheckRunsStore[key]
+		checkRuns = demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, patchsetNum)]
 		demoCheckRunsMu.RUnlock()
 	}
 
@@ -1967,61 +1209,35 @@ func (h *CLHandler) buildCIRunnerItems(ctx context.Context, clID int64, patchset
 		reqSet[strings.ToLower(strings.TrimSpace(r))] = true
 	}
 
-	seenRunners := make(map[string]bool)
+	seenRunners := make(map[string]bool, len(checkRuns)+len(requiredCIRunners))
 	var runnerItems []views.CIRunnerItem
 
 	for _, cr := range checkRuns {
 		norm := strings.ToLower(strings.TrimSpace(cr.RunnerName))
 		seenRunners[norm] = true
 
-		var durationStr string
-		if cr.StartedAt != nil {
-			if cr.CompletedAt != nil {
-				durationStr = cr.CompletedAt.Sub(*cr.StartedAt).Round(time.Millisecond * 100).String()
-			} else {
-				durationStr = time.Since(*cr.StartedAt).Round(time.Second).String()
-			}
-		}
-
 		var logHex string
 		if len(cr.LogBlobSHA256) > 0 {
 			logHex = hex.EncodeToString(cr.LogBlobSHA256)
 		}
 
-		provider := cr.Provider
-		if (provider == "" || provider == "local") && h.config != nil && h.config.CI.Runners != nil {
-			if rCfg, ok := h.config.CI.Runners[cr.RunnerName]; ok && rCfg.Provider != "" {
-				provider = rCfg.Provider
-			}
-		}
-		if provider == "" {
-			provider = "local"
-		}
-
 		runnerItems = append(runnerItems, views.CIRunnerItem{
 			RunnerName:  cr.RunnerName,
-			Provider:    provider,
+			Provider:    h.resolveRunnerProvider(cr.RunnerName, cr.Provider),
 			Status:      strings.ToLower(cr.Status),
 			IsRequired:  reqSet[norm],
 			ExternalURL: cr.ExternalURL,
 			LogBlobHex:  logHex,
-			Duration:    durationStr,
+			Duration:    formatCheckRunDuration(cr),
 		})
 	}
 
-	// For any required runner from OWNERS.toml that hasn't reported a check run yet:
 	for _, reqName := range requiredCIRunners {
 		norm := strings.ToLower(strings.TrimSpace(reqName))
 		if !seenRunners[norm] {
-			provider := "local"
-			if h.config != nil && h.config.CI.Runners != nil {
-				if rCfg, ok := h.config.CI.Runners[reqName]; ok && rCfg.Provider != "" {
-					provider = rCfg.Provider
-				}
-			}
 			runnerItems = append(runnerItems, views.CIRunnerItem{
 				RunnerName: reqName,
-				Provider:   provider,
+				Provider:   h.resolveRunnerProvider(reqName, ""),
 				Status:     "queued",
 				IsRequired: true,
 			})

@@ -64,52 +64,189 @@ func ThreeWayTreeMerge(
 	return mergedHash, nil, err
 }
 
-func threeWayTreeMergeInternal(
+func fetchTreeMap(treeHash []byte, label string, fetchTree FetchTreeFunc) (map[string]Entry, error) {
+	entryMap := make(map[string]Entry)
+	if len(treeHash) > 0 && !bytes.Equal(treeHash, EmptyTreeHash) {
+		entries, err := fetchTree(treeHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch %s tree %x: %w", label, treeHash, err)
+		}
+		for _, e := range entries {
+			entryMap[e.Name] = e
+		}
+	}
+	return entryMap, nil
+}
+
+func mergeBothAddedEntry(
 	ctx context.Context,
-	dirPath string,
-	ancestorHash, theirsHash, mineHash []byte,
+	name, filePath string,
+	hasTheirs, hasMine bool,
+	theirs, mine Entry,
 	fetchTree FetchTreeFunc,
 	readBlob ReadBlobFunc,
 	writeBlob WriteBlobFunc,
 	writeTree WriteTreeFunc,
 	theirsLabel, mineLabel string,
-) ([]byte, []Conflict, error) {
-	ancMap := make(map[string]Entry)
-	theirsMap := make(map[string]Entry)
-	mineMap := make(map[string]Entry)
-
-	if len(ancestorHash) > 0 && !bytes.Equal(ancestorHash, EmptyTreeHash) {
-		entries, err := fetchTree(ancestorHash)
+) ([]Entry, []Conflict, error) {
+	if hasMine && !hasTheirs {
+		return []Entry{mine}, nil, nil
+	}
+	if !hasMine && hasTheirs {
+		return []Entry{theirs}, nil, nil
+	}
+	if mine.IsDir() && theirs.IsDir() {
+		subHash, subConflicts, err := threeWayTreeMergeInternal(
+			ctx, filePath, nil, theirs.SubTreeHash, mine.SubTreeHash,
+			fetchTree, readBlob, writeBlob, writeTree, theirsLabel, mineLabel,
+		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to fetch ancestor tree %x: %w", ancestorHash, err)
+			return nil, nil, err
 		}
-		for _, e := range entries {
-			ancMap[e.Name] = e
+		var entries []Entry
+		if len(subHash) > 0 && !bytes.Equal(subHash, EmptyTreeHash) {
+			entries = append(entries, Entry{
+				Name:        name,
+				Mode:        0040755,
+				SubTreeHash: subHash,
+			})
 		}
+		return entries, subConflicts, nil
+	}
+	if !mine.IsDir() && !theirs.IsDir() {
+		theirsBytes, err := readBlob(theirs.BlobSHA256)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read theirs blob %x for %s: %w", theirs.BlobSHA256, filePath, err)
+		}
+		mineBytes, err := readBlob(mine.BlobSHA256)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read mine blob %x for %s: %w", mine.BlobSHA256, filePath, err)
+		}
+
+		mergedBytes, hasConflict, hunks := Merge3Way(nil, theirsBytes, mineBytes, theirsLabel, mineLabel)
+		blobSHA, err := writeBlob(mergedBytes)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to write merged blob for %s: %w", filePath, err)
+		}
+
+		entries := []Entry{{
+			Name:       name,
+			Mode:       mine.Mode,
+			Size:       uint64(len(mergedBytes)),
+			BlobSHA256: blobSHA,
+		}}
+		var conflicts []Conflict
+		if hasConflict {
+			conflicts = append(conflicts, Conflict{
+				Path:             filePath,
+				Reason:           "both_added_conflict",
+				ConflictHunks:    hunks,
+				ConflictedOutput: mergedBytes,
+			})
+		}
+		return entries, conflicts, nil
 	}
 
-	if len(theirsHash) > 0 && !bytes.Equal(theirsHash, EmptyTreeHash) {
-		entries, err := fetchTree(theirsHash)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to fetch theirs tree %x: %w", theirsHash, err)
-		}
-		for _, e := range entries {
-			theirsMap[e.Name] = e
-		}
+	conflicts := []Conflict{{
+		Path:   filePath,
+		Reason: "type_conflict",
+	}}
+	return []Entry{mine}, conflicts, nil
+}
+
+func mergeChangedBlobs(
+	filePath, name string,
+	anc, theirs, mine Entry,
+	readBlob ReadBlobFunc,
+	writeBlob WriteBlobFunc,
+	theirsLabel, mineLabel string,
+) ([]Entry, []Conflict, error) {
+	ancBytes, err := readBlob(anc.BlobSHA256)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read ancestor blob %x for %s: %w", anc.BlobSHA256, filePath, err)
+	}
+	theirsBytes, err := readBlob(theirs.BlobSHA256)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read theirs blob %x for %s: %w", theirs.BlobSHA256, filePath, err)
+	}
+	mineBytes, err := readBlob(mine.BlobSHA256)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read mine blob %x for %s: %w", mine.BlobSHA256, filePath, err)
 	}
 
-	if len(mineHash) > 0 && !bytes.Equal(mineHash, EmptyTreeHash) {
-		entries, err := fetchTree(mineHash)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to fetch mine tree %x: %w", mineHash, err)
-		}
-		for _, e := range entries {
-			mineMap[e.Name] = e
-		}
+	mergedBytes, hasConflict, hunks := Merge3Way(ancBytes, theirsBytes, mineBytes, theirsLabel, mineLabel)
+	blobSHA, err := writeBlob(mergedBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to write merged blob for %s: %w", filePath, err)
 	}
 
-	// Build unique sorted union of all item names
-	nameSet := make(map[string]struct{})
+	entries := []Entry{{
+		Name:       name,
+		Mode:       mine.Mode,
+		Size:       uint64(len(mergedBytes)),
+		BlobSHA256: blobSHA,
+	}}
+	var conflicts []Conflict
+	if hasConflict {
+		conflicts = append(conflicts, Conflict{
+			Path:             filePath,
+			Reason:           "content_conflict",
+			ConflictHunks:    hunks,
+			ConflictedOutput: mergedBytes,
+		})
+	}
+	return entries, conflicts, nil
+}
+
+func mergeBothChangedEntry(
+	ctx context.Context,
+	name, filePath string,
+	hasTheirs, hasMine bool,
+	anc, theirs, mine Entry,
+	fetchTree FetchTreeFunc,
+	readBlob ReadBlobFunc,
+	writeBlob WriteBlobFunc,
+	writeTree WriteTreeFunc,
+	theirsLabel, mineLabel string,
+) ([]Entry, []Conflict, error) {
+	if !hasTheirs && !hasMine {
+		return nil, nil, nil
+	}
+	if !hasTheirs && hasMine {
+		return []Entry{mine}, []Conflict{{Path: filePath, Reason: "delete_modify"}}, nil
+	}
+	if hasTheirs && !hasMine {
+		return []Entry{theirs}, []Conflict{{Path: filePath, Reason: "modify_delete"}}, nil
+	}
+
+	if mine.IsDir() && theirs.IsDir() && anc.IsDir() {
+		subHash, subConflicts, err := threeWayTreeMergeInternal(
+			ctx, filePath, anc.SubTreeHash, theirs.SubTreeHash, mine.SubTreeHash,
+			fetchTree, readBlob, writeBlob, writeTree, theirsLabel, mineLabel,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		var entries []Entry
+		if len(subHash) > 0 && !bytes.Equal(subHash, EmptyTreeHash) {
+			entries = append(entries, Entry{
+				Name:        name,
+				Mode:        0040755,
+				SubTreeHash: subHash,
+			})
+		}
+		return entries, subConflicts, nil
+	}
+
+	if !mine.IsDir() && !theirs.IsDir() && !anc.IsDir() {
+		return mergeChangedBlobs(filePath, name, anc, theirs, mine, readBlob, writeBlob, theirsLabel, mineLabel)
+	}
+
+	return []Entry{mine}, []Conflict{{Path: filePath, Reason: "type_conflict"}}, nil
+}
+
+func collectAllNames(ancMap, theirsMap, mineMap map[string]Entry) []string {
+	nameSet := make(map[string]struct{}, len(ancMap)+len(theirsMap)+len(mineMap))
 	for k := range ancMap {
 		nameSet[k] = struct{}{}
 	}
@@ -125,6 +262,75 @@ func threeWayTreeMergeInternal(
 		names = append(names, k)
 	}
 	sort.Strings(names)
+	return names
+}
+
+func resolveThreeWayEntry(
+	ctx context.Context,
+	name, filePath string,
+	hasAnc, hasTheirs, hasMine bool,
+	anc, theirs, mine Entry,
+	fetchTree FetchTreeFunc,
+	readBlob ReadBlobFunc,
+	writeBlob WriteBlobFunc,
+	writeTree WriteTreeFunc,
+	theirsLabel, mineLabel string,
+) ([]Entry, []Conflict, error) {
+	if hasMine && hasAnc && equalEntries(mine, anc) {
+		if hasTheirs {
+			return []Entry{theirs}, nil, nil
+		}
+		return nil, nil, nil
+	}
+
+	if hasTheirs && hasAnc && equalEntries(theirs, anc) {
+		if hasMine {
+			return []Entry{mine}, nil, nil
+		}
+		return nil, nil, nil
+	}
+
+	if hasMine && hasTheirs && equalEntries(mine, theirs) {
+		return []Entry{mine}, nil, nil
+	}
+
+	if !hasAnc {
+		return mergeBothAddedEntry(
+			ctx, name, filePath, hasTheirs, hasMine, theirs, mine,
+			fetchTree, readBlob, writeBlob, writeTree, theirsLabel, mineLabel,
+		)
+	}
+
+	return mergeBothChangedEntry(
+		ctx, name, filePath, hasTheirs, hasMine, anc, theirs, mine,
+		fetchTree, readBlob, writeBlob, writeTree, theirsLabel, mineLabel,
+	)
+}
+
+func threeWayTreeMergeInternal(
+	ctx context.Context,
+	dirPath string,
+	ancestorHash, theirsHash, mineHash []byte,
+	fetchTree FetchTreeFunc,
+	readBlob ReadBlobFunc,
+	writeBlob WriteBlobFunc,
+	writeTree WriteTreeFunc,
+	theirsLabel, mineLabel string,
+) ([]byte, []Conflict, error) {
+	ancMap, err := fetchTreeMap(ancestorHash, "ancestor", fetchTree)
+	if err != nil {
+		return nil, nil, err
+	}
+	theirsMap, err := fetchTreeMap(theirsHash, "theirs", fetchTree)
+	if err != nil {
+		return nil, nil, err
+	}
+	mineMap, err := fetchTreeMap(mineHash, "mine", fetchTree)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	names := collectAllNames(ancMap, theirsMap, mineMap)
 
 	var mergedEntries []Entry
 	var allConflicts []Conflict
@@ -139,191 +345,15 @@ func threeWayTreeMergeInternal(
 		theirs, hasTheirs := theirsMap[name]
 		mine, hasMine := mineMap[name]
 
-		// 1. Unchanged in mine: accept theirs
-		if hasMine && hasAnc && equalEntries(mine, anc) {
-			if hasTheirs {
-				mergedEntries = append(mergedEntries, theirs)
-			}
-			// if !hasTheirs, parent deleted it -> omit
-			continue
+		resEntries, resConflicts, err := resolveThreeWayEntry(
+			ctx, name, filePath, hasAnc, hasTheirs, hasMine, anc, theirs, mine,
+			fetchTree, readBlob, writeBlob, writeTree, theirsLabel, mineLabel,
+		)
+		if err != nil {
+			return nil, nil, err
 		}
-
-		// 2. Unchanged in theirs: accept mine
-		if hasTheirs && hasAnc && equalEntries(theirs, anc) {
-			if hasMine {
-				mergedEntries = append(mergedEntries, mine)
-			}
-			// if !hasMine, child deleted it -> omit
-			continue
-		}
-
-		// 3. Both modified identically
-		if hasMine && hasTheirs && equalEntries(mine, theirs) {
-			mergedEntries = append(mergedEntries, mine)
-			continue
-		}
-
-		// 4. Newly added in either or both (not present in ancestor)
-		if !hasAnc {
-			if hasMine && !hasTheirs {
-				mergedEntries = append(mergedEntries, mine)
-				continue
-			}
-			if !hasMine && hasTheirs {
-				mergedEntries = append(mergedEntries, theirs)
-				continue
-			}
-			// Both added something with same name
-			if mine.IsDir() && theirs.IsDir() {
-				subHash, subConflicts, err := threeWayTreeMergeInternal(
-					ctx, filePath, nil, theirs.SubTreeHash, mine.SubTreeHash,
-					fetchTree, readBlob, writeBlob, writeTree, theirsLabel, mineLabel,
-				)
-				if err != nil {
-					return nil, nil, err
-				}
-				allConflicts = append(allConflicts, subConflicts...)
-				if len(subHash) > 0 && !bytes.Equal(subHash, EmptyTreeHash) {
-					mergedEntries = append(mergedEntries, Entry{
-						Name:        name,
-						Mode:        0040755,
-						SubTreeHash: subHash,
-					})
-				}
-				continue
-			}
-			if !mine.IsDir() && !theirs.IsDir() {
-				// Both added files
-				theirsBytes, err := readBlob(theirs.BlobSHA256)
-				if err != nil {
-					return nil, nil, fmt.Errorf("failed to read theirs blob %x for %s: %w", theirs.BlobSHA256, filePath, err)
-				}
-				mineBytes, err := readBlob(mine.BlobSHA256)
-				if err != nil {
-					return nil, nil, fmt.Errorf("failed to read mine blob %x for %s: %w", mine.BlobSHA256, filePath, err)
-				}
-
-				mergedBytes, hasConflict, hunks := Merge3Way(nil, theirsBytes, mineBytes, theirsLabel, mineLabel)
-				blobSHA, err := writeBlob(mergedBytes)
-				if err != nil {
-					return nil, nil, fmt.Errorf("failed to write merged blob for %s: %w", filePath, err)
-				}
-
-				mergedEntries = append(mergedEntries, Entry{
-					Name:       name,
-					Mode:       mine.Mode,
-					Size:       uint64(len(mergedBytes)),
-					BlobSHA256: blobSHA,
-				})
-
-				if hasConflict {
-					allConflicts = append(allConflicts, Conflict{
-						Path:             filePath,
-						Reason:           "both_added_conflict",
-						ConflictHunks:    hunks,
-						ConflictedOutput: mergedBytes,
-					})
-				}
-				continue
-			}
-
-			// Type mismatch (one added file, one added dir)
-			allConflicts = append(allConflicts, Conflict{
-				Path:   filePath,
-				Reason: "type_conflict",
-			})
-			mergedEntries = append(mergedEntries, mine)
-			continue
-		}
-
-		// 5. Present in ancestor, modified/deleted in either or both
-		if !hasTheirs && !hasMine {
-			// Both deleted
-			continue
-		}
-		if !hasTheirs && hasMine {
-			// Parent deleted, child modified
-			allConflicts = append(allConflicts, Conflict{
-				Path:   filePath,
-				Reason: "delete_modify",
-			})
-			mergedEntries = append(mergedEntries, mine)
-			continue
-		}
-		if hasTheirs && !hasMine {
-			// Parent modified, child deleted
-			allConflicts = append(allConflicts, Conflict{
-				Path:   filePath,
-				Reason: "modify_delete",
-			})
-			mergedEntries = append(mergedEntries, theirs)
-			continue
-		}
-
-		// Both present and both changed differently
-		if mine.IsDir() && theirs.IsDir() && anc.IsDir() {
-			subHash, subConflicts, err := threeWayTreeMergeInternal(
-				ctx, filePath, anc.SubTreeHash, theirs.SubTreeHash, mine.SubTreeHash,
-				fetchTree, readBlob, writeBlob, writeTree, theirsLabel, mineLabel,
-			)
-			if err != nil {
-				return nil, nil, err
-			}
-			allConflicts = append(allConflicts, subConflicts...)
-			if len(subHash) > 0 && !bytes.Equal(subHash, EmptyTreeHash) {
-				mergedEntries = append(mergedEntries, Entry{
-					Name:        name,
-					Mode:        0040755,
-					SubTreeHash: subHash,
-				})
-			}
-			continue
-		}
-
-		if !mine.IsDir() && !theirs.IsDir() && !anc.IsDir() {
-			ancBytes, err := readBlob(anc.BlobSHA256)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read ancestor blob %x for %s: %w", anc.BlobSHA256, filePath, err)
-			}
-			theirsBytes, err := readBlob(theirs.BlobSHA256)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read theirs blob %x for %s: %w", theirs.BlobSHA256, filePath, err)
-			}
-			mineBytes, err := readBlob(mine.BlobSHA256)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read mine blob %x for %s: %w", mine.BlobSHA256, filePath, err)
-			}
-
-			mergedBytes, hasConflict, hunks := Merge3Way(ancBytes, theirsBytes, mineBytes, theirsLabel, mineLabel)
-			blobSHA, err := writeBlob(mergedBytes)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to write merged blob for %s: %w", filePath, err)
-			}
-
-			mergedEntries = append(mergedEntries, Entry{
-				Name:       name,
-				Mode:       mine.Mode,
-				Size:       uint64(len(mergedBytes)),
-				BlobSHA256: blobSHA,
-			})
-
-			if hasConflict {
-				allConflicts = append(allConflicts, Conflict{
-					Path:             filePath,
-					Reason:           "content_conflict",
-					ConflictHunks:    hunks,
-					ConflictedOutput: mergedBytes,
-				})
-			}
-			continue
-		}
-
-		// Type conflict between versions
-		allConflicts = append(allConflicts, Conflict{
-			Path:   filePath,
-			Reason: "type_conflict",
-		})
-		mergedEntries = append(mergedEntries, mine)
+		mergedEntries = append(mergedEntries, resEntries...)
+		allConflicts = append(allConflicts, resConflicts...)
 	}
 
 	if len(mergedEntries) == 0 {

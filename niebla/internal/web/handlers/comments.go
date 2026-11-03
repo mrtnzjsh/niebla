@@ -181,12 +181,22 @@ func (h *CommentsHandler) HandleGetCommentBox(w http.ResponseWriter, r *http.Req
 	_ = component.Render(h.renderContext(r.Context()), w)
 }
 
-// HandleCreateComment creates a new inline draft comment on a specific code line or multi-line range.
-// POST /cl/{id}/comments
-func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Request) {
+type createCommentParams struct {
+	clID                int64
+	psNum               int
+	filePath            string
+	line, endLine       int
+	side                string
+	author              string
+	body                string
+	resolved            bool
+	suggStart, suggEnd int
+	suggCode            string
+}
+
+func (h *CommentsHandler) parseCreateCommentParams(r *http.Request) (*createCommentParams, error) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "failed to parse form", http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("failed to parse form: %w", err)
 	}
 
 	clIDStr := r.FormValue("cl_id")
@@ -195,15 +205,13 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 	}
 	clID, err := strconv.ParseInt(clIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid cl_id", http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("invalid cl_id")
 	}
 
 	filePath := r.FormValue("file_path")
 	line, err := strconv.Atoi(r.FormValue("line_number"))
 	if err != nil || line <= 0 {
-		http.Error(w, "invalid line_number", http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("invalid line_number")
 	}
 
 	endLine, _ := strconv.Atoi(r.FormValue("end_line_number"))
@@ -231,8 +239,7 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 
 	body := strings.TrimSpace(r.FormValue("body"))
 	if body == "" {
-		http.Error(w, "comment body cannot be empty", http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("comment body cannot be empty")
 	}
 
 	suggStart, _ := strconv.Atoi(r.FormValue("suggestion_start_line"))
@@ -251,58 +258,115 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 		body = db.FormatSuggestionMarkdown(body, suggCode)
 	}
 
-	resolved := r.FormValue("resolved") == "true"
+	return &createCommentParams{
+		clID:       clID,
+		psNum:      psNum,
+		filePath:   filePath,
+		line:       line,
+		endLine:    endLine,
+		side:       side,
+		author:     author,
+		body:       body,
+		resolved:   r.FormValue("resolved") == "true",
+		suggStart:  suggStart,
+		suggEnd:    suggEnd,
+		suggCode:   suggCode,
+	}, nil
+}
+
+// HandleCreateComment creates a new inline draft comment on a specific code line or multi-line range.
+// POST /cl/{id}/comments
+func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Request) {
+	p, err := h.parseCreateCommentParams(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	var comments []db.Comment
 
 	if h.db != nil {
 		// New inline comments are saved as unposted drafts (IsDraft = true)
-		newComment, err := h.db.CreateCommentWithSuggestion(r.Context(), clID, psNum, filePath, line, endLine, side, author, body, nil, true, suggStart, suggEnd, suggCode)
+		newComment, err := h.db.CreateCommentWithSuggestion(r.Context(), p.clID, p.psNum, p.filePath, p.line, p.endLine, p.side, p.author, p.body, nil, true, p.suggStart, p.suggEnd, p.suggCode)
 		if err != nil {
 			log.Printf("failed to insert draft comment: %v", err)
 			http.Error(w, "failed to record draft comment", http.StatusInternalServerError)
 			return
 		}
 
-		if resolved {
+		if p.resolved {
 			_ = h.db.ResolveComment(r.Context(), newComment.ID, true)
 		}
 
-		rawComments, err := h.db.ListCommentsForLine(r.Context(), clID, filePath, endLine, side)
+		rawComments, err := h.db.ListCommentsForLine(r.Context(), p.clID, p.filePath, p.endLine, p.side)
 		if err != nil {
 			log.Printf("error fetching updated comments: %v", err)
 		}
-		comments = filterVisibleComments(rawComments, author)
+		comments = filterVisibleComments(rawComments, p.author)
 	} else {
 		demoCommentsMu.Lock()
 		nextCommentID++
 		c := db.Comment{
 			ID:                  nextCommentID,
-			CLID:                clID,
-			PatchsetNumber:      psNum,
-			FilePath:            filePath,
-			LineNumber:          line,
-			EndLineNumber:       endLine,
-			Side:                side,
-			Author:              author,
-			Body:                body,
-			Resolved:            resolved,
+			CLID:                p.clID,
+			PatchsetNumber:      p.psNum,
+			FilePath:            p.filePath,
+			LineNumber:          p.line,
+			EndLineNumber:       p.endLine,
+			Side:                p.side,
+			Author:              p.author,
+			Body:                p.body,
+			Resolved:            p.resolved,
 			IsDraft:             true,
-			HasSuggestion:       suggCode != "",
-			SuggestionStartLine: suggStart,
-			SuggestionEndLine:   suggEnd,
-			SuggestionCode:      suggCode,
+			HasSuggestion:       p.suggCode != "",
+			SuggestionStartLine: p.suggStart,
+			SuggestionEndLine:   p.suggEnd,
+			SuggestionCode:      p.suggCode,
 			CreatedAt:           time.Now(),
 		}
-		key := fmt.Sprintf("%d:%s:%d:%s", clID, filePath, endLine, side)
+		key := fmt.Sprintf("%d:%s:%d:%s", p.clID, p.filePath, p.endLine, p.side)
 		demoCommentsStore[key] = append(demoCommentsStore[key], c)
-		comments = filterVisibleComments(demoCommentsStore[key], author)
+		comments = filterVisibleComments(demoCommentsStore[key], p.author)
 		demoCommentsMu.Unlock()
 	}
 
-	draftCount := h.countDrafts(r, clID, author)
+	draftCount := h.countDrafts(r, p.clID, p.author)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	component := views.CommentBox(clID, psNum, filePath, line, endLine, side, comments, draftCount)
+	component := views.CommentBox(p.clID, p.psNum, p.filePath, p.line, p.endLine, p.side, comments, draftCount)
 	_ = component.Render(h.renderContext(r.Context()), w)
+}
+
+func discardDemoDraftComment(commentID int64, author string) (clID int64, psNum int, filePath string, line, endLine int, side string, comments []db.Comment, found bool) {
+	demoCommentsMu.Lock()
+	defer demoCommentsMu.Unlock()
+
+	var matchedKey string
+	for k, list := range demoCommentsStore {
+		for i := range list {
+			if list[i].ID == commentID && list[i].IsDraft && list[i].Author == author {
+				clID = list[i].CLID
+				psNum = list[i].PatchsetNumber
+				filePath = list[i].FilePath
+				line = list[i].LineNumber
+				endLine = list[i].EndLineNumber
+				if endLine <= 0 {
+					endLine = line
+				}
+				side = list[i].Side
+				matchedKey = k
+				demoCommentsStore[k] = append(list[:i], list[i+1:]...)
+				break
+			}
+		}
+		if matchedKey != "" {
+			break
+		}
+	}
+	if matchedKey != "" {
+		comments = filterVisibleComments(demoCommentsStore[matchedKey], author)
+		return clID, psNum, filePath, line, endLine, side, comments, true
+	}
+	return 0, 0, "", 0, 0, "", nil, false
 }
 
 // HandleDiscardComment deletes an unposted draft comment.
@@ -366,35 +430,9 @@ func (h *CommentsHandler) HandleDiscardComment(w http.ResponseWriter, r *http.Re
 		}
 		comments = filterVisibleComments(rawComments, author)
 	} else {
-		demoCommentsMu.Lock()
-		var matchedKey string
-		for k, list := range demoCommentsStore {
-			for i := range list {
-				if list[i].ID == commentID && list[i].IsDraft && list[i].Author == author {
-					clID = list[i].CLID
-					patchsetNumber = list[i].PatchsetNumber
-					filePath = list[i].FilePath
-					line = list[i].LineNumber
-					endLine = list[i].EndLineNumber
-					if endLine <= 0 {
-						endLine = line
-					}
-					side = list[i].Side
-					matchedKey = k
-					demoCommentsStore[k] = append(list[:i], list[i+1:]...)
-					break
-				}
-			}
-			if matchedKey != "" {
-				break
-			}
-		}
-		if matchedKey != "" {
-			comments = filterVisibleComments(demoCommentsStore[matchedKey], author)
-		}
-		demoCommentsMu.Unlock()
-
-		if matchedKey == "" {
+		var found bool
+		clID, patchsetNumber, filePath, line, endLine, side, comments, found = discardDemoDraftComment(commentID, author)
+		if !found {
 			http.Error(w, "draft comment not found", http.StatusNotFound)
 			return
 		}

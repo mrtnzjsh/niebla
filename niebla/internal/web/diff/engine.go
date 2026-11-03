@@ -91,6 +91,40 @@ func DiffTrees(ctx context.Context, fetchTree tree.FetchTreeFunc, baseTreeHash, 
 	return results, nil
 }
 
+func compareTreeEntry(fetchTree tree.FetchTreeFunc, filePath string, baseEntry, modEntry tree.Entry, inBase, inMod bool, out *[]FileDiffSummary) error {
+	if inBase && inMod {
+		if baseEntry.IsDir() && modEntry.IsDir() {
+			if !bytes.Equal(baseEntry.SubTreeHash, modEntry.SubTreeHash) {
+				return traverseTrees(fetchTree, filePath, baseEntry.SubTreeHash, modEntry.SubTreeHash, out)
+			}
+			return nil
+		}
+		if !baseEntry.IsDir() && !modEntry.IsDir() {
+			if !bytes.Equal(baseEntry.BlobSHA256, modEntry.BlobSHA256) {
+				*out = append(*out, FileDiffSummary{
+					Path:            filePath,
+					Type:            "M",
+					BaseBlobSHA:     baseEntry.BlobSHA256,
+					ModifiedBlobSHA: modEntry.BlobSHA256,
+				})
+			}
+			return nil
+		}
+		// Replaced directory with file or vice-versa
+		if err := collectSubtree(fetchTree, filePath, baseEntry, "D", out); err != nil {
+			return err
+		}
+		return collectSubtree(fetchTree, filePath, modEntry, "A", out)
+	}
+	if inBase {
+		return collectSubtree(fetchTree, filePath, baseEntry, "D", out)
+	}
+	if inMod {
+		return collectSubtree(fetchTree, filePath, modEntry, "A", out)
+	}
+	return nil
+}
+
 func traverseTrees(fetchTree tree.FetchTreeFunc, currentPath string, baseHash, modHash []byte, out *[]FileDiffSummary) error {
 	var baseEntries []tree.Entry
 	var modEntries []tree.Entry
@@ -139,40 +173,8 @@ func traverseTrees(fetchTree tree.FetchTreeFunc, currentPath string, baseHash, m
 		filePath := path.Join(currentPath, name)
 		baseEntry, inBase := baseMap[name]
 		modEntry, inMod := modMap[name]
-
-		if inBase && inMod {
-			if baseEntry.IsDir() && modEntry.IsDir() {
-				if !bytes.Equal(baseEntry.SubTreeHash, modEntry.SubTreeHash) {
-					if err := traverseTrees(fetchTree, filePath, baseEntry.SubTreeHash, modEntry.SubTreeHash, out); err != nil {
-						return err
-					}
-				}
-			} else if !baseEntry.IsDir() && !modEntry.IsDir() {
-				if !bytes.Equal(baseEntry.BlobSHA256, modEntry.BlobSHA256) {
-					*out = append(*out, FileDiffSummary{
-						Path:            filePath,
-						Type:            "M",
-						BaseBlobSHA:     baseEntry.BlobSHA256,
-						ModifiedBlobSHA: modEntry.BlobSHA256,
-					})
-				}
-			} else {
-				// Replaced directory with file or vice-versa
-				if err := collectSubtree(fetchTree, filePath, baseEntry, "D", out); err != nil {
-					return err
-				}
-				if err := collectSubtree(fetchTree, filePath, modEntry, "A", out); err != nil {
-					return err
-				}
-			}
-		} else if inBase {
-			if err := collectSubtree(fetchTree, filePath, baseEntry, "D", out); err != nil {
-				return err
-			}
-		} else if inMod {
-			if err := collectSubtree(fetchTree, filePath, modEntry, "A", out); err != nil {
-				return err
-			}
+		if err := compareTreeEntry(fetchTree, filePath, baseEntry, modEntry, inBase, inMod, out); err != nil {
+			return err
 		}
 	}
 
@@ -206,6 +208,85 @@ func collectSubtree(fetchTree tree.FetchTreeFunc, currentPath string, entry tree
 		}
 	}
 	return nil
+}
+
+func buildChangeRows(delLines, insLines []string, baseHighlighted, modHighlighted []template.HTML, baseIdx, modIdx, rowIndex *int) []SideBySideRow {
+	maxLen := len(delLines)
+	if len(insLines) > maxLen {
+		maxLen = len(insLines)
+	}
+	rows := make([]SideBySideRow, 0, maxLen)
+
+	for k := 0; k < maxLen; k++ {
+		var baseLine DiffLine
+		var modLine DiffLine
+		rowType := "equal"
+
+		hasDel := k < len(delLines)
+		hasIns := k < len(insLines)
+
+		if hasDel && hasIns {
+			rowType = "modify"
+		} else if hasDel {
+			rowType = "delete"
+		} else {
+			rowType = "add"
+		}
+
+		if hasDel {
+			content := delLines[k]
+			var hHTML template.HTML
+			if *baseIdx < len(baseHighlighted) {
+				hHTML = baseHighlighted[*baseIdx]
+			} else {
+				hHTML = template.HTML(template.HTMLEscapeString(content))
+			}
+			baseLine = DiffLine{
+				Type:            LineDeleted,
+				LineNum:         *baseIdx + 1,
+				Content:         content,
+				HighlightedHTML: hHTML,
+			}
+			*baseIdx++
+		} else {
+			baseLine = DiffLine{
+				Type:    LineEmpty,
+				LineNum: 0,
+			}
+		}
+
+		if hasIns {
+			content := insLines[k]
+			var hHTML template.HTML
+			if *modIdx < len(modHighlighted) {
+				hHTML = modHighlighted[*modIdx]
+			} else {
+				hHTML = template.HTML(template.HTMLEscapeString(content))
+			}
+			modLine = DiffLine{
+				Type:            LineAdded,
+				LineNum:         *modIdx + 1,
+				Content:         content,
+				HighlightedHTML: hHTML,
+			}
+			*modIdx++
+		} else {
+			modLine = DiffLine{
+				Type:    LineEmpty,
+				LineNum: 0,
+			}
+		}
+
+		rows = append(rows, SideBySideRow{
+			RowIndex: *rowIndex,
+			BaseLine: baseLine,
+			ModLine:  modLine,
+			IsChange: true,
+			RowType:  rowType,
+		})
+		*rowIndex++
+	}
+	return rows
 }
 
 // ComputeSideBySideDiff runs Myers line diff via diffmatchpatch and formats syntax-highlighted side-by-side rows.
@@ -298,81 +379,8 @@ func ComputeSideBySideDiff(filePath string, baseContent, modContent []byte, chan
 
 		deletions += len(delLines)
 		additions += len(insLines)
-
-		maxLen := len(delLines)
-		if len(insLines) > maxLen {
-			maxLen = len(insLines)
-		}
-
-		for k := 0; k < maxLen; k++ {
-			var baseLine DiffLine
-			var modLine DiffLine
-			rowType := "equal"
-
-			hasDel := k < len(delLines)
-			hasIns := k < len(insLines)
-
-			if hasDel && hasIns {
-				rowType = "modify"
-			} else if hasDel {
-				rowType = "delete"
-			} else {
-				rowType = "add"
-			}
-
-			if hasDel {
-				content := delLines[k]
-				var hHTML template.HTML
-				if baseIdx < len(baseHighlighted) {
-					hHTML = baseHighlighted[baseIdx]
-				} else {
-					hHTML = template.HTML(template.HTMLEscapeString(content))
-				}
-				baseLine = DiffLine{
-					Type:            LineDeleted,
-					LineNum:         baseIdx + 1,
-					Content:         content,
-					HighlightedHTML: hHTML,
-				}
-				baseIdx++
-			} else {
-				baseLine = DiffLine{
-					Type:    LineEmpty,
-					LineNum: 0,
-				}
-			}
-
-			if hasIns {
-				content := insLines[k]
-				var hHTML template.HTML
-				if modIdx < len(modHighlighted) {
-					hHTML = modHighlighted[modIdx]
-				} else {
-					hHTML = template.HTML(template.HTMLEscapeString(content))
-				}
-				modLine = DiffLine{
-					Type:            LineAdded,
-					LineNum:         modIdx + 1,
-					Content:         content,
-					HighlightedHTML: hHTML,
-				}
-				modIdx++
-			} else {
-				modLine = DiffLine{
-					Type:    LineEmpty,
-					LineNum: 0,
-				}
-			}
-
-			rows = append(rows, SideBySideRow{
-				RowIndex: rowIndex,
-				BaseLine: baseLine,
-				ModLine:  modLine,
-				IsChange: true,
-				RowType:  rowType,
-			})
-			rowIndex++
-		}
+		chRows := buildChangeRows(delLines, insLines, baseHighlighted, modHighlighted, &baseIdx, &modIdx, &rowIndex)
+		rows = append(rows, chRows...)
 	}
 
 	detail.Rows = rows
