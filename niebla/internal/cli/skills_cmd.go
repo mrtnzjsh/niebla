@@ -117,8 +117,8 @@ func renderSpokeTable(out io.Writer, statuses []skills.HarnessStatus) {
 	tw := tabwriter.NewWriter(out, 0, 8, 4, ' ', 0)
 	fmt.Fprintln(tw, "HARNESS\tSTATUS\tSPOKE PATH\tDETAILS")
 
-	for _, s := range statuses {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.Status, s.SpokePath, s.Message)
+	for _, status := range statuses {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", status.Name, status.Status, status.SpokePath, status.Message)
 	}
 
 	_ = tw.Flush()

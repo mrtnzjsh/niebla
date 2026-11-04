@@ -134,8 +134,8 @@ func parsePerFileEntry(pattern string, rawVal any) (PerFileRule, error) {
 
 func cleanStringSlice(slice []string) []string {
 	var res []string
-	for _, s := range slice {
-		trimmed := strings.TrimSpace(s)
+	for _, item := range slice {
+		trimmed := strings.TrimSpace(item)
 		if trimmed != "" {
 			res = append(res, trimmed)
 		}
@@ -190,7 +190,6 @@ type Evaluator struct {
 	cache         map[string]*Config
 }
 
-// NewEvaluator creates a new Evaluator.
 func NewEvaluator(provider FileProvider, groupResolver GroupResolver) *Evaluator {
 	return &Evaluator{
 		provider:      provider,
@@ -235,8 +234,8 @@ func (e *Evaluator) getConfig(dir string) (*Config, error) {
 func (e *Evaluator) ResolveRequirements(touchedPaths []string) ([]Requirement, error) {
 	var requirements []Requirement
 
-	for _, p := range touchedPaths {
-		cleanPath := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(p)), "/")
+	for _, touchedPath := range touchedPaths {
+		cleanPath := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(touchedPath)), "/")
 		if cleanPath == "" || cleanPath == "." {
 			continue
 		}
@@ -362,26 +361,26 @@ func (c *policyCollector) mergeRules(
 ) {
 	if reqApprovals != nil {
 		if c.policy.RequiredApprovals == nil || *reqApprovals > *c.policy.RequiredApprovals {
-			v := *reqApprovals
-			c.policy.RequiredApprovals = &v
+			val := *reqApprovals
+			c.policy.RequiredApprovals = &val
 		}
 	}
 	if requireGreenCI != nil {
 		if c.policy.RequireGreenCI == nil {
-			v := *requireGreenCI
-			c.policy.RequireGreenCI = &v
+			val := *requireGreenCI
+			c.policy.RequireGreenCI = &val
 		} else if *requireGreenCI && !*c.policy.RequireGreenCI {
-			t := true
-			c.policy.RequireGreenCI = &t
+			required := true
+			c.policy.RequireGreenCI = &required
 		}
 	}
 	if allowUnresolved != nil {
 		if c.policy.AllowUnresolvedComments == nil {
-			v := *allowUnresolved
-			c.policy.AllowUnresolvedComments = &v
+			unresolvedVal := *allowUnresolved
+			c.policy.AllowUnresolvedComments = &unresolvedVal
 		} else if !*allowUnresolved && *c.policy.AllowUnresolvedComments {
-			f := false
-			c.policy.AllowUnresolvedComments = &f
+			disallowed := false
+			c.policy.AllowUnresolvedComments = &disallowed
 		}
 	}
 	c.reviewers = append(c.reviewers, revs...)
@@ -389,8 +388,8 @@ func (c *policyCollector) mergeRules(
 	c.hooks = append(c.hooks, hks...)
 	c.runners = append(c.runners, rns...)
 	if len(rns) > 0 {
-		t := true
-		c.policy.RequireGreenCI = &t
+		required := true
+		c.policy.RequireGreenCI = &required
 	}
 }
 
@@ -454,8 +453,8 @@ func (c *policyCollector) finalize() {
 func (e *Evaluator) ResolvePolicy(touchedPaths []string) (*SubtreePolicy, error) {
 	col := &policyCollector{policy: &SubtreePolicy{}}
 
-	for _, p := range touchedPaths {
-		cleanPath := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(p)), "/")
+	for _, touchedPath := range touchedPaths {
+		cleanPath := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(touchedPath)), "/")
 		if cleanPath == "" || cleanPath == "." {
 			continue
 		}
@@ -508,10 +507,9 @@ func (e *Evaluator) Evaluate(touchedPaths []string, approvedBy []string) (*Evalu
 		result.Policy = *policy
 	}
 
-	// Normalize approved usernames
 	approvalsMap := make(map[string]bool)
-	for _, a := range approvedBy {
-		trimmed := strings.ToLower(strings.TrimSpace(a))
+	for _, approver := range approvedBy {
+		trimmed := strings.ToLower(strings.TrimSpace(approver))
 		if trimmed != "" {
 			approvalsMap[trimmed] = true
 		}
@@ -524,7 +522,6 @@ func (e *Evaluator) Evaluate(touchedPaths []string, approvedBy []string) (*Evalu
 		for _, owner := range req.Approvers {
 			ownerLower := strings.ToLower(owner)
 
-			// 1. Direct user match
 			if !strings.HasPrefix(ownerLower, "@") {
 				if approvalsMap[ownerLower] {
 					satisfied = true
@@ -532,7 +529,6 @@ func (e *Evaluator) Evaluate(touchedPaths []string, approvedBy []string) (*Evalu
 					break
 				}
 			} else {
-				// 2. Enterprise group resolution
 				if approvalsMap[ownerLower] {
 					satisfied = true
 					matchedUser = owner
@@ -540,10 +536,10 @@ func (e *Evaluator) Evaluate(touchedPaths []string, approvedBy []string) (*Evalu
 				}
 				if e.groupResolver != nil {
 					members := e.groupResolver(owner)
-					for _, m := range members {
-						if approvalsMap[strings.ToLower(strings.TrimSpace(m))] {
+					for _, member := range members {
+						if approvalsMap[strings.ToLower(strings.TrimSpace(member))] {
 							satisfied = true
-							matchedUser = m
+							matchedUser = member
 							break
 						}
 					}

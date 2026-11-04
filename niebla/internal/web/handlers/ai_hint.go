@@ -141,8 +141,8 @@ func (h *CommentsHandler) handleDemoApplySuggestion(w http.ResponseWriter, r *ht
 			if list[i].ID == commentID {
 				list[i].SuggestionAppliedPS = list[i].PatchsetNumber + 1
 				list[i].Resolved = true
-				c := list[i]
-				target = &c
+				comment := list[i]
+				target = &comment
 			}
 		}
 		demoCommentsStore[k] = list
@@ -298,8 +298,8 @@ func (h *CommentsHandler) HandleRejectSuggestion(w http.ResponseWriter, r *http.
 			for i := range list {
 				if list[i].ID == commentID {
 					list[i].SuggestionAppliedPS = -1
-					c := list[i]
-					target = &c
+					comment := list[i]
+					target = &comment
 				}
 			}
 			demoCommentsStore[k] = list

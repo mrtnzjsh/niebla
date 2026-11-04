@@ -94,7 +94,7 @@ func resolveDriver(cfg *config.Config, target string, customDir string) (drivers
 		})
 	}
 
-	t := strings.ToLower(strings.TrimSpace(target))
+	targetLower := strings.ToLower(strings.TrimSpace(target))
 	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, "./") || strings.HasPrefix(target, "../") {
 		return drivers.NewFilesystemDriver(drivers.FilesystemConfig{
 			RootPath:      target,
@@ -103,17 +103,17 @@ func resolveDriver(cfg *config.Config, target string, customDir string) (drivers
 		})
 	}
 
-	if t == "" {
+	if targetLower == "" {
 		if cfg.Resilience.S3.Enabled {
-			t = "s3"
+			targetLower = "s3"
 		} else if cfg.Resilience.Nextcloud.Enabled {
-			t = "nextcloud"
+			targetLower = "nextcloud"
 		} else {
-			t = "filesystem"
+			targetLower = "filesystem"
 		}
 	}
 
-	switch t {
+	switch targetLower {
 	case "s3":
 		accessKey := ""
 		if cfg.Resilience.S3.AccessKeyEnv != "" {
@@ -336,8 +336,8 @@ func newBackupListCmd(rootFlags *RootFlags) *cobra.Command {
 				ctx = context.Background()
 			}
 
-			t := strings.ToLower(strings.TrimSpace(target))
-			if t == "zfs" || (t == "" && cfg.Resilience.DefaultMode == "zfs_stream") {
+			targetLower := strings.ToLower(strings.TrimSpace(target))
+			if targetLower == "zfs" || (targetLower == "" && cfg.Resilience.DefaultMode == "zfs_stream") {
 				dataset := cfg.Resilience.ZFS.LocalDataset
 				mgr := zfs.NewSnapshotManager()
 				snaps, err := mgr.ListSnapshots(ctx, dataset)
@@ -347,8 +347,8 @@ func newBackupListCmd(rootFlags *RootFlags) *cobra.Command {
 
 				fmt.Fprintf(cmd.OutOrStdout(), "%-40s %-22s %-12s\n", "SNAPSHOT NAME", "CREATED AT", "USED BYTES")
 				fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 76))
-				for _, s := range snaps {
-					fmt.Fprintf(cmd.OutOrStdout(), "%-40s %-22s %-12d\n", s.Name, s.CreatedAt.Format("2006-01-02 15:04:05"), s.UsedBytes)
+				for _, snap := range snaps {
+					fmt.Fprintf(cmd.OutOrStdout(), "%-40s %-22s %-12d\n", snap.Name, snap.CreatedAt.Format("2006-01-02 15:04:05"), snap.UsedBytes)
 				}
 				return nil
 			}
@@ -402,8 +402,8 @@ func newBackupVerifyCmd(rootFlags *RootFlags) *cobra.Command {
 				ctx = context.Background()
 			}
 
-			t := strings.ToLower(strings.TrimSpace(target))
-			if t == "zfs" || strings.Contains(backupName, "@") {
+			targetLower := strings.ToLower(strings.TrimSpace(target))
+			if targetLower == "zfs" || strings.Contains(backupName, "@") {
 				dataset := cfg.Resilience.ZFS.LocalDataset
 				mgr := zfs.NewSnapshotManager()
 				snaps, err := mgr.ListSnapshots(ctx, dataset)
@@ -411,11 +411,11 @@ func newBackupVerifyCmd(rootFlags *RootFlags) *cobra.Command {
 					return fmt.Errorf("failed to query ZFS snapshots: %w", err)
 				}
 				found := false
-				for _, s := range snaps {
-					if s.Name == backupName || strings.HasSuffix(s.Name, backupName) {
+				for _, snap := range snaps {
+					if snap.Name == backupName || strings.HasSuffix(snap.Name, backupName) {
 						found = true
 						fmt.Fprintf(cmd.OutOrStdout(), "✓ ZFS Snapshot verified: %s (created: %s, size: %d bytes)\n",
-							s.Name, s.CreatedAt.Format(time.RFC3339), s.UsedBytes)
+							snap.Name, snap.CreatedAt.Format(time.RFC3339), snap.UsedBytes)
 						break
 					}
 				}
@@ -501,8 +501,8 @@ func restoreZFSSnapshot(ctx context.Context, cmd *cobra.Command, cfg *config.Con
 			return fmt.Errorf("failed to query snapshots: %w", err)
 		}
 		found := false
-		for _, s := range snaps {
-			if s.Name == snapFull || strings.HasSuffix(s.Name, backupName) {
+		for _, snap := range snaps {
+			if snap.Name == snapFull || strings.HasSuffix(snap.Name, backupName) {
 				found = true
 				break
 			}
@@ -636,8 +636,8 @@ func newBackupRestoreCmd(rootFlags *RootFlags) *cobra.Command {
 				ctx = context.Background()
 			}
 
-			t := strings.ToLower(strings.TrimSpace(target))
-			if t == "zfs" || strings.Contains(backupName, "@") {
+			targetLower := strings.ToLower(strings.TrimSpace(target))
+			if targetLower == "zfs" || strings.Contains(backupName, "@") {
 				return restoreZFSSnapshot(ctx, cmd, cfg, backupName, dryRun)
 			}
 
@@ -676,7 +676,7 @@ func newBackupPruneCmd(rootFlags *RootFlags) *cobra.Command {
 				ctx = context.Background()
 			}
 
-			t := strings.ToLower(strings.TrimSpace(target))
+			targetLower := strings.ToLower(strings.TrimSpace(target))
 			retention := keepCount
 			if retention <= 0 {
 				retention = cfg.Resilience.ZFS.RetentionCount
@@ -685,7 +685,7 @@ func newBackupPruneCmd(rootFlags *RootFlags) *cobra.Command {
 				retention = 7
 			}
 
-			if t == "zfs" || (t == "" && cfg.Resilience.DefaultMode == "zfs_stream") {
+			if targetLower == "zfs" || (targetLower == "" && cfg.Resilience.DefaultMode == "zfs_stream") {
 				dataset := cfg.Resilience.ZFS.LocalDataset
 				mgr := zfs.NewSnapshotManager()
 				prefix := cfg.Resilience.ZFS.SnapshotPrefix

@@ -289,37 +289,37 @@ func MatchAgentAuthor(author string, patterns []string) bool {
 	if authorLower == "" {
 		return false
 	}
-	for _, p := range patterns {
-		pLower := strings.ToLower(strings.TrimSpace(p))
-		if pLower == "" {
+	for _, pattern := range patterns {
+		patternLower := strings.ToLower(strings.TrimSpace(pattern))
+		if patternLower == "" {
 			continue
 		}
-		if pLower == authorLower {
+		if patternLower == authorLower {
 			return true
 		}
-		if strings.HasSuffix(pLower, "/*") {
-			prefix := strings.TrimSuffix(pLower, "*") // "agent/"
+		if strings.HasSuffix(patternLower, "/*") {
+			prefix := strings.TrimSuffix(patternLower, "*") // "agent/"
 			if strings.HasPrefix(authorLower, prefix) {
 				return true
 			}
 		}
-		if strings.HasPrefix(pLower, "*") && strings.HasSuffix(pLower, "*") {
-			substr := strings.Trim(pLower, "*")
+		if strings.HasPrefix(patternLower, "*") && strings.HasSuffix(patternLower, "*") {
+			substr := strings.Trim(patternLower, "*")
 			if strings.Contains(authorLower, substr) {
 				return true
 			}
-		} else if strings.HasPrefix(pLower, "*") {
-			suffix := strings.TrimPrefix(pLower, "*")
+		} else if strings.HasPrefix(patternLower, "*") {
+			suffix := strings.TrimPrefix(patternLower, "*")
 			if strings.HasSuffix(authorLower, suffix) {
 				return true
 			}
-		} else if strings.HasSuffix(pLower, "*") {
-			prefix := strings.TrimSuffix(pLower, "*")
+		} else if strings.HasSuffix(patternLower, "*") {
+			prefix := strings.TrimSuffix(patternLower, "*")
 			if strings.HasPrefix(authorLower, prefix) {
 				return true
 			}
 		}
-		if matched, err := filepath.Match(pLower, authorLower); err == nil && matched {
+		if matched, err := filepath.Match(patternLower, authorLower); err == nil && matched {
 			return true
 		}
 	}

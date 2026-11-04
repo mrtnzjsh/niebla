@@ -291,8 +291,8 @@ func BuildUpdatedTree(
 ) ([]byte, error) {
 	rootNode := newDirNode()
 
-	for _, c := range changes {
-		parts := strings.Split(filepath.ToSlash(c.Path), "/")
+	for _, change := range changes {
+		parts := strings.Split(filepath.ToSlash(change.Path), "/")
 		current := rootNode
 
 		for i := 0; i < len(parts)-1; i++ {
@@ -304,10 +304,10 @@ func BuildUpdatedTree(
 		}
 
 		fileName := parts[len(parts)-1]
-		if c.Type == ChangeDeleted {
+		if change.Type == ChangeDeleted {
 			current.files[fileName] = nil
 		} else {
-			up := uploads[c.Path]
+			up := uploads[change.Path]
 			current.files[fileName] = &tree.Entry{
 				Name:       fileName,
 				Mode:       up.Mode,
@@ -333,18 +333,16 @@ func recursivelyUpdateTree(
 ) ([]byte, error) {
 	entryMap := make(map[string]tree.Entry)
 
-	// 1. Fetch base entries if tree is not empty
 	if len(currentTreeHash) > 0 && !bytes.Equal(currentTreeHash, tree.EmptyTreeHash) {
 		baseEntries, err := fetchTree(currentTreeHash)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch base tree entries: %w", err)
 		}
-		for _, e := range baseEntries {
-			entryMap[e.Name] = e
+		for _, entry := range baseEntries {
+			entryMap[entry.Name] = entry
 		}
 	}
 
-	// 2. Apply file updates / deletions
 	for name, fileEntry := range mod.files {
 		if fileEntry == nil {
 			delete(entryMap, name)
@@ -353,7 +351,6 @@ func recursivelyUpdateTree(
 		}
 	}
 
-	// 3. Apply subdirectory updates recursively
 	for subName, subMod := range mod.subdirs {
 		var subBaseHash []byte
 		if existing, ok := entryMap[subName]; ok && existing.IsDir() {
@@ -378,10 +375,9 @@ func recursivelyUpdateTree(
 		}
 	}
 
-	// 4. Assemble sorted entries
 	entries := make([]tree.Entry, 0, len(entryMap))
-	for _, e := range entryMap {
-		entries = append(entries, e)
+	for _, entry := range entryMap {
+		entries = append(entries, entry)
 	}
 
 	if len(entries) == 0 {

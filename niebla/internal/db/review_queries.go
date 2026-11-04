@@ -774,8 +774,8 @@ func (d *DB) AddReviewers(ctx context.Context, clID int64, reviewers []string) e
 		VALUES ($1, $2, now())
 		ON CONFLICT (cl_id, reviewer) DO NOTHING;
 	`
-	for _, r := range reviewers {
-		trimmed := strings.TrimSpace(r)
+	for _, reviewer := range reviewers {
+		trimmed := strings.TrimSpace(reviewer)
 		if trimmed == "" {
 			continue
 		}
@@ -842,13 +842,13 @@ func (d *DB) CountUnresolvedComments(ctx context.Context, clID int64) (int, erro
 // GetAssignedCLIDsForUser returns a set of changelist IDs where the user or any of their groups is assigned as a reviewer.
 func (d *DB) GetAssignedCLIDsForUser(ctx context.Context, username string, groupNames []string) (map[int64]bool, error) {
 	targets := []string{username}
-	for _, g := range groupNames {
-		g = strings.TrimSpace(g)
-		if g != "" {
-			if !strings.HasPrefix(g, "@") {
-				targets = append(targets, "@"+g)
+	for _, groupName := range groupNames {
+		groupName = strings.TrimSpace(groupName)
+		if groupName != "" {
+			if !strings.HasPrefix(groupName, "@") {
+				targets = append(targets, "@"+groupName)
 			}
-			targets = append(targets, g)
+			targets = append(targets, groupName)
 		}
 	}
 

@@ -181,15 +181,15 @@ func (mc *MetadataCache) PopulateDir(dir string, entries []tree.Entry) {
 		mc.dirChildren[norm] = make(map[string]bool, len(entries))
 	}
 
-	for _, e := range entries {
+	for _, entry := range entries {
 		var relPath string
 		if norm == "" {
-			relPath = e.Name
+			relPath = entry.Name
 		} else {
-			relPath = norm + "/" + e.Name
+			relPath = norm + "/" + entry.Name
 		}
 
-		meta := entryToMetadata(e)
+		meta := entryToMetadata(entry)
 		mc.putLocked(relPath, meta)
 		mc.dirChildren[norm][relPath] = true
 	}

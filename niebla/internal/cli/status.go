@@ -122,9 +122,9 @@ func loadWorkspaceMatcher(ws *config.WorkspaceConfig) ignore.Matcher {
 			if dir == "" {
 				continue
 			}
-			p := filepath.Join(dir, ".nieblaignore")
-			if _, err := os.Stat(p); err == nil {
-				if m, err := ignore.LoadFile(p); err == nil {
+			ignorePath := filepath.Join(dir, ".nieblaignore")
+			if _, err := os.Stat(ignorePath); err == nil {
+				if m, err := ignore.LoadFile(ignorePath); err == nil {
 					return m
 				}
 			}
@@ -145,8 +145,8 @@ func ScanWorkspaceChanges(ws *config.WorkspaceConfig, rootTreeHash []byte, fetch
 	}
 
 	seen := make(map[string]bool, len(changes))
-	for _, c := range changes {
-		seen[c.Path] = true
+	for _, change := range changes {
+		seen[change.Path] = true
 	}
 
 	var walkBase func(treeHash []byte, prefix string) error
@@ -336,8 +336,8 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 	}
 
 	changes := make([]FileChange, 0, len(changeMap))
-	for _, c := range changeMap {
-		changes = append(changes, c)
+	for _, change := range changeMap {
+		changes = append(changes, change)
 	}
 
 	sort.Slice(changes, func(i, j int) bool {
@@ -377,9 +377,9 @@ func makeTreeFetcher(ctx context.Context, client nieblav1.NieblaServiceClient) t
 func renderStatus(out io.Writer, changes []FileChange) {
 	useColor := isColorEnabled(out)
 
-	for _, c := range changes {
+	for _, change := range changes {
 		var indicator string
-		switch c.Type {
+		switch change.Type {
 		case ChangeModified:
 			if useColor {
 				indicator = "\033[33mM\033[0m" // Yellow
@@ -400,7 +400,7 @@ func renderStatus(out io.Writer, changes []FileChange) {
 			}
 		}
 
-		fmt.Fprintf(out, "%s  %s\n", indicator, c.Path)
+		fmt.Fprintf(out, "%s  %s\n", indicator, change.Path)
 	}
 }
 

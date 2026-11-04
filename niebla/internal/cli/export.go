@@ -155,28 +155,26 @@ func makeBlobFetcher(client nieblav1.NieblaServiceClient, cacheDirs []string) ma
 	return func(ctx context.Context, sha256Bytes []byte, w io.Writer) error {
 		shaHex := hex.EncodeToString(sha256Bytes)
 
-		// 1. Check local CAS caches first
 		for _, cacheDir := range cacheDirs {
 			if casStorage, err := cas.NewStorage(cacheDir); err == nil {
-				if f, _, openErr := casStorage.OpenBlob(sha256Bytes); openErr == nil {
-					_, copyErr := io.Copy(w, f)
-					_ = f.Close()
+				if file, _, openErr := casStorage.OpenBlob(sha256Bytes); openErr == nil {
+					_, copyErr := io.Copy(w, file)
+					_ = file.Close()
 					if copyErr == nil {
 						return nil
 					}
 				}
 			}
 			flatPath := filepath.Join(cacheDir, shaHex)
-			if f, err := os.Open(flatPath); err == nil {
-				_, copyErr := io.Copy(w, f)
-				_ = f.Close()
+			if file, err := os.Open(flatPath); err == nil {
+				_, copyErr := io.Copy(w, file)
+				_ = file.Close()
 				if copyErr == nil {
 					return nil
 				}
 			}
 		}
 
-		// 2. Stream via gRPC ReadBlob
 		stream, err := client.ReadBlob(ctx, &nieblav1.ReadBlobRequest{
 			Sha256: sha256Bytes,
 			Offset: 0,

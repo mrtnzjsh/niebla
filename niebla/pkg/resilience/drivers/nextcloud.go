@@ -226,23 +226,23 @@ func (n *NextcloudDriver) List(ctx context.Context, prefix string) ([]ItemInfo, 
 	var items []ItemInfo
 	parsedBase, _ := url.Parse(n.baseURL)
 
-	for _, r := range ms.Responses {
+	for _, response := range ms.Responses {
 		// Ignore directories/collections
-		if r.PropStat.Prop.ResourceType.Collection != nil {
+		if response.PropStat.Prop.ResourceType.Collection != nil {
 			continue
 		}
 
-		itemPath := r.Href
+		itemPath := response.Href
 		if parsedBase != nil && strings.HasPrefix(itemPath, parsedBase.Path) {
 			itemPath = strings.TrimPrefix(itemPath, parsedBase.Path)
 		}
 		itemPath = strings.TrimPrefix(itemPath, "/")
 
-		modTime, _ := time.Parse(time.RFC1123, r.PropStat.Prop.GetLastModified)
+		modTime, _ := time.Parse(time.RFC1123, response.PropStat.Prop.GetLastModified)
 
 		items = append(items, ItemInfo{
 			Name:    itemPath,
-			Size:    r.PropStat.Prop.GetContentLength,
+			Size:    response.PropStat.Prop.GetContentLength,
 			ModTime: modTime.UTC(),
 		})
 	}

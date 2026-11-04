@@ -45,7 +45,6 @@ func (f *BlobFetcher) EnsureBlob(ctx context.Context, sha256Hex string) (string,
 		return "", fmt.Errorf("invalid sha256 hex string %q: %w", sha256Hex, err)
 	}
 
-	// 1. Fast path: check local CAS storage
 	if f.casStorage != nil && f.casStorage.Exists(shaBytes) {
 		return f.casStorage.BlobPath(sha256Hex)
 	}
@@ -54,7 +53,6 @@ func (f *BlobFetcher) EnsureBlob(ctx context.Context, sha256Hex string) (string,
 		return "", fmt.Errorf("remote client is nil and blob %s not in local CAS cache", sha256Hex)
 	}
 
-	// 2. In-flight coalescing
 	f.mu.Lock()
 	if existing, ok := f.inflight[sha256Hex]; ok {
 		f.mu.Unlock()
@@ -83,7 +81,6 @@ func (f *BlobFetcher) EnsureBlob(ctx context.Context, sha256Hex string) (string,
 		return fetch.path, fetch.err
 	}
 
-	// 3. Stream blob into CAS storage writer
 	path, err := f.streamAndCommitBlob(ctx, shaBytes, sha256Hex)
 	fetch.path = path
 	fetch.err = err

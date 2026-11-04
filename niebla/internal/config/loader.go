@@ -223,8 +223,8 @@ func validateMultiFileSectionUniqueness(files []NamedConfigBytes) error {
 	claimedBy := make(map[string]SectionClaim)
 	var dupErrors ValidationErrors
 
-	for _, f := range files {
-		claims, err := ExtractTOMLSections(f.Name, f.Data)
+	for _, file := range files {
+		claims, err := ExtractTOMLSections(file.Name, file.Data)
 		if err != nil {
 			return err
 		}
@@ -252,12 +252,12 @@ func unmarshalConfigFiles(files []NamedConfigBytes, cfg *Config) error {
 	var aiEndpointConfigured bool
 	var aiExplicitEnabled *bool
 
-	for _, f := range files {
-		if err := toml.Unmarshal(f.Data, cfg); err != nil {
+	for _, file := range files {
+		if err := toml.Unmarshal(file.Data, cfg); err != nil {
 			var decodeErr *toml.DecodeError
-			if errors.As(err, &decodeErr) && f.Name != "" {
+			if errors.As(err, &decodeErr) && file.Name != "" {
 				row, col := decodeErr.Position()
-				return fmt.Errorf("configuration syntax error in %s (line %d, column %d):\n  %s\nHint: Verify TOML syntax (check for unclosed quotes, invalid types, or missing '=').", f.Name, row, col, decodeErr.Error())
+				return fmt.Errorf("configuration syntax error in %s (line %d, column %d):\n  %s\nHint: Verify TOML syntax (check for unclosed quotes, invalid types, or missing '=').", file.Name, row, col, decodeErr.Error())
 			}
 			return err
 		}
@@ -270,7 +270,7 @@ func unmarshalConfigFiles(files []NamedConfigBytes, cfg *Config) error {
 				} `toml:"ai"`
 			} `toml:"critique"`
 		}
-		if err := toml.Unmarshal(f.Data, &rawProbe); err == nil {
+		if err := toml.Unmarshal(file.Data, &rawProbe); err == nil {
 			if rawProbe.Critique.AI.Endpoint != nil && strings.TrimSpace(*rawProbe.Critique.AI.Endpoint) != "" {
 				aiEndpointConfigured = true
 			}
@@ -290,30 +290,24 @@ func unmarshalConfigFiles(files []NamedConfigBytes, cfg *Config) error {
 // It enforces that no header or subsection (e.g. [server], [critique.theme], [critique.ai])
 // is defined in more than one file.
 func LoadMultiBytes(files []NamedConfigBytes) (*Config, error) {
-	// 1. Initialize with baseline defaults
 	cfg := DefaultConfig()
 
-	// 2. Unmarshal base config to ensure any structured defaults are primed
 	if len(BaseConfigBytes) > 0 {
 		if err := toml.Unmarshal(BaseConfigBytes, cfg); err != nil {
 			return nil, fmt.Errorf("internal error decoding base configuration: %w", err)
 		}
 	}
 
-	// 3. Verify TOML syntax of each file and enforce header/subsection uniqueness across files
 	if err := validateMultiFileSectionUniqueness(files); err != nil {
 		return nil, err
 	}
 
-	// 4. Unmarshal each file in order into the unified Config struct
 	if err := unmarshalConfigFiles(files, cfg); err != nil {
 		return nil, err
 	}
 
-	// 5. Expand environment variables ($USER, $HOME, etc.)
 	expandConfigEnv(cfg)
 
-	// 6. Fail fast on invalid configuration
 	if err := Validate(cfg); err != nil {
 		return nil, err
 	}
@@ -551,8 +545,8 @@ func expandConfigEnv(cfg *Config) {
 
 	reviewer := strings.TrimSpace(os.ExpandEnv(cfg.Critique.DefaultReviewer))
 	if reviewer == "" || reviewer == "$USER" {
-		if u := os.Getenv("USER"); u != "" {
-			reviewer = u
+		if osUser := os.Getenv("USER"); osUser != "" {
+			reviewer = osUser
 		} else if cur, err := user.Current(); err == nil && cur.Username != "" {
 			reviewer = cur.Username
 		} else {

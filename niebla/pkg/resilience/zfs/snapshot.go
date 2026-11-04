@@ -26,11 +26,11 @@ type SnapshotManager struct {
 
 // NewSnapshotManager creates a SnapshotManager instance.
 func NewSnapshotManager(zfsPath ...string) *SnapshotManager {
-	p := "zfs"
+	binaryPath := "zfs"
 	if len(zfsPath) > 0 && zfsPath[0] != "" {
-		p = zfsPath[0]
+		binaryPath = zfsPath[0]
 	}
-	return &SnapshotManager{zfsPath: p}
+	return &SnapshotManager{zfsPath: binaryPath}
 }
 
 // CreateRecursiveSnapshot creates an atomic recursive snapshot across dataset and all child datasets.

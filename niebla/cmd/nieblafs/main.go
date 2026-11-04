@@ -45,8 +45,8 @@ func (h *daemonControlHandler) HandleReanchor(ctx context.Context, newRootTreeHa
 
 func (h *daemonControlHandler) HandleInvalidate(ctx context.Context, paths []string) (int, error) {
 	purged := 0
-	for _, p := range paths {
-		if h.cache.Invalidate(p) {
+	for _, targetPath := range paths {
+		if h.cache.Invalidate(targetPath) {
 			purged++
 		}
 	}

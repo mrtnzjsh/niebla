@@ -177,7 +177,6 @@ func computeFileDiff(ctx context.Context, client nieblav1.NieblaServiceClient, c
 func fetchBlobContent(ctx context.Context, client nieblav1.NieblaServiceClient, cacheDirs []string, sha256Bytes []byte) ([]byte, error) {
 	shaHex := hex.EncodeToString(sha256Bytes)
 
-	// 1. Check local CAS caches
 	for _, cacheDir := range cacheDirs {
 		casStorage, err := cas.NewStorage(cacheDir)
 		if err == nil {
@@ -187,14 +186,12 @@ func fetchBlobContent(ctx context.Context, client nieblav1.NieblaServiceClient, 
 				}
 			}
 		}
-		// Also check flat cache file
 		flatPath := filepath.Join(cacheDir, shaHex)
 		if data, err := os.ReadFile(flatPath); err == nil {
 			return data, nil
 		}
 	}
 
-	// 2. Fetch via gRPC ReadBlob
 	stream, err := client.ReadBlob(ctx, &nieblav1.ReadBlobRequest{
 		Sha256: sha256Bytes,
 		Offset: 0,

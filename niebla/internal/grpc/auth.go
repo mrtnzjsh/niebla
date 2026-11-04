@@ -24,14 +24,14 @@ type Authenticator struct {
 // NewAuthenticator initializes an Authenticator with a slice of authorized bearer tokens.
 // If tokens is empty, authentication is disabled (permissive local development mode).
 func NewAuthenticator(tokens []string) *Authenticator {
-	m := make(map[string]bool)
-	for _, t := range tokens {
-		trimmed := strings.TrimSpace(t)
+	tokenMap := make(map[string]bool)
+	for _, token := range tokens {
+		trimmed := strings.TrimSpace(token)
 		if trimmed != "" {
-			m[trimmed] = true
+			tokenMap[trimmed] = true
 		}
 	}
-	return &Authenticator{tokens: m}
+	return &Authenticator{tokens: tokenMap}
 }
 
 // IsEnabled returns true if token authentication is enabled (i.e. at least one valid token is configured).
@@ -50,10 +50,9 @@ func (a *Authenticator) ValidateContext(ctx context.Context) error {
 		return status.Error(codes.Unauthenticated, "authentication required: missing request metadata")
 	}
 
-	// 1. Check "authorization" header: "Bearer <token>"
 	if authHeaders := md.Get(HeaderAuthorization); len(authHeaders) > 0 {
-		for _, h := range authHeaders {
-			parts := strings.SplitN(strings.TrimSpace(h), " ", 2)
+		for _, header := range authHeaders {
+			parts := strings.SplitN(strings.TrimSpace(header), " ", 2)
 			if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
 				token := strings.TrimSpace(parts[1])
 				if a.tokens[token] {
@@ -63,10 +62,9 @@ func (a *Authenticator) ValidateContext(ctx context.Context) error {
 		}
 	}
 
-	// 2. Check "x-niebla-token" header
 	if tokenHeaders := md.Get(HeaderNieblaToken); len(tokenHeaders) > 0 {
-		for _, t := range tokenHeaders {
-			if a.tokens[strings.TrimSpace(t)] {
+		for _, token := range tokenHeaders {
+			if a.tokens[strings.TrimSpace(token)] {
 				return nil
 			}
 		}

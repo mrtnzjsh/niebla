@@ -82,18 +82,18 @@ templ ReplyModal(clID int64, activeReviewer string, draftCount int, drafts []db.
 
 					if len(drafts) > 0 {
 						<div class="space-y-2 max-h-48 overflow-y-auto pr-1">
-							for _, d := range drafts {
+							for _, draft := range drafts {
 								<div class="p-3 bg-slate-900/90 border border-amber-900/40 rounded-lg text-xs space-y-1 relative group">
 									<div class="flex items-center justify-between">
 										<span class="font-mono text-[11px] text-sky-400 font-medium">
-											{ fmt.Sprintf("%s : %s (%s)", d.FilePath, d.LineRangeStr(), d.Side) }
+											{ fmt.Sprintf("%s : %s (%s)", draft.FilePath, draft.LineRangeStr(), draft.Side) }
 										</span>
 										<span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-950 text-amber-300 border border-amber-800/40 font-semibold">
 											draft
 										</span>
 									</div>
 									<p class="text-slate-300 whitespace-pre-wrap font-sans text-xs">
-										{ d.Body }
+										{ draft.Body }
 									</p>
 								</div>
 							}

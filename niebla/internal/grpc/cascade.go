@@ -121,11 +121,11 @@ func (s *Server) rebaseChild(
 
 	if mergeErr != nil || len(conflicts) > 0 {
 		var sb strings.Builder
-		for _, c := range conflicts {
-			if c.ConflictHunks > 0 {
-				sb.WriteString(fmt.Sprintf("%s (%d conflict hunks); ", c.Path, c.ConflictHunks))
+		for _, conflict := range conflicts {
+			if conflict.ConflictHunks > 0 {
+				sb.WriteString(fmt.Sprintf("%s (%d conflict hunks); ", conflict.Path, conflict.ConflictHunks))
 			} else {
-				sb.WriteString(fmt.Sprintf("%s (%s); ", c.Path, c.Reason))
+				sb.WriteString(fmt.Sprintf("%s (%s); ", conflict.Path, conflict.Reason))
 			}
 		}
 		summary := strings.TrimSuffix(sb.String(), "; ")
@@ -136,8 +136,8 @@ func (s *Server) rebaseChild(
 
 		if s.emitter != nil {
 			conflictedPaths := make([]string, len(conflicts))
-			for i, c := range conflicts {
-				conflictedPaths[i] = c.Path
+			for i, conflict := range conflicts {
+				conflictedPaths[i] = conflict.Path
 			}
 			s.emitter.Emit(ctx, pkgevents.New(
 				pkgevents.TypeCLRebaseConflict,

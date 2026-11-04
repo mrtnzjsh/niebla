@@ -1114,23 +1114,23 @@ func acceptAIHintScript(safeID string, endLine int, replStart int, replEnd int) 
 
 func formatPlusLines(code string) string {
 	lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
-	for i, l := range lines {
-		lines[i] = "+ " + l
+	for i, line := range lines {
+		lines[i] = "+ " + line
 	}
 	return strings.Join(lines, "\n")
 }
 
 func formatMinusLines(code string) string {
 	lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
-	for i, l := range lines {
-		lines[i] = "- " + l
+	for i, line := range lines {
+		lines[i] = "- " + line
 	}
 	return strings.Join(lines, "\n")
 }
 
 func hasPublishedComments(comments []db.Comment) bool {
-	for _, c := range comments {
-		if !c.IsDraft {
+	for _, comment := range comments {
+		if !comment.IsDraft {
 			return true
 		}
 	}
@@ -1139,10 +1139,10 @@ func hasPublishedComments(comments []db.Comment) bool {
 
 func isThreadResolved(comments []db.Comment) bool {
 	published := 0
-	for _, c := range comments {
-		if !c.IsDraft {
+	for _, comment := range comments {
+		if !comment.IsDraft {
 			published++
-			if !c.Resolved {
+			if !comment.Resolved {
 				return false
 			}
 		}

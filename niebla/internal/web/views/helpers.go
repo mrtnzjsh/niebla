@@ -45,9 +45,9 @@ func ActiveUser() string {
 
 // ActiveUserInitial returns the single-character uppercase initial of ActiveUser().
 func ActiveUserInitial() string {
-	u := ActiveUser()
-	if len(u) > 0 {
-		return strings.ToUpper(string(u[0]))
+	currentUser := ActiveUser()
+	if len(currentUser) > 0 {
+		return strings.ToUpper(string(currentUser[0]))
 	}
 	return "R"
 }

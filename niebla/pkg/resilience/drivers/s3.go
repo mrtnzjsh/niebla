@@ -109,13 +109,13 @@ func (s *S3Driver) buildURL(key string, queryParams url.Values) string {
 		pathPart = "/" + key
 	}
 
-	u := &url.URL{
+	targetURL := &url.URL{
 		Scheme:   scheme,
 		Host:     host,
 		Path:     pathPart,
 		RawQuery: queryParams.Encode(),
 	}
-	return u.String()
+	return targetURL.String()
 }
 
 // signV4 signs an HTTP request with AWS Signature Version 4.
@@ -252,13 +252,13 @@ type listBucketResultV2 struct {
 // List queries objects matching the prefix using S3 ListObjectsV2.
 func (s *S3Driver) List(ctx context.Context, prefix string) ([]ItemInfo, error) {
 	targetPrefix := s.objectKey(prefix)
-	q := url.Values{}
-	q.Set("list-type", "2")
+	query := url.Values{}
+	query.Set("list-type", "2")
 	if targetPrefix != "" {
-		q.Set("prefix", targetPrefix)
+		query.Set("prefix", targetPrefix)
 	}
 
-	targetURL := s.buildURL("", q)
+	targetURL := s.buildURL("", query)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create S3 ListObjects request: %w", err)
@@ -282,16 +282,16 @@ func (s *S3Driver) List(ctx context.Context, prefix string) ([]ItemInfo, error) 
 	}
 
 	var items []ItemInfo
-	for _, c := range res.Contents {
-		relKey := c.Key
+	for _, item := range res.Contents {
+		relKey := item.Key
 		if s.prefix != "" && strings.HasPrefix(relKey, s.prefix) {
 			relKey = strings.TrimPrefix(relKey, s.prefix)
 			relKey = strings.TrimPrefix(relKey, "/")
 		}
 		items = append(items, ItemInfo{
 			Name:    relKey,
-			Size:    c.Size,
-			ModTime: c.LastModified.UTC(),
+			Size:    item.Size,
+			ModTime: item.LastModified.UTC(),
 		})
 	}
 

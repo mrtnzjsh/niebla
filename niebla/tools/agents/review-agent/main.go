@@ -23,8 +23,8 @@ func resolveTargetFiles(filesFlag string) []string {
 		rawFiles = strings.TrimSpace(os.Getenv("NIEBLA_TOUCHED_FILES"))
 	}
 	var targetFiles []string
-	for _, f := range strings.Split(rawFiles, ",") {
-		trimmed := strings.TrimSpace(f)
+	for _, file := range strings.Split(rawFiles, ",") {
+		trimmed := strings.TrimSpace(file)
 		if trimmed != "" {
 			targetFiles = append(targetFiles, trimmed)
 		}
@@ -136,7 +136,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	rawResp, err := client.CompletePrompt(ctx, sysPrompt, userPrompt.String())
+	rawResp, err := client.CompletePrompt(ctx, sysPrompt, userPrompt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error querying AI endpoint: %v\n", err)
 		os.Exit(1)

@@ -88,8 +88,8 @@ func Validate(cfg *Config) error {
 		validateCI,
 	}
 
-	for _, v := range validators {
-		_ = v(cfg, &errs)
+	for _, validator := range validators {
+		_ = validator(cfg, &errs)
 	}
 
 	if len(errs) > 0 {
@@ -99,8 +99,8 @@ func Validate(cfg *Config) error {
 }
 
 func isPresetSupported(name string) bool {
-	for _, p := range SupportedPresets {
-		if p == name {
+	for _, preset := range SupportedPresets {
+		if preset == name {
 			return true
 		}
 	}
@@ -113,24 +113,24 @@ func isValidColor(val string) bool {
 
 func findClosestPreset(input string) string {
 	input = strings.ToLower(input)
-	for _, p := range SupportedPresets {
-		if strings.HasPrefix(p, input) || strings.Contains(p, input) {
-			return p
+	for _, preset := range SupportedPresets {
+		if strings.HasPrefix(preset, input) || strings.Contains(preset, input) {
+			return preset
 		}
 	}
 
 	var bestMatch string
 	minDist := 6
-	for _, p := range SupportedPresets {
-		d := levenshtein(input, p)
-		if parts := strings.Split(p, "-"); len(parts) > 1 {
-			if dPrefix := levenshtein(input, parts[0]); dPrefix < d {
-				d = dPrefix
+	for _, preset := range SupportedPresets {
+		dist := levenshtein(input, preset)
+		if parts := strings.Split(preset, "-"); len(parts) > 1 {
+			if dPrefix := levenshtein(input, parts[0]); dPrefix < dist {
+				dist = dPrefix
 			}
 		}
-		if d < minDist {
-			minDist = d
-			bestMatch = p
+		if dist < minDist {
+			minDist = dist
+			bestMatch = preset
 		}
 	}
 	return bestMatch
@@ -164,11 +164,11 @@ func levenshtein(a, b string) int {
 }
 
 func min(vals ...int) int {
-	m := vals[0]
-	for _, v := range vals[1:] {
-		if v < m {
-			m = v
+	minVal := vals[0]
+	for _, val := range vals[1:] {
+		if val < minVal {
+			minVal = val
 		}
 	}
-	return m
+	return minVal
 }

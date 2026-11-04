@@ -64,8 +64,8 @@ func writeTarPayload(tarWriter *tar.Writer, opts PackOptions, manifestJSON []byt
 		}
 	}
 
-	for sha, r := range opts.Blobs {
-		blobBytes, err := io.ReadAll(r)
+	for sha, reader := range opts.Blobs {
+		blobBytes, err := io.ReadAll(reader)
 		if err != nil {
 			return fmt.Errorf("failed to read blob %s: %w", sha, err)
 		}
@@ -114,12 +114,10 @@ func Pack(ctx context.Context, w io.Writer, opts PackOptions) error {
 		MetadataJSON: manifestJSON,
 	}
 
-	// 1. Write the cryptographic header
 	if err := crypto.WriteHeader(w, header); err != nil {
 		return fmt.Errorf("failed to write envelope header: %w", err)
 	}
 
-	// 2. Initialize AEAD cipher with ephemeral DEK
 	var cipher crypto.AEADCipher
 	if suite == crypto.SuiteChaCha20Poly1305 {
 		cipher, err = crypto.NewChaCha20Poly1305(dek)
@@ -130,7 +128,6 @@ func Pack(ctx context.Context, w io.Writer, opts PackOptions) error {
 		return fmt.Errorf("failed to initialize cipher with DEK: %w", err)
 	}
 
-	// 3. Set up streaming pipeline: tar -> zstd -> cipher.StreamEncrypt -> w
 	pr, pw := io.Pipe()
 
 	encryptErrCh := make(chan error, 1)
@@ -183,20 +180,17 @@ type UnpackResult struct {
 
 // Unpack decrypts, decompresses, and reads an encrypted .nieblabak archive stream.
 func Unpack(ctx context.Context, r io.Reader, masterKey []byte) (*UnpackResult, error) {
-	// 1. Read envelope header
 	header, err := crypto.ReadHeader(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read envelope header: %w", err)
 	}
 
-	// 2. Unwrap DEK using master key
 	dek, err := crypto.UnwrapDEK(masterKey, header.WrappedDEK)
 	if err != nil {
 		return nil, err
 	}
 	defer crypto.WipeKey(dek)
 
-	// 3. Initialize AEAD cipher
 	var cipher crypto.AEADCipher
 	if header.CipherSuite == crypto.SuiteChaCha20Poly1305 {
 		cipher, err = crypto.NewChaCha20Poly1305(dek)
@@ -207,7 +201,6 @@ func Unpack(ctx context.Context, r io.Reader, masterKey []byte) (*UnpackResult, 
 		return nil, fmt.Errorf("failed to initialize cipher with DEK: %w", err)
 	}
 
-	// 4. Stream decrypt
 	pr, pw := io.Pipe()
 	decryptErrCh := make(chan error, 1)
 	go func() {
@@ -216,7 +209,6 @@ func Unpack(ctx context.Context, r io.Reader, masterKey []byte) (*UnpackResult, 
 		decryptErrCh <- err
 	}()
 
-	// 5. Decompress zstd stream
 	zstdReader, err := zstd.NewReader(pr)
 	if err != nil {
 		_ = pr.Close()
@@ -224,7 +216,6 @@ func Unpack(ctx context.Context, r io.Reader, masterKey []byte) (*UnpackResult, 
 	}
 	defer zstdReader.Close()
 
-	// 6. Read tar entries
 	tarReader := tar.NewReader(zstdReader)
 	result := &UnpackResult{
 		Header: header,

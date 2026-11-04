@@ -92,32 +92,27 @@ func MarshalManifest(entries []Entry) ([]byte, error) {
 	SortEntries(sorted)
 
 	var buf bytes.Buffer
-	for _, e := range sorted {
-		nameBytes := []byte(e.Name)
+	for _, entry := range sorted {
+		nameBytes := []byte(entry.Name)
 		if len(nameBytes) > 0xffff {
-			return nil, fmt.Errorf("entry name %q exceeds maximum uint16 length", e.Name)
+			return nil, fmt.Errorf("entry name %q exceeds maximum uint16 length", entry.Name)
 		}
 
-		// 1. Name: uint16 length + utf-8 bytes
 		_ = binary.Write(&buf, binary.BigEndian, uint16(len(nameBytes)))
 		buf.Write(nameBytes)
 
-		// 2. Mode: uint32
-		_ = binary.Write(&buf, binary.BigEndian, e.Mode)
+		_ = binary.Write(&buf, binary.BigEndian, entry.Mode)
 
-		// 3. Size: uint64
-		_ = binary.Write(&buf, binary.BigEndian, e.Size)
+		_ = binary.Write(&buf, binary.BigEndian, entry.Size)
 
-		// 4. BlobSHA256: 32 bytes (zeros if not a file)
-		if len(e.BlobSHA256) == 32 {
-			buf.Write(e.BlobSHA256)
+		if len(entry.BlobSHA256) == 32 {
+			buf.Write(entry.BlobSHA256)
 		} else {
 			buf.Write(make([]byte, 32))
 		}
 
-		// 5. SubTreeHash: 32 bytes (zeros if leaf file)
-		if len(e.SubTreeHash) == 32 {
-			buf.Write(e.SubTreeHash)
+		if len(entry.SubTreeHash) == 32 {
+			buf.Write(entry.SubTreeHash)
 		} else {
 			buf.Write(make([]byte, 32))
 		}
@@ -132,37 +127,37 @@ func UnmarshalManifest(data []byte) ([]Entry, error) {
 		return []Entry{}, nil
 	}
 
-	r := bytes.NewReader(data)
+	reader := bytes.NewReader(data)
 	var entries []Entry
 	var zeroHash [32]byte
 
-	for r.Len() > 0 {
+	for reader.Len() > 0 {
 		var nameLen uint16
-		if err := binary.Read(r, binary.BigEndian, &nameLen); err != nil {
+		if err := binary.Read(reader, binary.BigEndian, &nameLen); err != nil {
 			return nil, fmt.Errorf("corrupt manifest: failed to read entry name length: %w", err)
 		}
 
-		if r.Len() < int(nameLen)+4+8+32+32 {
-			return nil, fmt.Errorf("corrupt manifest: truncated entry payload (need %d bytes, have %d)", int(nameLen)+76, r.Len())
+		if reader.Len() < int(nameLen)+4+8+32+32 {
+			return nil, fmt.Errorf("corrupt manifest: truncated entry payload (need %d bytes, have %d)", int(nameLen)+76, reader.Len())
 		}
 
 		nameBytes := make([]byte, nameLen)
-		if _, err := r.Read(nameBytes); err != nil {
+		if _, err := reader.Read(nameBytes); err != nil {
 			return nil, fmt.Errorf("corrupt manifest: failed to read entry name: %w", err)
 		}
 
 		var mode uint32
-		if err := binary.Read(r, binary.BigEndian, &mode); err != nil {
+		if err := binary.Read(reader, binary.BigEndian, &mode); err != nil {
 			return nil, fmt.Errorf("corrupt manifest: failed to read mode: %w", err)
 		}
 
 		var size uint64
-		if err := binary.Read(r, binary.BigEndian, &size); err != nil {
+		if err := binary.Read(reader, binary.BigEndian, &size); err != nil {
 			return nil, fmt.Errorf("corrupt manifest: failed to read size: %w", err)
 		}
 
 		blobHash := make([]byte, 32)
-		if _, err := r.Read(blobHash); err != nil {
+		if _, err := reader.Read(blobHash); err != nil {
 			return nil, fmt.Errorf("corrupt manifest: failed to read blob hash: %w", err)
 		}
 		if bytes.Equal(blobHash, zeroHash[:]) {
@@ -170,7 +165,7 @@ func UnmarshalManifest(data []byte) ([]Entry, error) {
 		}
 
 		subTreeHash := make([]byte, 32)
-		if _, err := r.Read(subTreeHash); err != nil {
+		if _, err := reader.Read(subTreeHash); err != nil {
 			return nil, fmt.Errorf("corrupt manifest: failed to read subtree hash: %w", err)
 		}
 		if bytes.Equal(subTreeHash, zeroHash[:]) {
@@ -280,8 +275,8 @@ func fetchEntryMap(hash []byte, fetchTree FetchTreeFunc) (map[string]Entry, erro
 		if err != nil {
 			return nil, err
 		}
-		for _, e := range entries {
-			entryMap[e.Name] = e
+		for _, entry := range entries {
+			entryMap[entry.Name] = entry
 		}
 	}
 	return entryMap, nil
@@ -345,11 +340,11 @@ func DiffTreeFiles(oldTree, newTree []byte, fetchTree FetchTreeFunc) ([]string, 
 		}
 
 		allNames := make(map[string]bool, len(oldEntriesMap)+len(newEntriesMap))
-		for n := range oldEntriesMap {
-			allNames[n] = true
+		for name := range oldEntriesMap {
+			allNames[name] = true
 		}
-		for n := range newEntriesMap {
-			allNames[n] = true
+		for name := range newEntriesMap {
+			allNames[name] = true
 		}
 
 		for name := range allNames {

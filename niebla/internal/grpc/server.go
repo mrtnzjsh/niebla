@@ -71,16 +71,16 @@ func NewServer(database *db.DB, casStorage *cas.Storage, cacheSize int, configs 
 		}
 	}
 
-	s := &Server{
+	server := &Server{
 		db:              database,
 		casStorage:      casStorage,
 		treeCache:       cache,
 		toolchainConfig: toolchainCfg,
 		emitter:         emitter,
 	}
-	s.rebaseQueue = NewRebaseQueue(2, 256, s.CascadeStackRebase)
+	server.rebaseQueue = NewRebaseQueue(2, 256, server.CascadeStackRebase)
 
-	return s, nil
+	return server, nil
 }
 
 // Close stops the server's background workers and releases resources.
@@ -159,8 +159,8 @@ func (s *Server) GetTree(ctx context.Context, req *nieblav1.GetTreeRequest) (*ni
 		}
 
 		protoEntries = make([]*nieblav1.NodeEntry, len(dbEntries))
-		for i, e := range dbEntries {
-			protoEntries[i] = e.ToProto()
+		for i, entry := range dbEntries {
+			protoEntries[i] = entry.ToProto()
 		}
 
 		s.treeCache.Add(cacheKey, protoEntries)
@@ -177,22 +177,21 @@ func (s *Server) GetNode(ctx context.Context, req *nieblav1.GetNodeRequest) (*ni
 
 	cacheKey := hex.EncodeToString(req.ParentTreeHash)
 	if cachedEntries, ok := s.treeCache.Get(cacheKey); ok {
-		for _, e := range cachedEntries {
-			if e.Name == req.Name {
-				return e, nil
+		for _, entry := range cachedEntries {
+			if entry.Name == req.Name {
+				return entry, nil
 			}
 		}
 		return nil, status.Errorf(codes.NotFound, "node %q not found in parent tree %s", req.Name, cacheKey)
 	}
 
-	// Query from PostgreSQL (or CAS manifest fallback)
 	entries, err := s.getTreeEntries(ctx, req.ParentTreeHash)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to query node: %v", err)
 	}
-	for _, e := range entries {
-		if e.Name == req.Name {
-			return e.ToProto(), nil
+	for _, entry := range entries {
+		if entry.Name == req.Name {
+			return entry.ToProto(), nil
 		}
 	}
 

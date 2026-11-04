@@ -214,27 +214,27 @@ templ CLDetail(data CLDetailData) {
 								</tr>
 							</thead>
 							<tbody class="divide-y divide-slate-800/50">
-								for _, f := range data.Files {
+								for _, file := range data.Files {
 									<tr
-										id={ fmt.Sprintf("file-row-%s", sanitizeHTMLID(f.Path)) }
+										id={ fmt.Sprintf("file-row-%s", sanitizeHTMLID(file.Path)) }
 										class={ "hover:bg-slate-800/60 transition cursor-pointer select-none group",
-											templ.KV("bg-sky-950/20 font-semibold", f.Path == data.SelectedFilePath) }
-										onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleFileAccordion('%d', '%s', '%s', '%d', '%d');", data.CL.CLID, sanitizeHTMLID(f.Path), f.Path, data.CurrentPatchset, data.BasePatchset)} }
+											templ.KV("bg-sky-950/20 font-semibold", file.Path == data.SelectedFilePath) }
+										onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleFileAccordion('%d', '%s', '%s', '%d', '%d');", data.CL.CLID, sanitizeHTMLID(file.Path), file.Path, data.CurrentPatchset, data.BasePatchset)} }
 									>
 										<td class="w-16 px-3 py-2 text-center">
 											<div class="flex items-center justify-center space-x-1.5">
 												<button
 													type="button"
-													id={ fmt.Sprintf("chevron-%s", sanitizeHTMLID(f.Path)) }
+													id={ fmt.Sprintf("chevron-%s", sanitizeHTMLID(file.Path)) }
 													class={ "text-slate-500 group-hover:text-slate-300 transition-transform duration-200",
-														templ.KV("rotate-90", f.Path == data.SelectedFilePath && data.SelectedFileDiff != nil) }
+														templ.KV("rotate-90", file.Path == data.SelectedFilePath && data.SelectedFileDiff != nil) }
 													title="Toggle inline diff"
 												>
 													<svg class="w-3.5 h-3.5 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"></path>
 													</svg>
 												</button>
-												switch f.Type {
+												switch file.Type {
 													case "M":
 														<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">M</span>
 													case "A":
@@ -248,29 +248,29 @@ templ CLDetail(data CLDetailData) {
 										</td>
 										<td class="px-3 py-2">
 											<a
-												href={ templ.SafeURL(fmt.Sprintf("/cl/%d/file/%s?ps=%d&base_ps=%d", data.CL.CLID, f.Path, data.CurrentPatchset, data.BasePatchset)) }
+												href={ templ.SafeURL(fmt.Sprintf("/cl/%d/file/%s?ps=%d&base_ps=%d", data.CL.CLID, file.Path, data.CurrentPatchset, data.BasePatchset)) }
 												target="_blank"
 												rel="noopener noreferrer"
-												onclick={ templ.ComponentScript{Call: fmt.Sprintf("handleFilenameClick(event, '%s');", sanitizeHTMLID(f.Path))} }
+												onclick={ templ.ComponentScript{Call: fmt.Sprintf("handleFilenameClick(event, '%s');", sanitizeHTMLID(file.Path))} }
 												class="text-slate-200 hover:text-sky-400 transition"
 												title="Open diff in a new tab"
 											>
-												{ f.Path }
+												{ file.Path }
 											</a>
 										</td>
 										<td class="w-32 px-3 py-2 text-center" onclick="event.stopPropagation()">
-											@FileReviewBadge(data.CL.CLID, f.Path, f.Reviewed, data.CurrentPatchset, data.BasePatchset)
+											@FileReviewBadge(data.CL.CLID, file.Path, file.Reviewed, data.CurrentPatchset, data.BasePatchset)
 										</td>
 										<td class="px-3 py-2 text-right font-mono text-[11px]">
-											<span class="text-emerald-400">{ fmt.Sprintf("+%d", f.Additions) }</span>
+											<span class="text-emerald-400">{ fmt.Sprintf("+%d", file.Additions) }</span>
 											<span class="text-slate-600">/</span>
-											<span class="text-rose-400">{ fmt.Sprintf("-%d", f.Deletions) }</span>
+											<span class="text-rose-400">{ fmt.Sprintf("-%d", file.Deletions) }</span>
 										</td>
 										<td class="px-3 py-2 text-center">
-											if f.UnresolvedComments > 0 {
+											if file.UnresolvedComments > 0 {
 												<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-950/70 text-amber-300 border border-amber-800/40">
 													<span>💬</span>
-													<span>{ strconv.Itoa(f.UnresolvedComments) }</span>
+													<span>{ strconv.Itoa(file.UnresolvedComments) }</span>
 												</span>
 											} else {
 												<span class="text-slate-600 text-[10px]">—</span>
@@ -279,13 +279,13 @@ templ CLDetail(data CLDetailData) {
 									</tr>
 									<!-- Inline Accordion Row for Diff -->
 									<tr
-										id={ fmt.Sprintf("accordion-row-%s", sanitizeHTMLID(f.Path)) }
+										id={ fmt.Sprintf("accordion-row-%s", sanitizeHTMLID(file.Path)) }
 										class={ "border-b border-slate-800 bg-[#090d16]",
-											templ.KV("hidden", f.Path != data.SelectedFilePath || data.SelectedFileDiff == nil) }
+											templ.KV("hidden", file.Path != data.SelectedFilePath || data.SelectedFileDiff == nil) }
 									>
 										<td colspan="5" class="p-0">
-											<div id={ fmt.Sprintf("diff-content-%s", sanitizeHTMLID(f.Path)) } class="w-full">
-												if f.Path == data.SelectedFilePath && data.SelectedFileDiff != nil {
+											<div id={ fmt.Sprintf("diff-content-%s", sanitizeHTMLID(file.Path)) } class="w-full">
+												if file.Path == data.SelectedFilePath && data.SelectedFileDiff != nil {
 													@DiffView(data.CL.CLID, data.CurrentPatchset, data.BasePatchset, data.SelectedFileDiff, data.CommentsByLine)
 												}
 											</div>
@@ -476,24 +476,24 @@ templ ReviewersControl(data CLDetailData) {
 			if len(data.Reviewers) == 0 {
 				<span class="italic text-slate-600 text-[11px]">No reviewers assigned</span>
 			} else {
-				for _, r := range data.Reviewers {
-					<span class={ "inline-flex items-center space-x-1 pl-2 pr-1.5 py-0.5 rounded text-[11px] font-mono", getVerdictClass(r.Verdict) }>
-						if r.Verdict == "lgtm" || r.Verdict == "approved" {
+				for _, reviewer := range data.Reviewers {
+					<span class={ "inline-flex items-center space-x-1 pl-2 pr-1.5 py-0.5 rounded text-[11px] font-mono", getVerdictClass(reviewer.Verdict) }>
+						if reviewer.Verdict == "lgtm" || reviewer.Verdict == "approved" {
 							<span class="text-emerald-400">✓</span>
-						} else if r.Verdict == "changes_requested" {
+						} else if reviewer.Verdict == "changes_requested" {
 							<span class="text-rose-400">!</span>
 						} else {
 							<span class="text-slate-400 opacity-70">⏳</span>
 						}
-						<span class="font-semibold">{ r.Reviewer }</span>
-						<span class="opacity-75 text-[10px]">({ r.Verdict })</span>
+						<span class="font-semibold">{ reviewer.Reviewer }</span>
+						<span class="opacity-75 text-[10px]">({ reviewer.Verdict })</span>
 						if data.CL.Status != "submitted" {
 							<button
 								type="button"
-								hx-post={ fmt.Sprintf("/cl/%d/reviewers/%s/remove", data.CL.CLID, r.Reviewer) }
+								hx-post={ fmt.Sprintf("/cl/%d/reviewers/%s/remove", data.CL.CLID, reviewer.Reviewer) }
 								hx-target="#cl-actions-bar"
 								hx-swap="outerHTML"
-								title={ fmt.Sprintf("Remove %s", r.Reviewer) }
+								title={ fmt.Sprintf("Remove %s", reviewer.Reviewer) }
 								class="ml-1 text-slate-400 hover:text-rose-400 transition cursor-pointer p-0.5 rounded"
 							>
 								✕
@@ -571,19 +571,19 @@ templ UnresolvedCommentsModal(data CLDetailData) {
 					<div class="space-y-1.5">
 						<span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 font-mono">Files with Pending Comments</span>
 						<div class="divide-y divide-slate-800/60 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/60">
-							for _, f := range data.Files {
-								if f.UnresolvedComments > 0 {
+							for _, file := range data.Files {
+								if file.UnresolvedComments > 0 {
 									<div class="px-3 py-2 flex items-center justify-between font-mono">
 										<a
-											href={ templ.SafeURL(fmt.Sprintf("/cl/%d/file/%s?ps=%d&base_ps=%d", data.CL.CLID, f.Path, data.CurrentPatchset, data.BasePatchset)) }
+											href={ templ.SafeURL(fmt.Sprintf("/cl/%d/file/%s?ps=%d&base_ps=%d", data.CL.CLID, file.Path, data.CurrentPatchset, data.BasePatchset)) }
 											class="text-slate-300 hover:text-sky-400 transition"
 											onclick="document.getElementById('unresolved-comments-modal').close()"
 										>
-											{ f.Path }
+											{ file.Path }
 										</a>
 										<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950 text-amber-300 border border-amber-800/50">
 											<span>💬</span>
-											<span>{ fmt.Sprintf("%d unresolved", f.UnresolvedComments) }</span>
+											<span>{ fmt.Sprintf("%d unresolved", file.UnresolvedComments) }</span>
 										</span>
 									</div>
 								}
@@ -776,11 +776,11 @@ templ ApprovalButtons(clID int64, approvals []db.Approval) {
 
 func isCLApproved(approvals []db.Approval) bool {
 	hasLGTM := false
-	for _, a := range approvals {
-		if a.Verdict == "changes_requested" {
+	for _, approval := range approvals {
+		if approval.Verdict == "changes_requested" {
 			return false
 		}
-		if a.Verdict == "approved" || a.Verdict == "lgtm" {
+		if approval.Verdict == "approved" || approval.Verdict == "lgtm" {
 			hasLGTM = true
 		}
 	}
@@ -887,15 +887,15 @@ templ CIRunnersBlock(data CLDetailData) {
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-slate-800/50">
-						for _, r := range data.CIRunners {
+						for _, runner := range data.CIRunners {
 							<tr class="hover:bg-slate-800/50 transition">
 								<td class="w-28 px-3 py-2 text-center">
-									@CIRunnerStatusBadge(r.Status)
+									@CIRunnerStatusBadge(runner.Status)
 								</td>
 								<td class="px-3 py-2">
 									<div class="flex items-center space-x-2">
-										<span class="text-slate-200 font-semibold">{ r.RunnerName }</span>
-										if r.IsRequired {
+										<span class="text-slate-200 font-semibold">{ runner.RunnerName }</span>
+										if runner.IsRequired {
 											<span class="px-1.5 py-0.5 rounded text-[10px] font-sans font-bold bg-indigo-950/80 text-indigo-300 border border-indigo-700/60" title="Required to pass before SubmitCL">
 												Required
 											</span>
@@ -904,21 +904,21 @@ templ CIRunnersBlock(data CLDetailData) {
 								</td>
 								<td class="w-32 px-3 py-2 text-center">
 									<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700/60">
-										{ r.Provider }
+										{ runner.Provider }
 									</span>
 								</td>
 								<td class="w-32 px-3 py-2 text-right font-mono text-[11px] text-slate-400">
-									if r.Duration != "" {
-										<span>{ r.Duration }</span>
+									if runner.Duration != "" {
+										<span>{ runner.Duration }</span>
 									} else {
 										<span class="text-slate-600">—</span>
 									}
 								</td>
 								<td class="w-36 px-3 py-2 text-center">
 									<div class="flex items-center justify-center space-x-2">
-										if r.LogBlobHex != "" {
+										if runner.LogBlobHex != "" {
 											<a
-												href={ templ.SafeURL(fmt.Sprintf("/cl/%d/raw?hash=%s", data.CL.CLID, r.LogBlobHex)) }
+												href={ templ.SafeURL(fmt.Sprintf("/cl/%d/raw?hash=%s", data.CL.CLID, runner.LogBlobHex)) }
 												target="_blank"
 												class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 transition"
 												title="View CAS raw log output"
@@ -926,9 +926,9 @@ templ CIRunnersBlock(data CLDetailData) {
 												View Log ↗
 											</a>
 										}
-										if r.ExternalURL != "" {
+										if runner.ExternalURL != "" {
 											<a
-												href={ templ.SafeURL(r.ExternalURL) }
+												href={ templ.SafeURL(runner.ExternalURL) }
 												target="_blank"
 												rel="noopener noreferrer"
 												class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition"
@@ -937,7 +937,7 @@ templ CIRunnersBlock(data CLDetailData) {
 												External ↗
 											</a>
 										}
-										if r.LogBlobHex == "" && r.ExternalURL == "" {
+										if runner.LogBlobHex == "" && runner.ExternalURL == "" {
 											<span class="text-slate-600 text-[10px]">—</span>
 										}
 									</div>
@@ -996,8 +996,8 @@ templ CIRunnerAggregateBadge(runners []CIRunnerItem) {
 		failedCount := 0
 		runningCount := 0
 		queuedCount := 0
-		for _, r := range runners {
-			switch strings.ToLower(r.Status) {
+		for _, runner := range runners {
+			switch strings.ToLower(runner.Status) {
 			case "passed":
 				passedCount++
 			case "failed":

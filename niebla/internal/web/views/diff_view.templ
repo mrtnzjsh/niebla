@@ -85,15 +85,15 @@ templ DiffView(clID int64, patchsetNumber int, basePatchsetNumber int, detail *d
 	{{
 		commentedLines := make(map[int]bool)
 		for _, comments := range commentsByLine {
-			for _, c := range comments {
-				start := c.LineNumber
-				end := c.EndLineNumber
+			for _, comment := range comments {
+				start := comment.LineNumber
+				end := comment.EndLineNumber
 				if end <= 0 {
 					end = start
 				}
 				if end > start {
-					for l := start; l <= end; l++ {
-						commentedLines[l] = true
+					for lineNum := start; lineNum <= end; lineNum++ {
+						commentedLines[lineNum] = true
 					}
 				}
 			}

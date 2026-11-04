@@ -146,21 +146,21 @@ func traverseTrees(fetchTree tree.FetchTreeFunc, currentPath string, baseHash, m
 	}
 
 	baseMap := make(map[string]tree.Entry, len(baseEntries))
-	for _, e := range baseEntries {
-		baseMap[e.Name] = e
+	for _, entry := range baseEntries {
+		baseMap[entry.Name] = entry
 	}
 
 	modMap := make(map[string]tree.Entry, len(modEntries))
-	for _, e := range modEntries {
-		modMap[e.Name] = e
+	for _, entry := range modEntries {
+		modMap[entry.Name] = entry
 	}
 
 	allNamesMap := make(map[string]struct{}, len(baseEntries)+len(modEntries))
-	for _, e := range baseEntries {
-		allNamesMap[e.Name] = struct{}{}
+	for _, entry := range baseEntries {
+		allNamesMap[entry.Name] = struct{}{}
 	}
-	for _, e := range modEntries {
-		allNamesMap[e.Name] = struct{}{}
+	for _, entry := range modEntries {
+		allNamesMap[entry.Name] = struct{}{}
 	}
 
 	names := make([]string, 0, len(allNamesMap))
@@ -321,10 +321,10 @@ func ComputeSideBySideDiff(filePath string, baseContent, modContent []byte, chan
 
 	i := 0
 	for i < len(diffs) {
-		d := diffs[i]
+		currentDiff := diffs[i]
 
-		if d.Type == diffmatchpatch.DiffEqual {
-			eqLines := splitLinesPreserving(d.Text)
+		if currentDiff.Type == diffmatchpatch.DiffEqual {
+			eqLines := splitLinesPreserving(currentDiff.Text)
 			for _, lineContent := range eqLines {
 				var baseHTML template.HTML
 				if baseIdx < len(baseHighlighted) {
@@ -444,8 +444,8 @@ func HighlightLines(filename, content string) []template.HTML {
 	if err != nil {
 		rawLines := splitLinesPreserving(content)
 		res := make([]template.HTML, len(rawLines))
-		for idx, r := range rawLines {
-			res[idx] = template.HTML(template.HTMLEscapeString(r))
+		for idx, rawLine := range rawLines {
+			res[idx] = template.HTML(template.HTMLEscapeString(rawLine))
 		}
 		return res
 	}
@@ -454,16 +454,16 @@ func HighlightLines(filename, content string) []template.HTML {
 	if err := formatter.Format(&buf, style, it); err != nil {
 		rawLines := splitLinesPreserving(content)
 		res := make([]template.HTML, len(rawLines))
-		for idx, r := range rawLines {
-			res[idx] = template.HTML(template.HTMLEscapeString(r))
+		for idx, rawLine := range rawLines {
+			res[idx] = template.HTML(template.HTMLEscapeString(rawLine))
 		}
 		return res
 	}
 
 	split := strings.Split(buf.String(), "\n")
 	res := make([]template.HTML, len(split))
-	for idx, s := range split {
-		res[idx] = template.HTML(s)
+	for idx, lineStr := range split {
+		res[idx] = template.HTML(lineStr)
 	}
 	return res
 }

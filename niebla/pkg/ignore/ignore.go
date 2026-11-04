@@ -38,13 +38,13 @@ type PatternMatcher struct {
 
 // NewMatcher constructs a PatternMatcher from pattern lines.
 func NewMatcher(patterns ...string) *PatternMatcher {
-	m := &PatternMatcher{}
+	matcher := &PatternMatcher{}
 	for _, line := range patterns {
-		if r, ok := parseLine(line); ok {
-			m.rules = append(m.rules, r)
+		if parsedRule, ok := parseLine(line); ok {
+			matcher.rules = append(matcher.rules, parsedRule)
 		}
 	}
-	return m
+	return matcher
 }
 
 // Parse constructs a PatternMatcher from an io.Reader containing .nieblaignore lines.
@@ -87,40 +87,38 @@ func parseLine(line string) (rule, bool) {
 		return rule{}, false
 	}
 
-	var r rule
-	r.raw = line
-	p := line
+	var parsedRule rule
+	parsedRule.raw = line
+	pattern := line
 
-	if strings.HasPrefix(p, `\!`) || strings.HasPrefix(p, `\#`) {
-		p = p[1:]
-	} else if strings.HasPrefix(p, "!") {
-		r.negate = true
-		p = p[1:]
+	if strings.HasPrefix(pattern, `\!`) || strings.HasPrefix(pattern, `\#`) {
+		pattern = pattern[1:]
+	} else if strings.HasPrefix(pattern, "!") {
+		parsedRule.negate = true
+		pattern = pattern[1:]
 	}
 
-	if strings.HasSuffix(p, "/") {
-		r.dirOnly = true
-		p = strings.TrimSuffix(p, "/")
+	if strings.HasSuffix(pattern, "/") {
+		parsedRule.dirOnly = true
+		pattern = strings.TrimSuffix(pattern, "/")
 	}
 
-	if strings.HasPrefix(p, "/") {
-		r.anchored = true
-		p = strings.TrimPrefix(p, "/")
-	} else if strings.Contains(p, "/") {
-		// Patterns containing a slash (other than trailing slash) are anchored to the root,
-		// unless they start with "**/".
-		if !strings.HasPrefix(p, "**/") {
-			r.anchored = true
+	if strings.HasPrefix(pattern, "/") {
+		parsedRule.anchored = true
+		pattern = strings.TrimPrefix(pattern, "/")
+	} else if strings.Contains(pattern, "/") {
+		if !strings.HasPrefix(pattern, "**/") {
+			parsedRule.anchored = true
 		}
 	}
 
-	p = strings.TrimPrefix(p, "./")
-	if p == "" {
+	pattern = strings.TrimPrefix(pattern, "./")
+	if pattern == "" {
 		return rule{}, false
 	}
 
-	r.pattern = p
-	return r, true
+	parsedRule.pattern = pattern
+	return parsedRule, true
 }
 
 func normalizePath(relPath string) string {
@@ -163,9 +161,9 @@ func (m *PatternMatcher) Match(relPath string, isDir bool) bool {
 	parts := strings.Split(norm, "/")
 	ignored := false
 
-	for _, r := range m.rules {
-		if matchRule(r, norm, parts, isDir) {
-			ignored = !r.negate
+	for _, ruleItem := range m.rules {
+		if matchRule(ruleItem, norm, parts, isDir) {
+			ignored = !ruleItem.negate
 		}
 	}
 

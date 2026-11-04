@@ -53,7 +53,6 @@ func NewProvider(cfg Config) *Provider {
 	return &Provider{cfg: cfg}
 }
 
-// Name returns the identifier of this provider.
 func (p *Provider) Name() string {
 	return p.cfg.Name
 }
@@ -72,7 +71,6 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 
 	startTime := time.Now().UTC()
 
-	// 1. Report status: running
 	if p.cfg.Reporter != nil {
 		_ = p.cfg.Reporter.ReportStatus(ctx, ci.CheckRunReport{
 			CLID:           req.CLID,
@@ -84,7 +82,6 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 		})
 	}
 
-	// 2. Materialize tree if tree hash is available
 	if req.TreeHash != "" && p.cfg.TreeFetcher != nil {
 		treeHashBytes, err := hex.DecodeString(strings.TrimSpace(req.TreeHash))
 		if err == nil && len(treeHashBytes) > 0 {
@@ -111,7 +108,6 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 		}
 	}
 
-	// 3. Prepare execution context with timeout
 	timeout := time.Duration(p.cfg.TimeoutSeconds) * time.Second
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -132,7 +128,6 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 	cmd.Stdout = &outputBuf
 	cmd.Stderr = &outputBuf
 
-	// 4. Run the build/test command
 	execErr := cmd.Run()
 	endTime := time.Now().UTC()
 
@@ -145,7 +140,6 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 		}
 	}
 
-	// 5. Store output log to CAS if configured
 	var logHashHex string
 	if p.cfg.CASStorage != nil && outputBuf.Len() > 0 {
 		hashBytes, _, _, _, err := p.cfg.CASStorage.Put(bytes.NewReader(outputBuf.Bytes()))
@@ -154,7 +148,6 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 		}
 	}
 
-	// 6. Report final verdict
 	if p.cfg.Reporter != nil {
 		_ = p.cfg.Reporter.ReportStatus(ctx, ci.CheckRunReport{
 			CLID:           req.CLID,

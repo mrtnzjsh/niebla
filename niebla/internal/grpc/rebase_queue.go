@@ -74,21 +74,21 @@ func NewRebaseQueue(numWorkers int, bufferSize int, executor RebaseExecutor) *Re
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	q := &RebaseQueue{
+	queue := &RebaseQueue{
 		tasks:    make(chan RebaseTask, bufferSize),
 		executor: executor,
 		locks:    NewKeyedMutex(),
 		ctx:      ctx,
 		cancel:   cancel,
 	}
-	q.idleCond = sync.NewCond(&q.idleMu)
+	queue.idleCond = sync.NewCond(&queue.idleMu)
 
 	for i := 0; i < numWorkers; i++ {
-		q.wg.Add(1)
-		go q.workerLoop()
+		queue.wg.Add(1)
+		go queue.workerLoop()
 	}
 
-	return q
+	return queue
 }
 
 func (q *RebaseQueue) workerLoop() {

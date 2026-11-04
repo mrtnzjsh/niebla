@@ -101,8 +101,8 @@ func (s *StaticResolver) GetUserGroups(ctx context.Context, username string) ([]
 	uClean := strings.ToLower(strings.TrimSpace(username))
 	var userGroups []string
 	for grp, members := range s.Groups {
-		for _, m := range members {
-			if strings.ToLower(strings.TrimSpace(m)) == uClean {
+		for _, member := range members {
+			if strings.ToLower(strings.TrimSpace(member)) == uClean {
 				userGroups = append(userGroups, grp)
 				break
 			}
@@ -209,8 +209,8 @@ func ExpandReviewers(ctx context.Context, resolver Resolver, inputs []string) ([
 					return nil, fmt.Errorf("failed to resolve group %q: %w", item, err)
 				}
 				if len(members) > 0 {
-					for _, m := range members {
-						mTrim := strings.TrimSpace(m)
+					for _, member := range members {
+						mTrim := strings.TrimSpace(member)
 						if mTrim != "" && !seen[mTrim] {
 							seen[mTrim] = true
 							result = append(result, mTrim)

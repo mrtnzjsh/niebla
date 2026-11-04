@@ -68,11 +68,11 @@ func (h *CommentsHandler) resolveReviewer(r *http.Request) string {
 		return h.authResolver.ResolveUser(r)
 	}
 	if r != nil {
-		if q := r.URL.Query().Get("reviewer"); q != "" {
-			return strings.TrimSpace(q)
+		if reviewerParam := r.URL.Query().Get("reviewer"); reviewerParam != "" {
+			return strings.TrimSpace(reviewerParam)
 		}
-		if a := r.FormValue("author"); a != "" {
-			return strings.TrimSpace(a)
+		if authorParam := r.FormValue("author"); authorParam != "" {
+			return strings.TrimSpace(authorParam)
 		}
 	}
 	return auth.CurrentOSUser()
@@ -80,10 +80,10 @@ func (h *CommentsHandler) resolveReviewer(r *http.Request) string {
 
 func filterVisibleComments(comments []db.Comment, activeReviewer string) []db.Comment {
 	var visible []db.Comment
-	for _, c := range comments {
+	for _, comment := range comments {
 		// Visible if already published OR authored as draft by active reviewer
-		if !c.IsDraft || c.Author == activeReviewer {
-			visible = append(visible, c)
+		if !comment.IsDraft || comment.Author == activeReviewer {
+			visible = append(visible, comment)
 		}
 	}
 	return visible
@@ -101,8 +101,8 @@ func (h *CommentsHandler) countDrafts(r *http.Request, clID int64, author string
 	defer demoCommentsMu.RUnlock()
 	count := 0
 	for _, list := range demoCommentsStore {
-		for _, c := range list {
-			if c.CLID == clID && c.Author == author && c.IsDraft {
+		for _, comment := range list {
+			if comment.CLID == clID && comment.Author == author && comment.IsDraft {
 				count++
 			}
 		}
@@ -306,7 +306,7 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 	} else {
 		demoCommentsMu.Lock()
 		nextCommentID++
-		c := db.Comment{
+		comment := db.Comment{
 			ID:                  nextCommentID,
 			CLID:                p.clID,
 			PatchsetNumber:      p.psNum,
@@ -325,7 +325,7 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 			CreatedAt:           time.Now(),
 		}
 		key := fmt.Sprintf("%d:%s:%d:%s", p.clID, p.filePath, p.endLine, p.side)
-		demoCommentsStore[key] = append(demoCommentsStore[key], c)
+		demoCommentsStore[key] = append(demoCommentsStore[key], comment)
 		comments = filterVisibleComments(demoCommentsStore[key], p.author)
 		demoCommentsMu.Unlock()
 	}

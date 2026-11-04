@@ -267,15 +267,15 @@ func newWorkspaceListCmd(rootFlags *RootFlags) *cobra.Command {
 				return nil
 			}
 
-			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 8, 4, ' ', 0)
-			fmt.Fprintln(w, "NAME\tBASE CL\tMOUNT PATH\tSTATUS")
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 8, 4, ' ', 0)
+			fmt.Fprintln(writer, "NAME\tBASE CL\tMOUNT PATH\tSTATUS")
 
 			for _, ws := range workspaces {
 				status := checkWorkspaceStatus(ws)
-				fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", ws.Name, ws.BaseCL, ws.MountDir, status)
+				fmt.Fprintf(writer, "%s\t%d\t%s\t%s\n", ws.Name, ws.BaseCL, ws.MountDir, status)
 			}
 
-			return w.Flush()
+			return writer.Flush()
 		},
 	}
 }
@@ -307,30 +307,25 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 				}
 			}
 
-			// 1. Unmount workspace
 			if isMountPoint(ws.MountDir) {
 				if err := unmountWorkspace(ws.MountDir); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unmounting %s failed: %v\n", ws.MountDir, err)
 				}
 			}
 
-			// 2. Terminate daemon PID if alive
 			if ws.PID > 0 && isProcessAlive(ws.PID) {
 				terminateProcess(ws.PID)
 			}
 
-			// 3. Remove scratch directory and control socket
 			if ws.SocketPath != "" {
 				_ = os.Remove(ws.SocketPath)
 			}
 			if ws.ScratchDir != "" {
 				_ = os.RemoveAll(ws.ScratchDir)
-				// Clean up parent directory if empty
 				parent := filepath.Dir(ws.ScratchDir)
-				_ = os.Remove(parent) // Only removes if empty
+				_ = os.Remove(parent)
 			}
 
-			// 4. Delete config metadata
 			if err := mgr.Delete(name); err != nil {
 				return fmt.Errorf("failed to remove workspace metadata: %w", err)
 			}
@@ -460,14 +455,12 @@ func pollMountActive(out io.Writer, pid int, mountDir, socketPath, scratchDir st
 	logPath := filepath.Join(filepath.Dir(scratchDir), "nieblafs.log")
 
 	for time.Now().Before(deadline) {
-		// 1. Check if process is still alive
 		if !isProcessAlive(pid) {
 			tailMsg := readLogTail(logPath, 5)
 			fmt.Fprintf(out, "Warning: nieblafs daemon (PID %d) exited prematurely.\n%s\n", pid, tailMsg)
 			return
 		}
 
-		// 2. Check if control socket responds (fast deterministic readiness)
 		if socketPath != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 			if err := control.NewClient(socketPath).Ping(ctx); err == nil {
@@ -477,7 +470,6 @@ func pollMountActive(out io.Writer, pid int, mountDir, socketPath, scratchDir st
 			cancel()
 		}
 
-		// 3. Check if mounted
 		if isMountPoint(mountDir) {
 			return
 		}

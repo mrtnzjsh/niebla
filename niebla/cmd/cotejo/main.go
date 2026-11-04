@@ -96,10 +96,8 @@ func main() {
 	assetsDirFlag := flag.String("assets-dir", getEnv("COTEJO_ASSETS_DIR", "./assets"), "Path to assets directory")
 	flag.Parse()
 
-	// 0. Load and validate unified configuration
 	cfg := loadCotejoConfig(*configFlag, *hostFlag, *dbURLFlag, *blobPathFlag, *portFlag)
 
-	// Resolve active theme and wire into Critique views & Chroma syntax highlighting
 	activeTheme := config.ResolveTheme(cfg.Critique.Theme)
 	views.SetActiveThemeCSS(activeTheme.ToCSSVariables())
 	diff.SetSyntaxStyle(activeTheme.SyntaxStyle)
@@ -113,10 +111,8 @@ func main() {
 	log.Printf("PostgreSQL URL      : %s", cfg.Server.DBURL)
 	log.Printf("Assets directory    : %s", *assetsDirFlag)
 
-	// 1. Initialize CAS local blob storage engine
 	casStorage := initCASStorage(cfg.Server.BlobPath)
 
-	// 2. Connect to database & apply migrations (or fallback to UI Dev Mode)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -132,7 +128,6 @@ func main() {
 		log.Printf("Connected to PostgreSQL and verified Cotejo schema migrations.")
 	}
 
-	// 3. Initialize HTTP handlers and event publisher
 	eventEmitter, err := internalevents.NewEmitterFromConfig(&cfg.Events)
 	if err != nil {
 		log.Fatalf("Failed to initialize event publisher: %v", err)
@@ -155,7 +150,6 @@ func main() {
 	rawHandler := handlers.NewRawHandler(database, casStorage)
 	ciHandler := handlers.NewCIHandler(database)
 
-	// 4. Set up HTTP routing (Go 1.22+ ServeMux with method and pattern matching)
 	mux := http.NewServeMux()
 
 	// Static assets
@@ -208,7 +202,6 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 
-	// 5. Start HTTP server
 	addr := fmt.Sprintf("%s:%d", cfg.Critique.Host, cfg.Critique.Port)
 	server := &http.Server{
 		Addr:         addr,
@@ -232,7 +225,6 @@ func main() {
 		close(serverErrCh)
 	}()
 
-	// 6. Graceful shutdown on SIGINT / SIGTERM
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 

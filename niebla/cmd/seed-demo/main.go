@@ -24,19 +24,19 @@ func putTree(ctx context.Context, database *db.DB, casStorage *cas.Storage, file
 	for clean, content := range files {
 		clean = filepath.ToSlash(filepath.Clean(clean))
 		var comps []string
-		for _, c := range bytes.Split([]byte(clean), []byte("/")) {
-			if len(c) > 0 {
-				comps = append(comps, string(c))
+		for _, comp := range bytes.Split([]byte(clean), []byte("/")) {
+			if len(comp) > 0 {
+				comps = append(comps, string(comp))
 			}
 		}
 
 		curr := root
 		for i := 0; i < len(comps)-1; i++ {
-			p := comps[i]
-			if _, ok := curr.subdirs[p]; !ok {
-				curr.subdirs[p] = &dirNode{files: make(map[string][]byte), subdirs: make(map[string]*dirNode)}
+			part := comps[i]
+			if _, ok := curr.subdirs[part]; !ok {
+				curr.subdirs[part] = &dirNode{files: make(map[string][]byte), subdirs: make(map[string]*dirNode)}
 			}
-			curr = curr.subdirs[p]
+			curr = curr.subdirs[part]
 		}
 		curr.files[comps[len(comps)-1]] = []byte(content)
 	}
@@ -105,7 +105,6 @@ func main() {
 	_, _ = pool.Exec(ctx, "DELETE FROM cl_patchsets;")
 	_, _ = pool.Exec(ctx, "DELETE FROM changelists WHERE cl_id > 1;")
 
-	// 1. Files for Patchset 1
 	filesPS1 := map[string]string{
 		"README.md": "# Niebla Monorepo\n\nCloud-native monorepo VCS and Cotejo code review platform.\n\n## Features\n- Virtual FUSE & FUSE-less workspaces\n- Server-authoritative Merkle trees\n",
 		"cmd/app/main.go": `package main
@@ -190,10 +189,9 @@ reviewers = ["alice", "bob"]
 	}
 	treePS1 := putTree(ctx, database, casStorage, filesPS1)
 
-	// 2. Files for Patchset 2
 	filesPS2 := make(map[string]string)
-	for k, v := range filesPS1 {
-		filesPS2[k] = v
+	for filePath, content := range filesPS1 {
+		filesPS2[filePath] = content
 	}
 	filesPS2["cmd/app/main.go"] = `package main
 
@@ -233,7 +231,6 @@ func ValidateToken(token string) (bool, error) {
 `
 	treePS2 := putTree(ctx, database, casStorage, filesPS2)
 
-	// 3. Update CL 1 directly to be an active, shelved review CL
 	desc := `feat(cotejo): implement fast server-authoritative code review web UI and Myers diff engine
 
 - Pure Go + a-h/templ + HTMX + Tailwind CSS
@@ -254,17 +251,14 @@ func ValidateToken(token string) (bool, error) {
 		log.Fatalf("Failed to update CL 1: %v", err)
 	}
 
-	// 4. Create Patchsets 1 and 2 for CL 1
 	_ = database.CreatePatchset(ctx, 1, 1, treePS1)
 	_ = database.CreatePatchset(ctx, 1, 2, treePS2)
 
-	// 5. Add Reviewers & Approvals to CL 1
 	_ = database.AddReviewers(ctx, 1, []string{"matatan", "alice", "package-builder", "sec-bot"})
 	_ = database.SetApproval(ctx, 1, "alice", "lgtm")
 	_ = database.SetApproval(ctx, 1, "package-builder", "lgtm")
 	_ = database.SetApproval(ctx, 1, "sec-bot", "lgtm")
 
-	// 6. Add Comments to CL 1
 	_, _ = database.CreateCommentWithSuggestion(ctx,
 		1, 2, "pkg/auth/token.go", 10, 14, "modified", "sec-bot",
 		"⚠️ Token expiration timestamp and minimum length validation recommended for production bearer auth.",
@@ -278,7 +272,6 @@ func ValidateToken(token string) (bool, error) {
 	_, _ = database.CreateComment(ctx, 1, 2, "cmd/app/main.go", 17, 18, "modified", "alice",
 		"LGTM! Clean entrypoint and proper port configuration matching Cotejo proxy.", nil, false)
 
-	// 7. Add Check Runs to CL 1
 	_, _ = database.UpsertCheckRun(ctx, db.CheckRun{
 		CLID:           1,
 		PatchsetNumber: 2,

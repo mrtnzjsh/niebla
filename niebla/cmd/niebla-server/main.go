@@ -103,13 +103,11 @@ func main() {
 	log.Printf("CAS blob path       : %s", *blobPathFlag)
 	log.Printf("PostgreSQL URL      : %s", *dbURLFlag)
 
-	// 1. Initialize CAS local blob storage engine
 	casStorage, err := cas.NewStorage(*blobPathFlag)
 	if err != nil {
 		log.Fatalf("Failed to initialize CAS storage engine at %s: %v", *blobPathFlag, err)
 	}
 
-	// 2. Connect to database & run embedded schema migrations
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -121,10 +119,8 @@ func main() {
 	defer database.Close()
 	log.Printf("Connected to PostgreSQL and verified schema migrations.")
 
-	// 3. Load toolchain configuration
 	cfg, _ := config.Load()
 
-	// 4. Build gRPC server options (TLS & Bearer Token Authentication)
 	grpcOpts := buildGRPCServerOptions(cfg, *tlsFlag, *tlsCertFlag, *tlsKeyFlag, *tokenFlag)
 
 	grpcServer := grpc.NewServer(grpcOpts...)
@@ -147,7 +143,6 @@ func main() {
 
 	repoServer.Register(grpcServer)
 
-	// 4. Start network listener
 	addr := fmt.Sprintf("%s:%d", *hostFlag, *portFlag)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -163,7 +158,6 @@ func main() {
 		close(serverErrCh)
 	}()
 
-	// 5. Handle graceful shutdown on SIGINT / SIGTERM
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 

@@ -9,17 +9,17 @@ func MatchFilter(filters []string, eventType string) bool {
 	if len(filters) == 0 {
 		return true
 	}
-	for _, f := range filters {
-		f = strings.TrimSpace(f)
-		if f == "*" || f == "" {
+	for _, filter := range filters {
+		filter = strings.TrimSpace(filter)
+		if filter == "*" || filter == "" {
 			return true
 		}
-		if strings.HasSuffix(f, "*") {
-			prefix := strings.TrimSuffix(f, "*")
+		if strings.HasSuffix(filter, "*") {
+			prefix := strings.TrimSuffix(filter, "*")
 			if strings.HasPrefix(eventType, prefix) {
 				return true
 			}
-		} else if f == eventType {
+		} else if filter == eventType {
 			return true
 		}
 	}

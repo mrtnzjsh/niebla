@@ -122,8 +122,8 @@ func executeMaterializationJobs(
 	defer cancel()
 
 	jobCh := make(chan fileJob, len(jobs))
-	for _, j := range jobs {
-		jobCh <- j
+	for _, job := range jobs {
+		jobCh <- job
 	}
 	close(jobCh)
 

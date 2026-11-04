@@ -59,7 +59,6 @@ func NewProvider(cfg Config) (*Provider, error) {
 	}, nil
 }
 
-// Name returns the provider identifier.
 func (p *Provider) Name() string {
 	return p.cfg.Name
 }

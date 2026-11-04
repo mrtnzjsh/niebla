@@ -105,20 +105,20 @@ func MatchAgentsWithExplicit(agents []AgentDef, touchedFiles []string, explicitN
 	}
 
 	var matched []AgentDef
-	for _, a := range agents {
-		if explicitMap[strings.ToLower(strings.TrimSpace(a.Name))] {
-			matched = append(matched, a)
+	for _, agent := range agents {
+		if explicitMap[strings.ToLower(strings.TrimSpace(agent.Name))] {
+			matched = append(matched, agent)
 			continue
 		}
-		if a.OptIn {
+		if agent.OptIn {
 			continue
 		}
-		if len(a.TriggerPaths) == 0 {
-			matched = append(matched, a)
+		if len(agent.TriggerPaths) == 0 {
+			matched = append(matched, agent)
 			continue
 		}
-		if a.MatchesAnyFile(touchedFiles) {
-			matched = append(matched, a)
+		if agent.MatchesAnyFile(touchedFiles) {
+			matched = append(matched, agent)
 		}
 	}
 	return matched
@@ -126,9 +126,9 @@ func MatchAgentsWithExplicit(agents []AgentDef, touchedFiles []string, explicitN
 
 // MatchesAnyFile checks if any of the touched files match the agent's trigger paths.
 func (a *AgentDef) MatchesAnyFile(touchedFiles []string) bool {
-	for _, f := range touchedFiles {
+	for _, file := range touchedFiles {
 		for _, pattern := range a.TriggerPaths {
-			if matchPathPattern(pattern, f) {
+			if matchPathPattern(pattern, file) {
 				return true
 			}
 		}
@@ -251,35 +251,35 @@ func ParseReviewOutput(output string) (*AgentReviewReport, []DiagnosticComment) 
 			if report.Verdict != "" || report.Summary != "" || len(report.Comments) > 0 {
 				var diags []DiagnosticComment
 				for i := range report.Comments {
-					c := &report.Comments[i]
-					c.Path = path.Clean(strings.TrimSpace(c.Path))
-					if c.LineStart <= 0 {
-						c.LineStart = 1
+					comment := &report.Comments[i]
+					comment.Path = path.Clean(strings.TrimSpace(comment.Path))
+					if comment.LineStart <= 0 {
+						comment.LineStart = 1
 					}
-					if c.LineEnd < c.LineStart {
-						c.LineEnd = c.LineStart
+					if comment.LineEnd < comment.LineStart {
+						comment.LineEnd = comment.LineStart
 					}
-					if c.Severity == "" {
-						c.Severity = "warning"
+					if comment.Severity == "" {
+						comment.Severity = "warning"
 					}
-					if c.SuggestionCode != "" {
-						if c.SuggestionStartLine <= 0 {
-							c.SuggestionStartLine = c.LineStart
+					if comment.SuggestionCode != "" {
+						if comment.SuggestionStartLine <= 0 {
+							comment.SuggestionStartLine = comment.LineStart
 						}
-						if c.SuggestionEndLine < c.SuggestionStartLine {
-							c.SuggestionEndLine = c.LineEnd
+						if comment.SuggestionEndLine < comment.SuggestionStartLine {
+							comment.SuggestionEndLine = comment.LineEnd
 						}
 					}
 					diags = append(diags, DiagnosticComment{
-						Path:                c.Path,
-						LineStart:           c.LineStart,
-						LineEnd:             c.LineEnd,
-						Column:              c.Column,
-						Severity:            c.Severity,
-						Message:             c.Message,
-						SuggestionStartLine: c.SuggestionStartLine,
-						SuggestionEndLine:   c.SuggestionEndLine,
-						SuggestionCode:      c.SuggestionCode,
+						Path:                comment.Path,
+						LineStart:           comment.LineStart,
+						LineEnd:             comment.LineEnd,
+						Column:              comment.Column,
+						Severity:            comment.Severity,
+						Message:             comment.Message,
+						SuggestionStartLine: comment.SuggestionStartLine,
+						SuggestionEndLine:   comment.SuggestionEndLine,
+						SuggestionCode:      comment.SuggestionCode,
 					})
 				}
 				return &report, diags

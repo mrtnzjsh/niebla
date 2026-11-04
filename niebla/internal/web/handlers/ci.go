@@ -196,8 +196,8 @@ func evaluateDemoCheckRuns(clID int64, patchsetNum int) (runs []db.CheckRun, gre
 	demoCheckRunsMu.RUnlock()
 
 	total = len(runs)
-	for _, r := range runs {
-		switch r.Status {
+	for _, run := range runs {
+		switch run.Status {
 		case "queued", "running":
 			pending++
 		case "failed", "canceled", "cancelled":

@@ -59,7 +59,6 @@ type ServerHook struct {
 	Command        string        `toml:"command"`
 }
 
-// IsBlocking returns true if the hook is blocking (defaults to true if omitted).
 func (h *ServerHook) IsBlocking() bool {
 	if h.Blocking == nil {
 		return true
@@ -197,7 +196,6 @@ func EvaluateTreeScan(hook ServerHook, touched []TouchedFile) []HookFailure {
 
 		cleanPath := path.Clean(file.Path)
 
-		// Check forbidden patterns
 		for _, pattern := range rule.ForbiddenPatterns {
 			if matchPathPattern(pattern, cleanPath) {
 				failures = append(failures, HookFailure{
@@ -210,7 +208,6 @@ func EvaluateTreeScan(hook ServerHook, touched []TouchedFile) []HookFailure {
 			}
 		}
 
-		// Check max file size
 		if rule.MaxFileSizeBytes > 0 && file.SizeBytes > rule.MaxFileSizeBytes {
 			failures = append(failures, HookFailure{
 				HookName: hook.Name,
@@ -275,8 +272,8 @@ func EvaluateServerPresubmitWithOptions(hooks []ServerHook, meta CLMetadata, tou
 		}
 	}
 
-	for _, f := range result.Failures {
-		if f.Blocking {
+	for _, failure := range result.Failures {
+		if failure.Blocking {
 			result.Passed = false
 			break
 		}
@@ -286,9 +283,9 @@ func EvaluateServerPresubmitWithOptions(hooks []ServerHook, meta CLMetadata, tou
 }
 
 func hookMatchesTouched(patterns []string, touched []TouchedFile) bool {
-	for _, f := range touched {
-		for _, p := range patterns {
-			if matchPathPattern(p, f.Path) {
+	for _, file := range touched {
+		for _, pattern := range patterns {
+			if matchPathPattern(pattern, file.Path) {
 				return true
 			}
 		}

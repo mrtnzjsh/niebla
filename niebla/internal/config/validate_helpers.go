@@ -521,11 +521,11 @@ func validateResilienceEncryption(cfg *Config, errs *ValidationErrors) {
 
 func validateResilienceBackups(cfg *Config, errs *ValidationErrors) {
 	if cfg.Resilience.Nextcloud.Enabled {
-		u := strings.TrimSpace(cfg.Resilience.Nextcloud.URL)
-		if u == "" || (!strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://")) {
+		targetURL := strings.TrimSpace(cfg.Resilience.Nextcloud.URL)
+		if targetURL == "" || (!strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://")) {
 			*errs = append(*errs, ValidationError{
 				Field:   "resilience.nextcloud.url",
-				Value:   u,
+				Value:   targetURL,
 				Message: "nextcloud url must begin with http:// or https://",
 				Hint:    "Specify full WebDAV path (e.g. 'https://nextcloud.domain.com/remote.php/dav/files/user/niebla').",
 			})
@@ -703,8 +703,8 @@ func validateCI(cfg *Config, errs *ValidationErrors) error {
 		}
 	}
 
-	for name, r := range cfg.CI.Runners {
-		provider := strings.ToLower(strings.TrimSpace(r.Provider))
+	for name, runnerCfg := range cfg.CI.Runners {
+		provider := strings.ToLower(strings.TrimSpace(runnerCfg.Provider))
 		if provider == "" {
 			*errs = append(*errs, ValidationError{
 				Field:   fmt.Sprintf("ci.runners.%s.provider", name),
@@ -715,25 +715,25 @@ func validateCI(cfg *Config, errs *ValidationErrors) error {
 		} else if provider != "local" && provider != "forgejo" && provider != "github" && provider != "webhook" {
 			*errs = append(*errs, ValidationError{
 				Field:   fmt.Sprintf("ci.runners.%s.provider", name),
-				Value:   r.Provider,
-				Message: fmt.Sprintf("unsupported CI provider %q", r.Provider),
+				Value:   runnerCfg.Provider,
+				Message: fmt.Sprintf("unsupported CI provider %q", runnerCfg.Provider),
 				Hint:    "Supported CI providers: 'local', 'forgejo', 'github', or 'webhook'.",
 			})
 		}
 
 		if provider == "forgejo" || provider == "github" || provider == "webhook" {
-			ep := strings.TrimSpace(r.Endpoint)
-			if ep == "" || (!strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://")) {
+			endpoint := strings.TrimSpace(runnerCfg.Endpoint)
+			if endpoint == "" || (!strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://")) {
 				*errs = append(*errs, ValidationError{
 					Field:   fmt.Sprintf("ci.runners.%s.endpoint", name),
-					Value:   ep,
+					Value:   endpoint,
 					Message: "endpoint must begin with http:// or https://",
 					Hint:    "Specify the HTTP/REST webhook or dispatch endpoint URL.",
 				})
 			}
 		}
 
-		validateCIRunnerAuth(name, r, errs)
+		validateCIRunnerAuth(name, runnerCfg, errs)
 	}
 
 	return nil

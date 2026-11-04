@@ -159,25 +159,25 @@ func ReadHeader(r io.Reader) (*EnvelopeHeader, error) {
 		return nil, ErrInvalidMagic
 	}
 
-	h := &EnvelopeHeader{}
-	if err := binary.Read(r, binary.BigEndian, &h.Version); err != nil {
+	header := &EnvelopeHeader{}
+	if err := binary.Read(r, binary.BigEndian, &header.Version); err != nil {
 		return nil, fmt.Errorf("failed to read version: %w", err)
 	}
-	if h.Version > CurrentEnvelopeVersion {
-		return nil, fmt.Errorf("%w: header version %d > current %d", ErrUnsupportedVer, h.Version, CurrentEnvelopeVersion)
+	if header.Version > CurrentEnvelopeVersion {
+		return nil, fmt.Errorf("%w: header version %d > current %d", ErrUnsupportedVer, header.Version, CurrentEnvelopeVersion)
 	}
 
 	var suiteByte uint8
 	if err := binary.Read(r, binary.BigEndian, &suiteByte); err != nil {
 		return nil, fmt.Errorf("failed to read cipher suite: %w", err)
 	}
-	h.CipherSuite = CipherSuite(suiteByte)
+	header.CipherSuite = CipherSuite(suiteByte)
 
-	if err := binary.Read(r, binary.BigEndian, &h.KDFMode); err != nil {
+	if err := binary.Read(r, binary.BigEndian, &header.KDFMode); err != nil {
 		return nil, fmt.Errorf("failed to read KDF mode: %w", err)
 	}
 
-	if _, err := io.ReadFull(r, h.Salt[:]); err != nil {
+	if _, err := io.ReadFull(r, header.Salt[:]); err != nil {
 		return nil, fmt.Errorf("failed to read salt: %w", err)
 	}
 
@@ -185,8 +185,8 @@ func ReadHeader(r io.Reader) (*EnvelopeHeader, error) {
 	if err := binary.Read(r, binary.BigEndian, &dekLen); err != nil {
 		return nil, fmt.Errorf("failed to read wrapped DEK length: %w", err)
 	}
-	h.WrappedDEK = make([]byte, dekLen)
-	if _, err := io.ReadFull(r, h.WrappedDEK); err != nil {
+	header.WrappedDEK = make([]byte, dekLen)
+	if _, err := io.ReadFull(r, header.WrappedDEK); err != nil {
 		return nil, fmt.Errorf("failed to read wrapped DEK: %w", err)
 	}
 
@@ -195,11 +195,11 @@ func ReadHeader(r io.Reader) (*EnvelopeHeader, error) {
 		return nil, fmt.Errorf("failed to read metadata length: %w", err)
 	}
 	if metaLen > 0 {
-		h.MetadataJSON = make([]byte, metaLen)
-		if _, err := io.ReadFull(r, h.MetadataJSON); err != nil {
+		header.MetadataJSON = make([]byte, metaLen)
+		if _, err := io.ReadFull(r, header.MetadataJSON); err != nil {
 			return nil, fmt.Errorf("failed to read metadata payload: %w", err)
 		}
 	}
 
-	return h, nil
+	return header, nil
 }

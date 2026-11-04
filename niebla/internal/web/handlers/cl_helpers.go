@@ -108,13 +108,13 @@ func (h *CLHandler) getFileCommentsByLine(ctx context.Context, clID int64, targe
 	}
 	fileComments, err := h.db.ListComments(ctx, clID, targetFile)
 	if err == nil {
-		for _, c := range fileComments {
-			if !c.IsDraft || c.Author == reviewer {
-				anchorLine := c.EndLineNumber
+		for _, comment := range fileComments {
+			if !comment.IsDraft || comment.Author == reviewer {
+				anchorLine := comment.EndLineNumber
 				if anchorLine <= 0 {
-					anchorLine = c.LineNumber
+					anchorLine = comment.LineNumber
 				}
-				commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+				commentsByLine[anchorLine] = append(commentsByLine[anchorLine], comment)
 			}
 		}
 	}
@@ -313,8 +313,8 @@ func (h *CLHandler) getSubmitCLMetadata(ctx context.Context, clID int64) (
 	demoCLStatusMu.RUnlock()
 
 	demoApprovalsMu.RLock()
-	for _, a := range demoApprovalsStore[clID] {
-		if a.Verdict == "approved" || a.Verdict == "lgtm" {
+	for _, approval := range demoApprovalsStore[clID] {
+		if approval.Verdict == "approved" || approval.Verdict == "lgtm" {
 			approvalsCount++
 		}
 	}
@@ -322,8 +322,8 @@ func (h *CLHandler) getSubmitCLMetadata(ctx context.Context, clID int64) (
 
 	demoCommentsMu.RLock()
 	for _, list := range demoCommentsStore {
-		for _, c := range list {
-			if c.CLID == clID && !c.IsDraft && !c.Resolved {
+		for _, comment := range list {
+			if comment.CLID == clID && !comment.IsDraft && !comment.Resolved {
 				unresolvedCount++
 			}
 		}
@@ -406,8 +406,8 @@ func (h *CLHandler) validateSubmitCI(ctx context.Context, clID int64, requireGre
 		runs := demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, 1)]
 		demoCheckRunsMu.RUnlock()
 		total = len(runs)
-		for _, r := range runs {
-			switch r.Status {
+		for _, run := range runs {
+			switch run.Status {
 			case "queued", "running":
 				pending++
 			case "failed", "canceled", "cancelled":
@@ -460,7 +460,7 @@ func (h *CLHandler) publishDemoReview(clID int64, author, overallMsg, verdict st
 	}
 	if overallMsg != "" {
 		nextCommentID++
-		c := db.Comment{
+		comment := db.Comment{
 			ID:             nextCommentID,
 			CLID:           clID,
 			PatchsetNumber: 1,
@@ -475,7 +475,7 @@ func (h *CLHandler) publishDemoReview(clID int64, author, overallMsg, verdict st
 			CreatedAt:      time.Now(),
 		}
 		key := fmt.Sprintf("%d::0:modified", clID)
-		demoCommentsStore[key] = append(demoCommentsStore[key], c)
+		demoCommentsStore[key] = append(demoCommentsStore[key], comment)
 	}
 	demoCommentsMu.Unlock()
 
@@ -526,8 +526,8 @@ func (h *CLHandler) resolveRunnerProvider(name, rawProvider string) string {
 // consolidateReviewersWithApprovals merges review assignments with latest recorded verdicts.
 func consolidateReviewersWithApprovals(rawReviewers []db.ReviewerAssignment, approvals []db.Approval, clID int64) []db.ReviewerAssignment {
 	verdictMap := make(map[string]string, len(approvals))
-	for _, a := range approvals {
-		verdictMap[a.Reviewer] = a.Verdict
+	for _, approval := range approvals {
+		verdictMap[approval.Reviewer] = approval.Verdict
 	}
 	found := make(map[string]bool, len(rawReviewers)+len(approvals))
 	var list []db.ReviewerAssignment
@@ -538,13 +538,13 @@ func consolidateReviewersWithApprovals(rawReviewers []db.ReviewerAssignment, app
 		list = append(list, rev)
 		found[rev.Reviewer] = true
 	}
-	for _, a := range approvals {
-		if !found[a.Reviewer] {
+	for _, approval := range approvals {
+		if !found[approval.Reviewer] {
 			list = append(list, db.ReviewerAssignment{
 				CLID:      clID,
-				Reviewer:  a.Reviewer,
-				Verdict:   a.Verdict,
-				UpdatedAt: a.UpdatedAt,
+				Reviewer:  approval.Reviewer,
+				Verdict:   approval.Verdict,
+				UpdatedAt: approval.UpdatedAt,
 			})
 		}
 	}
@@ -554,8 +554,8 @@ func consolidateReviewersWithApprovals(rawReviewers []db.ReviewerAssignment, app
 // countApprovedVerdicts counts how many approvals have approved or lgtm verdicts.
 func countApprovedVerdicts(approvals []db.Approval) int {
 	cnt := 0
-	for _, a := range approvals {
-		if a.Verdict == "approved" || a.Verdict == "lgtm" {
+	for _, approval := range approvals {
+		if approval.Verdict == "approved" || approval.Verdict == "lgtm" {
 			cnt++
 		}
 	}
@@ -572,23 +572,23 @@ func resolveDemoCLComments(clID int64, targetFile, reviewer string) (map[int][]d
 	var reviewerDrafts []db.Comment
 
 	for key, list := range demoCommentsStore {
-		for _, c := range list {
-			if c.CLID != clID {
+		for _, comment := range list {
+			if comment.CLID != clID {
 				continue
 			}
-			if c.Author == reviewer && c.IsDraft {
-				reviewerDrafts = append(reviewerDrafts, c)
+			if comment.Author == reviewer && comment.IsDraft {
+				reviewerDrafts = append(reviewerDrafts, comment)
 			}
-			if !c.IsDraft && !c.Resolved {
+			if !comment.IsDraft && !comment.Resolved {
 				unresolvedCount++
 			}
 			if targetFile != "" && strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
-				if !c.IsDraft || c.Author == reviewer {
-					anchor := c.EndLineNumber
+				if !comment.IsDraft || comment.Author == reviewer {
+					anchor := comment.EndLineNumber
 					if anchor <= 0 {
-						anchor = c.LineNumber
+						anchor = comment.LineNumber
 					}
-					commentsByLine[anchor] = append(commentsByLine[anchor], c)
+					commentsByLine[anchor] = append(commentsByLine[anchor], comment)
 				}
 			}
 		}
@@ -656,12 +656,12 @@ func (h *CLHandler) fetchActionsBarData(ctx context.Context, clID int64, author 
 
 	demoCommentsMu.RLock()
 	for _, list := range demoCommentsStore {
-		for _, c := range list {
-			if c.CLID == clID {
-				if c.IsDraft && c.Author == author {
+		for _, comment := range list {
+			if comment.CLID == clID {
+				if comment.IsDraft && comment.Author == author {
 					draftCount++
 				}
-				if !c.IsDraft && !c.Resolved {
+				if !comment.IsDraft && !comment.Resolved {
 					unresolvedCount++
 				}
 			}

@@ -97,34 +97,34 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 			<!-- Comment Thread List -->
 			if len(comments) > 0 {
 				<div class="space-y-3 mb-4">
-					for _, c := range comments {
+					for _, comment := range comments {
 						<div class={ "p-3 rounded-lg border text-xs transition",
-							templ.KV("bg-amber-950/20 border-amber-800/50", c.IsDraft),
-							templ.KV("bg-slate-900/90 border-slate-800", !c.IsDraft && !c.Resolved),
-							templ.KV("bg-emerald-950/20 border-emerald-900/30 opacity-80", !c.IsDraft && c.Resolved) }>
+							templ.KV("bg-amber-950/20 border-amber-800/50", comment.IsDraft),
+							templ.KV("bg-slate-900/90 border-slate-800", !comment.IsDraft && !comment.Resolved),
+							templ.KV("bg-emerald-950/20 border-emerald-900/30 opacity-80", !comment.IsDraft && comment.Resolved) }>
 							<div class="flex items-center justify-between mb-1.5">
 								<div class="flex items-center space-x-2">
 									<div class="w-5 h-5 rounded-full bg-indigo-600/50 text-indigo-300 flex items-center justify-center font-bold text-[10px]">
-										{ string([]rune(c.Author)[0]) }
+										{ string([]rune(comment.Author)[0]) }
 									</div>
-									<span class="font-semibold text-slate-200">{ c.Author }</span>
-									<span class="text-[10px] text-slate-500">{ c.CreatedAt.Format("Jan 02, 15:04") }</span>
-									if c.IsDraft {
+									<span class="font-semibold text-slate-200">{ comment.Author }</span>
+									<span class="text-[10px] text-slate-500">{ comment.CreatedAt.Format("Jan 02, 15:04") }</span>
+									if comment.IsDraft {
 										<span class="inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
 											<span>Draft</span>
 										</span>
 									}
-									if c.HasSuggestion {
+									if comment.HasSuggestion {
 										<span class="inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">
 											<span>💡 AI / Code Suggestion</span>
 										</span>
 									}
 								</div>
 								<div class="flex items-center space-x-2">
-									if c.IsDraft {
+									if comment.IsDraft {
 										<button
 											type="button"
-											hx-post={ fmt.Sprintf("/cl/%d/comments/%d/discard?author=%s", clID, c.ID, url.QueryEscape(c.Author)) }
+											hx-post={ fmt.Sprintf("/cl/%d/comments/%d/discard?author=%s", clID, comment.ID, url.QueryEscape(comment.Author)) }
 											hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), endLine) }
 											hx-swap="innerHTML"
 											class="text-[11px] px-2 py-0.5 rounded font-medium bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-800/40 transition flex items-center space-x-1"
@@ -136,12 +136,12 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 									} else {
 										<button
 											type="button"
-											hx-post={ fmt.Sprintf("/cl/%d/comments/%d/resolve?resolved=%t", clID, c.ID, !c.Resolved) }
+											hx-post={ fmt.Sprintf("/cl/%d/comments/%d/resolve?resolved=%t", clID, comment.ID, !comment.Resolved) }
 											hx-target={ fmt.Sprintf("#comment-row-%s-%d", sanitizeHTMLID(filePath), endLine) }
 											hx-swap="innerHTML"
-											class={ "text-[11px] px-2 py-0.5 rounded font-medium transition flex items-center space-x-1", templ.KV("bg-emerald-900/40 text-emerald-300 hover:bg-emerald-800/50", !c.Resolved), templ.KV("bg-slate-800 text-slate-400 hover:bg-slate-700", c.Resolved) }
+											class={ "text-[11px] px-2 py-0.5 rounded font-medium transition flex items-center space-x-1", templ.KV("bg-emerald-900/40 text-emerald-300 hover:bg-emerald-800/50", !comment.Resolved), templ.KV("bg-slate-800 text-slate-400 hover:bg-slate-700", comment.Resolved) }
 										>
-											if c.Resolved {
+											if comment.Resolved {
 												<span>Reopen</span>
 											} else {
 												<span>✓ Mark Resolved</span>
@@ -150,13 +150,13 @@ templ CommentBox(clID int64, patchsetNumber int, filePath string, line int, endL
 									}
 								</div>
 							</div>
-							if c.BodyWithoutSuggestionFence() != "" {
+							if comment.BodyWithoutSuggestionFence() != "" {
 								<div class="text-slate-300 whitespace-pre-wrap font-sans text-xs pl-7 leading-relaxed">
-									{ c.BodyWithoutSuggestionFence() }
+									{ comment.BodyWithoutSuggestionFence() }
 								</div>
 							}
-							if c.HasSuggestion && c.SuggestionCode != "" {
-								@CommentSuggestionCard(clID, filePath, endLine, c)
+							if comment.HasSuggestion && comment.SuggestionCode != "" {
+								@CommentSuggestionCard(clID, filePath, endLine, comment)
 							}
 						</div>
 					}
@@ -389,23 +389,23 @@ func acceptAIHintScript(safeID string, endLine int, replStart int, replEnd int) 
 
 func formatPlusLines(code string) string {
 	lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
-	for i, l := range lines {
-		lines[i] = "+ " + l
+	for i, line := range lines {
+		lines[i] = "+ " + line
 	}
 	return strings.Join(lines, "\n")
 }
 
 func formatMinusLines(code string) string {
 	lines := strings.Split(strings.ReplaceAll(code, "\r\n", "\n"), "\n")
-	for i, l := range lines {
-		lines[i] = "- " + l
+	for i, line := range lines {
+		lines[i] = "- " + line
 	}
 	return strings.Join(lines, "\n")
 }
 
 func hasPublishedComments(comments []db.Comment) bool {
-	for _, c := range comments {
-		if !c.IsDraft {
+	for _, comment := range comments {
+		if !comment.IsDraft {
 			return true
 		}
 	}
@@ -414,10 +414,10 @@ func hasPublishedComments(comments []db.Comment) bool {
 
 func isThreadResolved(comments []db.Comment) bool {
 	published := 0
-	for _, c := range comments {
-		if !c.IsDraft {
+	for _, comment := range comments {
+		if !comment.IsDraft {
 			published++
-			if !c.Resolved {
+			if !comment.Resolved {
 				return false
 			}
 		}

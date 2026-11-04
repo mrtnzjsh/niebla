@@ -195,8 +195,8 @@ func (s *Server) checkOwnersSatisfaction(clID int64, ownersEval *owners.Evaluati
 		return nil
 	}
 	var missingDesc []string
-	for _, m := range ownersEval.Missing {
-		missingDesc = append(missingDesc, fmt.Sprintf("%s (%s owners: %s)", m.Path, m.Directory, strings.Join(m.Approvers, ", ")))
+	for _, missing := range ownersEval.Missing {
+		missingDesc = append(missingDesc, fmt.Sprintf("%s (%s owners: %s)", missing.Path, missing.Directory, strings.Join(missing.Approvers, ", ")))
 	}
 	return status.Errorf(codes.FailedPrecondition,
 		"cannot submit CL %d: missing required OWNERS approval for: %s",
@@ -205,8 +205,8 @@ func (s *Server) checkOwnersSatisfaction(clID int64, ownersEval *owners.Evaluati
 
 func buildTouchedFiles(clInfo *db.Changelist, touchedFiles []string, fetchTree tree.FetchTreeFunc) []hooks.TouchedFile {
 	var touched []hooks.TouchedFile
-	for _, p := range touchedFiles {
-		entry, _ := tree.ResolvePath(clInfo.RootTreeHash, p, fetchTree)
+	for _, path := range touchedFiles {
+		entry, _ := tree.ResolvePath(clInfo.RootTreeHash, path, fetchTree)
 		status := "modified"
 		var size uint64
 		var blobSHA []byte
@@ -217,7 +217,7 @@ func buildTouchedFiles(clInfo *db.Changelist, touchedFiles []string, fetchTree t
 			blobSHA = entry.BlobSHA256
 		}
 		touched = append(touched, hooks.TouchedFile{
-			Path:      p,
+			Path:      path,
 			SizeBytes: size,
 			BlobSHA:   blobSHA,
 			Status:    status,
@@ -371,11 +371,11 @@ func (s *Server) performTrunkMerge(mCtx context.Context, cl *db.Changelist, head
 	)
 	if mergeErr != nil || len(conflicts) > 0 {
 		var sb strings.Builder
-		for _, c := range conflicts {
-			if c.ConflictHunks > 0 {
-				sb.WriteString(fmt.Sprintf("%s (%d conflict hunks); ", c.Path, c.ConflictHunks))
+		for _, conflict := range conflicts {
+			if conflict.ConflictHunks > 0 {
+				sb.WriteString(fmt.Sprintf("%s (%d conflict hunks); ", conflict.Path, conflict.ConflictHunks))
 			} else {
-				sb.WriteString(fmt.Sprintf("%s (%s); ", c.Path, c.Reason))
+				sb.WriteString(fmt.Sprintf("%s (%s); ", conflict.Path, conflict.Reason))
 			}
 		}
 		summary := strings.TrimSuffix(sb.String(), "; ")
@@ -492,8 +492,8 @@ func (s *Server) dispatchAgentPersonas(ctx context.Context, clID int64, patchset
 
 	matched := agents.MatchAgentsWithExplicit(agentsCfg.Agents, touchedFiles, explicitAgents)
 	var agentNames []string
-	for _, a := range matched {
-		agentNames = append(agentNames, a.Name)
+	for _, agent := range matched {
+		agentNames = append(agentNames, agent.Name)
 	}
 	if len(agentNames) > 0 {
 		if err := s.db.AddReviewers(ctx, clID, agentNames); err != nil {

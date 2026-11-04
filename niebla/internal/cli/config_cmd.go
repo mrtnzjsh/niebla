@@ -39,9 +39,9 @@ func newConfigPathCmd() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), path)
 			if dir, err := config.DefaultConfigDir(); err == nil {
 				if files, err := config.DiscoverConfigFiles(dir); err == nil && len(files) > 1 {
-					for _, f := range files {
-						if f != path {
-							fmt.Fprintln(cmd.OutOrStdout(), f)
+					for _, file := range files {
+						if file != path {
+							fmt.Fprintln(cmd.OutOrStdout(), file)
 						}
 					}
 				}
@@ -87,8 +87,8 @@ func newConfigValidateCmd() *cobra.Command {
 			}
 			if files, err := config.DiscoverConfigFiles(dir); err == nil && len(files) > 1 {
 				var names []string
-				for _, f := range files {
-					names = append(names, filepath.Base(f))
+				for _, file := range files {
+					names = append(names, filepath.Base(file))
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "  • Combined files   : %v\n", names)
 			}
@@ -120,15 +120,15 @@ func newConfigShowCmd() *cobra.Command {
 			if !resolved {
 				dir := filepath.Dir(path)
 				if files, err := config.DiscoverConfigFiles(dir); err == nil && len(files) > 1 {
-					for i, f := range files {
-						data, rErr := os.ReadFile(f)
+					for i, file := range files {
+						data, rErr := os.ReadFile(file)
 						if rErr != nil {
 							continue
 						}
 						if i > 0 {
 							fmt.Fprintln(cmd.OutOrStdout())
 						}
-						fmt.Fprintf(cmd.OutOrStdout(), "# === %s ===\n", filepath.Base(f))
+						fmt.Fprintf(cmd.OutOrStdout(), "# === %s ===\n", filepath.Base(file))
 						fmt.Fprint(cmd.OutOrStdout(), string(data))
 					}
 					return nil

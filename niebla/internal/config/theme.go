@@ -186,45 +186,45 @@ func ResolveTheme(tc ThemeConfig) *ResolvedTheme {
 	}
 
 	// Apply individual color overrides
-	c := tc.Colors
-	if c.BGCanvas != "" {
-		res.BGCanvas = c.BGCanvas
+	colors := tc.Colors
+	if colors.BGCanvas != "" {
+		res.BGCanvas = colors.BGCanvas
 	}
-	if c.BGSurface != "" {
-		res.BGSurface = c.BGSurface
+	if colors.BGSurface != "" {
+		res.BGSurface = colors.BGSurface
 	}
-	if c.BGCard != "" {
-		res.BGCard = c.BGCard
+	if colors.BGCard != "" {
+		res.BGCard = colors.BGCard
 	}
-	if c.Border != "" {
-		res.Border = c.Border
+	if colors.Border != "" {
+		res.Border = colors.Border
 	}
-	if c.TextPrimary != "" {
-		res.TextPrimary = c.TextPrimary
+	if colors.TextPrimary != "" {
+		res.TextPrimary = colors.TextPrimary
 	}
-	if c.TextMuted != "" {
-		res.TextMuted = c.TextMuted
+	if colors.TextMuted != "" {
+		res.TextMuted = colors.TextMuted
 	}
-	if c.Accent != "" {
-		res.Accent = c.Accent
+	if colors.Accent != "" {
+		res.Accent = colors.Accent
 	}
-	if c.DiffAddBG != "" {
-		res.DiffAddBG = c.DiffAddBG
+	if colors.DiffAddBG != "" {
+		res.DiffAddBG = colors.DiffAddBG
 	}
-	if c.DiffAddBorder != "" {
-		res.DiffAddBorder = c.DiffAddBorder
+	if colors.DiffAddBorder != "" {
+		res.DiffAddBorder = colors.DiffAddBorder
 	}
-	if c.DiffDelBG != "" {
-		res.DiffDelBG = c.DiffDelBG
+	if colors.DiffDelBG != "" {
+		res.DiffDelBG = colors.DiffDelBG
 	}
-	if c.DiffDelBorder != "" {
-		res.DiffDelBorder = c.DiffDelBorder
+	if colors.DiffDelBorder != "" {
+		res.DiffDelBorder = colors.DiffDelBorder
 	}
-	if c.DiffModLeftBG != "" {
-		res.DiffModLeftBG = c.DiffModLeftBG
+	if colors.DiffModLeftBG != "" {
+		res.DiffModLeftBG = colors.DiffModLeftBG
 	}
-	if c.DiffModRightBG != "" {
-		res.DiffModRightBG = c.DiffModRightBG
+	if colors.DiffModRightBG != "" {
+		res.DiffModRightBG = colors.DiffModRightBG
 	}
 
 	return &res

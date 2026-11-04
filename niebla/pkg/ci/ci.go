@@ -106,20 +106,17 @@ func NewDispatcher(reporter StatusReporter, serverURL, runnerToken string) *Disp
 	}
 }
 
-// RegisterProvider adds a provider driver under runnerName.
-func (d *Dispatcher) RegisterProvider(runnerName string, p Provider) {
-	d.providers[runnerName] = p
+func (d *Dispatcher) RegisterProvider(runnerName string, provider Provider) {
+	d.providers[runnerName] = provider
 }
 
-// GetProvider returns the registered provider by name.
 func (d *Dispatcher) GetProvider(runnerName string) (Provider, bool) {
-	p, ok := d.providers[runnerName]
-	return p, ok
+	provider, ok := d.providers[runnerName]
+	return provider, ok
 }
 
-// Dispatch invokes a specific runner target, reporting 'queued' beforehand.
 func (d *Dispatcher) Dispatch(ctx context.Context, runnerName string, req DispatchRequest) error {
-	p, ok := d.providers[runnerName]
+	provider, ok := d.providers[runnerName]
 	if !ok {
 		return fmt.Errorf("runner %q is not registered", runnerName)
 	}
@@ -131,27 +128,24 @@ func (d *Dispatcher) Dispatch(ctx context.Context, runnerName string, req Dispat
 		req.RunnerToken = d.runnerToken
 	}
 
-	// 1. Report queued state
 	if d.reporter != nil {
 		_ = d.reporter.ReportStatus(ctx, CheckRunReport{
 			CLID:           req.CLID,
 			PatchsetNumber: req.Patchset,
 			RunnerName:     runnerName,
-			Provider:       p.Name(),
+			Provider:       provider.Name(),
 			Status:         "queued",
 		})
 	}
 
-	// 2. Trigger the provider
-	externalURL, err := p.Trigger(ctx, req)
+	externalURL, err := provider.Trigger(ctx, req)
 	if err != nil {
-		// Report failure if trigger itself failed
 		if d.reporter != nil {
 			_ = d.reporter.ReportStatus(ctx, CheckRunReport{
 				CLID:           req.CLID,
 				PatchsetNumber: req.Patchset,
 				RunnerName:     runnerName,
-				Provider:       p.Name(),
+				Provider:       provider.Name(),
 				Status:         "failed",
 				ExternalURL:    externalURL,
 			})

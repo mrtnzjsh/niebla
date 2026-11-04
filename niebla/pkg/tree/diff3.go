@@ -155,15 +155,15 @@ func Merge3Way(ancestor, theirs, mine []byte, theirsLabel, mineLabel string) (me
 	}
 
 	var buf bytes.Buffer
-	for _, l := range result {
-		buf.WriteString(l)
+	for _, line := range result {
+		buf.WriteString(line)
 	}
 	return buf.Bytes(), hasConflict, conflictHunks
 }
 
 func getEditChunks(orig, modified []string) []editChunk {
-	m := difflib.NewMatcher(orig, modified)
-	opcodes := m.GetOpCodes()
+	matcher := difflib.NewMatcher(orig, modified)
+	opcodes := matcher.GetOpCodes()
 
 	var chunks []editChunk
 	for _, op := range opcodes {
@@ -187,18 +187,18 @@ func reconstructRegion(orig []string, chunks []editChunk, start, end int, fullMo
 	var res []string
 	curr := start
 
-	for _, c := range chunks {
-		// Include zero-width insertion chunks (c.oStart == start && c.oEnd == end)
-		if !(c.oStart == start && c.oEnd == end) && (c.oEnd <= start || c.oStart >= end) {
+	for _, chunk := range chunks {
+		// Include zero-width insertion chunks (chunk.oStart == start && chunk.oEnd == end)
+		if !(chunk.oStart == start && chunk.oEnd == end) && (chunk.oEnd <= start || chunk.oStart >= end) {
 			continue
 		}
 		// Copy unchanged prefix inside the region
-		for curr < c.oStart && curr < len(orig) {
+		for curr < chunk.oStart && curr < len(orig) {
 			res = append(res, orig[curr])
 			curr++
 		}
-		res = append(res, c.newLines...)
-		curr = c.oEnd
+		res = append(res, chunk.newLines...)
+		curr = chunk.oEnd
 	}
 
 	// Copy remaining unchanged suffix inside region

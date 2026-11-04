@@ -241,12 +241,11 @@ func (d *DB) SubmitCL(ctx context.Context, clID int64, mergeFns ...TrunkMergeFun
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Acquire exclusive transaction-scoped trunk commit lock so concurrent distributed submits serialize cleanly
+	// Acquire exclusive transaction-scoped trunk commit lock so concurrent distributed submits serialize cleanly.
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", TrunkCommitAdvisoryLockID); err != nil {
 		return nil, fmt.Errorf("failed to acquire trunk serialization lock: %w", err)
 	}
 
-	// 2. Lock the target CL row for update
 	selectQuery := `
 		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
 		       needs_rebase, rebase_conflict_details, base_patchset_number
@@ -281,7 +280,6 @@ func (d *DB) SubmitCL(ctx context.Context, clID int64, mergeFns ...TrunkMergeFun
 		return &cl, nil
 	}
 
-	// 3. Query current trunk head inside the serialized lock
 	headQuery := `
 		SELECT cl_id, author, description, root_tree_hash, parent_cl, status, trunk_revision, committed_at,
 		       needs_rebase, rebase_conflict_details, base_patchset_number

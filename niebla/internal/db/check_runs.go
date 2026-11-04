@@ -180,8 +180,8 @@ func (d *DB) AreCheckRunsGreen(ctx context.Context, clID int64, patchsetNumber i
 	if total == 0 {
 		return false, 0, 0, 0, nil
 	}
-	for _, r := range runs {
-		switch r.Status {
+	for _, run := range runs {
+		switch run.Status {
 		case "queued", "running":
 			pending++
 		case "failed", "canceled", "cancelled":

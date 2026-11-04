@@ -63,19 +63,16 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 
 // Read reads file contents from scratch or cached CAS blob at the requested offset.
 func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	// 1. If scratch path is populated, read directly from scratch
 	if f.scratchPath != "" {
 		return readFromFileAt(f.scratchPath, req.Offset, req.Size, resp)
 	}
 
-	// 2. If blobPath exists on disk, read from local CAS blob
 	if f.blobPath != "" {
 		if fileExists(f.blobPath) {
 			return readFromFileAt(f.blobPath, req.Offset, req.Size, resp)
 		}
 	}
 
-	// 3. Lazy streaming from remote server via BlobFetcher
 	if f.fs != nil && f.fs.Fetcher != nil && f.blobHash != "" {
 		cachedPath, err := f.fs.Fetcher.EnsureBlob(ctx, f.blobHash)
 		if err == nil && cachedPath != "" {

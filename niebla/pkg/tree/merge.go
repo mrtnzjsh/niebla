@@ -42,7 +42,6 @@ func ThreeWayTreeMerge(
 	writeTree WriteTreeFunc,
 	theirsLabel, mineLabel string,
 ) ([]byte, []Conflict, error) {
-	// 1. Fast paths
 	if bytes.Equal(mineHash, ancestorHash) {
 		return append([]byte(nil), theirsHash...), nil, nil
 	}
@@ -71,8 +70,8 @@ func fetchTreeMap(treeHash []byte, label string, fetchTree FetchTreeFunc) (map[s
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch %s tree %x: %w", label, treeHash, err)
 		}
-		for _, e := range entries {
-			entryMap[e.Name] = e
+		for _, entry := range entries {
+			entryMap[entry.Name] = entry
 		}
 	}
 	return entryMap, nil
@@ -247,19 +246,19 @@ func mergeBothChangedEntry(
 
 func collectAllNames(ancMap, theirsMap, mineMap map[string]Entry) []string {
 	nameSet := make(map[string]struct{}, len(ancMap)+len(theirsMap)+len(mineMap))
-	for k := range ancMap {
-		nameSet[k] = struct{}{}
+	for name := range ancMap {
+		nameSet[name] = struct{}{}
 	}
-	for k := range theirsMap {
-		nameSet[k] = struct{}{}
+	for name := range theirsMap {
+		nameSet[name] = struct{}{}
 	}
-	for k := range mineMap {
-		nameSet[k] = struct{}{}
+	for name := range mineMap {
+		nameSet[name] = struct{}{}
 	}
 
 	names := make([]string, 0, len(nameSet))
-	for k := range nameSet {
-		names = append(names, k)
+	for name := range nameSet {
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names

@@ -125,8 +125,8 @@ func (h *CLHandler) resolveReviewer(r *http.Request) string {
 		return h.authResolver.ResolveUser(r)
 	}
 	if r != nil {
-		if q := r.URL.Query().Get("reviewer"); q != "" {
-			return strings.TrimSpace(q)
+		if reviewerParam := r.URL.Query().Get("reviewer"); reviewerParam != "" {
+			return strings.TrimSpace(reviewerParam)
 		}
 	}
 	return auth.CurrentOSUser()
@@ -318,15 +318,15 @@ func (h *CLHandler) HandleAddReviewers(w http.ResponseWriter, r *http.Request) {
 			for _, rev := range current {
 				exists[rev.Reviewer] = true
 			}
-			for _, u := range expanded {
-				if !exists[u] {
+			for _, username := range expanded {
+				if !exists[username] {
 					current = append(current, db.ReviewerAssignment{
 						CLID:      clID,
-						Reviewer:  u,
+						Reviewer:  username,
 						Verdict:   "pending",
 						UpdatedAt: time.Now(),
 					})
-					exists[u] = true
+					exists[username] = true
 				}
 			}
 			demoReviewersStore[clID] = current
@@ -652,10 +652,10 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 
 	unresolvedTotal := 0
 	commentsPerFile := make(map[string]int)
-	for _, c := range allComments {
-		if !c.IsDraft && !c.Resolved {
+	for _, comment := range allComments {
+		if !comment.IsDraft && !comment.Resolved {
 			unresolvedTotal++
-			commentsPerFile[c.FilePath]++
+			commentsPerFile[comment.FilePath]++
 		}
 	}
 
@@ -837,9 +837,9 @@ func (h *CLHandler) renderDemoCLPage(w http.ResponseWriter, r *http.Request, clI
 	var detail *diff.FileDiffDetail
 	if targetFile != "" {
 		changeType := "M"
-		for _, f := range files {
-			if f.Path == targetFile {
-				changeType = f.Type
+		for _, file := range files {
+			if file.Path == targetFile {
+				changeType = file.Type
 				break
 			}
 		}
@@ -1015,17 +1015,17 @@ func (h *CLHandler) renderDemoCLFileDiffPage(w http.ResponseWriter, r *http.Requ
 	commentsByLine := make(map[int][]db.Comment)
 	var reviewerDrafts []db.Comment
 	for k, list := range demoCommentsStore {
-		for _, c := range list {
-			if c.CLID == clID && c.Author == reviewer && c.IsDraft {
-				reviewerDrafts = append(reviewerDrafts, c)
+		for _, comment := range list {
+			if comment.CLID == clID && comment.Author == reviewer && comment.IsDraft {
+				reviewerDrafts = append(reviewerDrafts, comment)
 			}
 			if strings.HasPrefix(k, fmt.Sprintf("%d:%s:", clID, targetFile)) {
-				if !c.IsDraft || c.Author == reviewer {
-					anchorLine := c.EndLineNumber
+				if !comment.IsDraft || comment.Author == reviewer {
+					anchorLine := comment.EndLineNumber
 					if anchorLine <= 0 {
-						anchorLine = c.LineNumber
+						anchorLine = comment.LineNumber
 					}
-					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], comment)
 				}
 			}
 		}
@@ -1114,14 +1114,14 @@ func (h *CLHandler) renderDemoCLDiffContent(w http.ResponseWriter, r *http.Reque
 	demoCommentsMu.RLock()
 	commentsByLine := make(map[int][]db.Comment)
 	for key, list := range demoCommentsStore {
-		for _, c := range list {
+		for _, comment := range list {
 			if strings.HasPrefix(key, fmt.Sprintf("%d:%s:", clID, targetFile)) {
-				if !c.IsDraft || c.Author == reviewer {
-					anchorLine := c.EndLineNumber
+				if !comment.IsDraft || comment.Author == reviewer {
+					anchorLine := comment.EndLineNumber
 					if anchorLine <= 0 {
-						anchorLine = c.LineNumber
+						anchorLine = comment.LineNumber
 					}
-					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], c)
+					commentsByLine[anchorLine] = append(commentsByLine[anchorLine], comment)
 				}
 			}
 		}
@@ -1205,8 +1205,8 @@ func (h *CLHandler) buildCIRunnerItems(ctx context.Context, clID int64, patchset
 	}
 
 	reqSet := make(map[string]bool, len(requiredCIRunners))
-	for _, r := range requiredCIRunners {
-		reqSet[strings.ToLower(strings.TrimSpace(r))] = true
+	for _, runner := range requiredCIRunners {
+		reqSet[strings.ToLower(strings.TrimSpace(runner))] = true
 	}
 
 	seenRunners := make(map[string]bool, len(checkRuns)+len(requiredCIRunners))

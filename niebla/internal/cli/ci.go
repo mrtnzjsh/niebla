@@ -165,7 +165,6 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 			ctx := cmd.Context()
 			startTime := time.Now().UTC()
 
-			// 1. Report running
 			_ = reporter.ReportStatus(ctx, ci.CheckRunReport{
 				CLID:           clID,
 				PatchsetNumber: patchset,
@@ -176,7 +175,6 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 				StartedAt:      &startTime,
 			})
 
-			// 2. Prepare command execution
 			execCmd := exec.CommandContext(ctx, args[0], args[1:]...)
 			var logBuf bytes.Buffer
 
@@ -184,12 +182,10 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 				execCmd.Stdout = &logBuf
 				execCmd.Stderr = &logBuf
 			} else {
-				// Tee to terminal stdout/stderr and buffer
 				execCmd.Stdout = io.MultiWriter(cmd.OutOrStdout(), &logBuf)
 				execCmd.Stderr = io.MultiWriter(cmd.ErrOrStderr(), &logBuf)
 			}
 
-			// 3. Run command
 			execErr := execCmd.Run()
 			endTime := time.Now().UTC()
 
@@ -204,7 +200,6 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 				}
 			}
 
-			// 4. Upload log blob to CAS if server is reachable
 			var logHashHex string
 			logData := logBuf.Bytes()
 			if len(logData) > 0 {
@@ -225,7 +220,6 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 				}
 			}
 
-			// 5. Report final status
 			_ = reporter.ReportStatus(ctx, ci.CheckRunReport{
 				CLID:           clID,
 				PatchsetNumber: patchset,

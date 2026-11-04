@@ -55,15 +55,15 @@ func NewFS(scratchDir, cacheDir string, cache *metadata.MetadataCache, opts ...O
 	if cache == nil {
 		cache = metadata.NewMetadataCache()
 	}
-	f := &FS{
+	filesystem := &FS{
 		ScratchDir: scratchDir,
 		CacheDir:   cacheDir,
 		Cache:      cache,
 	}
 	for _, opt := range opts {
-		opt(f)
+		opt(filesystem)
 	}
-	return f
+	return filesystem
 }
 
 // EnsureDirectoryLoaded fetches directory entries lazily from the remote server if not yet cached, using paged streaming.
@@ -157,12 +157,10 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		relPath = filepath.Join(d.path, name)
 	}
 
-	// 1. Check Negative Lookup Cache first to suppress redundant remote calls
 	if d.fs != nil && d.fs.Cache != nil && d.fs.Cache.IsNegative(relPath) {
 		return nil, syscall.ENOENT
 	}
 
-	// 2. Check Scratch Directory (Copy-on-Write overlay takes precedence)
 	if d.fs != nil && d.fs.ScratchDir != "" {
 		scratchPath := filepath.Join(d.fs.ScratchDir, relPath)
 		if fi, err := os.Lstat(scratchPath); err == nil {
@@ -189,12 +187,10 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		}
 	}
 
-	// 3. Ensure parent directory entries are loaded from remote server if needed
 	if d.fs != nil {
 		_ = d.fs.EnsureDirectoryLoaded(ctx, d.path)
 	}
 
-	// 4. Check In-Memory Metadata Cache (base Merkle tree entries)
 	if d.fs != nil && d.fs.Cache != nil {
 		if meta, ok := d.fs.Cache.Get(relPath); ok {
 			if meta.SubTreeHash != "" || (meta.Mode&syscall.S_IFDIR != 0) {
@@ -229,30 +225,27 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	seen := make(map[string]bool)
 	var entries []fuse.Dirent
 
-	// 1. Read entries from local scratch directory
 	if d.fs != nil && d.fs.ScratchDir != "" {
 		scratchDir := filepath.Join(d.fs.ScratchDir, d.path)
 		if des, err := os.ReadDir(scratchDir); err == nil {
 			for _, de := range des {
 				seen[de.Name()] = true
-				t := fuse.DT_File
+				direntType := fuse.DT_File
 				if de.IsDir() {
-					t = fuse.DT_Dir
+					direntType = fuse.DT_Dir
 				}
 				entries = append(entries, fuse.Dirent{
 					Name: de.Name(),
-					Type: t,
+					Type: direntType,
 				})
 			}
 		}
 	}
 
-	// 2. Ensure parent directory entries are loaded from remote server if needed
 	if d.fs != nil {
 		_ = d.fs.EnsureDirectoryLoaded(ctx, d.path)
 	}
 
-	// 3. Read entries from metadata cache
 	if d.fs != nil && d.fs.Cache != nil {
 		cachedMetas := d.fs.Cache.ListDir(d.path)
 		for _, meta := range cachedMetas {
@@ -261,13 +254,13 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 				continue
 			}
 			seen[entryName] = true
-			t := fuse.DT_File
+			direntType := fuse.DT_File
 			if meta.SubTreeHash != "" || (meta.Mode&syscall.S_IFDIR != 0) {
-				t = fuse.DT_Dir
+				direntType = fuse.DT_Dir
 			}
 			entries = append(entries, fuse.Dirent{
 				Name: entryName,
-				Type: t,
+				Type: direntType,
 			})
 		}
 	}

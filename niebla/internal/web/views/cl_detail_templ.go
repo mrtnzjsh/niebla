@@ -1597,11 +1597,11 @@ func ApprovalButtons(clID int64, approvals []db.Approval) templ.Component {
 
 func isCLApproved(approvals []db.Approval) bool {
 	hasLGTM := false
-	for _, a := range approvals {
-		if a.Verdict == "changes_requested" {
+	for _, approval := range approvals {
+		if approval.Verdict == "changes_requested" {
 			return false
 		}
-		if a.Verdict == "approved" || a.Verdict == "lgtm" {
+		if approval.Verdict == "approved" || approval.Verdict == "lgtm" {
 			hasLGTM = true
 		}
 	}
@@ -2041,8 +2041,8 @@ func CIRunnerAggregateBadge(runners []CIRunnerItem) templ.Component {
 		failedCount := 0
 		runningCount := 0
 		queuedCount := 0
-		for _, r := range runners {
-			switch strings.ToLower(r.Status) {
+		for _, runner := range runners {
+			switch strings.ToLower(runner.Status) {
 			case "passed":
 				passedCount++
 			case "failed":

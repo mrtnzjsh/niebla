@@ -44,7 +44,6 @@ func NewStorage(baseDir string) (*Storage, error) {
 	}, nil
 }
 
-// BaseDir returns the root directory for CAS storage.
 func (s *Storage) BaseDir() string {
 	return s.baseDir
 }
@@ -275,7 +274,7 @@ func (w *BlobWriter) Abort() {
 }
 
 // Put writes an entire reader's content into CAS storage atomically.
-func (s *Storage) Put(r io.Reader) (hashBytes []byte, hexHash string, size int64, storagePath string, err error) {
+func (s *Storage) Put(reader io.Reader) (hashBytes []byte, hexHash string, size int64, storagePath string, err error) {
 	writer, err := s.BeginWriter()
 	if err != nil {
 		return nil, "", 0, "", err
@@ -287,7 +286,7 @@ func (s *Storage) Put(r io.Reader) (hashBytes []byte, hexHash string, size int64
 	}()
 
 	buf := make([]byte, DefaultChunkSize)
-	if _, err = io.CopyBuffer(writer, r, buf); err != nil {
+	if _, err = io.CopyBuffer(writer, reader, buf); err != nil {
 		return nil, "", 0, "", fmt.Errorf("failed to write blob content: %w", err)
 	}
 
