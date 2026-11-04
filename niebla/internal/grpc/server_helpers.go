@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -521,4 +522,57 @@ func resolveChildOldParentTree(ctx context.Context, database *db.DB, child, pare
 		}
 	}
 	return oldParentTree
+}
+
+const (
+	// DefaultTreePageSize is the default number of entries returned per GetTree page.
+	DefaultTreePageSize = 5000
+
+	// MaxTreePageSize is the maximum allowed page size for GetTree.
+	MaxTreePageSize = 10000
+)
+
+// paginateTreeEntries slices the full list of proto entries according to the request's page_size and page_token.
+func paginateTreeEntries(entries []*nieblav1.NodeEntry, pageSize int32, pageToken string) (*nieblav1.GetTreeResponse, error) {
+	total := len(entries)
+	if total == 0 {
+		return &nieblav1.GetTreeResponse{Entries: []*nieblav1.NodeEntry{}}, nil
+	}
+
+	offset := 0
+	if pageToken != "" {
+		parsed, err := strconv.Atoi(pageToken)
+		if err != nil || parsed < 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid page_token %q", pageToken)
+		}
+		offset = parsed
+	}
+
+	if offset >= total {
+		return &nieblav1.GetTreeResponse{Entries: []*nieblav1.NodeEntry{}}, nil
+	}
+
+	limit := int(pageSize)
+	if limit <= 0 {
+		if pageToken == "" && total <= DefaultTreePageSize {
+			// Backward-compatible path: return entire slice if under default limit and not paginating
+			return &nieblav1.GetTreeResponse{Entries: entries}, nil
+		}
+		limit = DefaultTreePageSize
+	} else if limit > MaxTreePageSize {
+		limit = MaxTreePageSize
+	}
+
+	end := offset + limit
+	var nextPageToken string
+	if end < total {
+		nextPageToken = strconv.Itoa(end)
+	} else {
+		end = total
+	}
+
+	return &nieblav1.GetTreeResponse{
+		Entries:       entries[offset:end],
+		NextPageToken: nextPageToken,
+	}, nil
 }

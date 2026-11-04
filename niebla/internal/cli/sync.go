@@ -91,7 +91,7 @@ func applyWorkspaceSyncUpdate(
 	return controlPurged, nil
 }
 
-func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool) error {
+func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool, noHooks bool) error {
 	mgr, err := config.NewManager(rootFlags.ConfigDir)
 	if err != nil {
 		return err
@@ -183,6 +183,12 @@ func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool)
 		return fmt.Errorf("failed to save updated workspace metadata: %w", err)
 	}
 
+	if !noHooks {
+		if err := runPostSyncHooks(ctx, ws.MountDir, ws.Name, resp.ClId, serverAddr); err != nil {
+			return fmt.Errorf("post_sync hooks failed: %w", err)
+		}
+	}
+
 	if rootFlags.JSON {
 		return writeJSON(cmd.OutOrStdout(), SyncOutput{
 			Workspace:       ws.Name,
@@ -211,17 +217,19 @@ func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool)
 // NewSyncCmd constructs the 'sync' command for reconciling local workspaces with upstream trees.
 func NewSyncCmd(rootFlags *RootFlags) *cobra.Command {
 	var dryRun bool
+	var noHooks bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Synchronize workspace with latest parent CL or trunk head",
 		Long:  "Fetches the updated parent Merkle tree, reconciles local scratch changes, and reports or injects rebase conflicts.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeWorkspaceSync(cmd, rootFlags, dryRun)
+			return executeWorkspaceSync(cmd, rootFlags, dryRun, noHooks)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview sync operations without applying changes")
+	cmd.Flags().BoolVar(&noHooks, "no-hooks", false, "Skip client post_sync lifecycle hooks")
 
 	return cmd
 }

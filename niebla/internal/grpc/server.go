@@ -139,7 +139,7 @@ func (s *Server) getTreeEntries(ctx context.Context, treeHash []byte) ([]tree.En
 	return dbEntries, nil
 }
 
-// GetTree returns all directory entries for a given tree hash, utilizing an LRU cache.
+// GetTree returns directory entries for a given tree hash, utilizing an LRU cache and supporting pagination.
 func (s *Server) GetTree(ctx context.Context, req *nieblav1.GetTreeRequest) (*nieblav1.GetTreeResponse, error) {
 	if len(req.TreeHash) == 0 || bytes.Equal(req.TreeHash, tree.EmptyTreeHash) {
 		return &nieblav1.GetTreeResponse{Entries: []*nieblav1.NodeEntry{}}, nil
@@ -147,24 +147,26 @@ func (s *Server) GetTree(ctx context.Context, req *nieblav1.GetTreeRequest) (*ni
 
 	cacheKey := hex.EncodeToString(req.TreeHash)
 
+	var protoEntries []*nieblav1.NodeEntry
 	// Check hot LRU cache first
 	if cachedEntries, ok := s.treeCache.Get(cacheKey); ok {
-		return &nieblav1.GetTreeResponse{Entries: cachedEntries}, nil
+		protoEntries = cachedEntries
+	} else {
+		// Cache miss: fetch from PostgreSQL (or CAS manifest fallback)
+		dbEntries, err := s.getTreeEntries(ctx, req.TreeHash)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to query tree: %v", err)
+		}
+
+		protoEntries = make([]*nieblav1.NodeEntry, len(dbEntries))
+		for i, e := range dbEntries {
+			protoEntries[i] = e.ToProto()
+		}
+
+		s.treeCache.Add(cacheKey, protoEntries)
 	}
 
-	// Cache miss: fetch from PostgreSQL (or CAS manifest fallback)
-	dbEntries, err := s.getTreeEntries(ctx, req.TreeHash)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to query tree: %v", err)
-	}
-
-	protoEntries := make([]*nieblav1.NodeEntry, len(dbEntries))
-	for i, e := range dbEntries {
-		protoEntries[i] = e.ToProto()
-	}
-
-	s.treeCache.Add(cacheKey, protoEntries)
-	return &nieblav1.GetTreeResponse{Entries: protoEntries}, nil
+	return paginateTreeEntries(protoEntries, req.PageSize, req.PageToken)
 }
 
 // GetNode retrieves metadata for a single named child node within a parent directory tree.

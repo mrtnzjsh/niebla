@@ -1,16 +1,12 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"niebla/internal/cli/config"
-	"niebla/pkg/hooks"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"github.com/spf13/cobra"
@@ -21,34 +17,6 @@ type SubmitOutput struct {
 	CLID            int64  `json:"cl_id"`
 	Status          string `json:"status"`
 	CommittedAtUnix int64  `json:"committed_at_unix"`
-}
-
-func runClientPresubmitHooks(ctx context.Context, mountDir string) error {
-	hooksFile := filepath.Join(mountDir, ".niebla", "hooks.toml")
-	hooksBytes, err := os.ReadFile(hooksFile)
-	if err != nil {
-		return nil
-	}
-	hooksCfg, err := hooks.ParseTOML(hooksBytes)
-	if err != nil || hooksCfg == nil || len(hooksCfg.Client.Presubmit) == 0 {
-		return nil
-	}
-
-	for _, clientHook := range hooksCfg.Client.Presubmit {
-		if clientHook.Command == "" {
-			continue
-		}
-		hookCmd := exec.CommandContext(ctx, "sh", "-c", clientHook.Command)
-		hookCmd.Dir = mountDir
-		out, hErr := hookCmd.CombinedOutput()
-		if clientHook.FailOnOutput && len(bytes.TrimSpace(out)) > 0 {
-			return fmt.Errorf("client presubmit hook %q failed (produced unexpected output, fail_on_output=true):\n%s", clientHook.Name, string(out))
-		}
-		if hErr != nil {
-			return fmt.Errorf("client presubmit hook %q failed with error: %w\n%s", clientHook.Name, hErr, string(out))
-		}
-	}
-	return nil
 }
 
 func resolveSubmitCLID(mgr *config.Manager, rootFlags *RootFlags, targetCL int64) (int64, *config.WorkspaceConfig, error) {

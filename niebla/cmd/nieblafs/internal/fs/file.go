@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	_ fs.Node         = (*File)(nil)
-	_ fs.HandleReader = (*File)(nil)
-	_ fs.HandleWriter = (*File)(nil)
+	_ fs.Node          = (*File)(nil)
+	_ fs.HandleReader  = (*File)(nil)
+	_ fs.HandleWriter  = (*File)(nil)
+	_ fs.NodeSetattrer = (*File)(nil)
 )
 
 // File represents a file node backed by either local CoW scratch storage or a CAS blob.
@@ -69,7 +70,16 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 
 	// 2. If blobPath exists on disk, read from local CAS blob
 	if f.blobPath != "" {
-		if _, err := os.Stat(f.blobPath); err == nil {
+		if fileExists(f.blobPath) {
+			return readFromFileAt(f.blobPath, req.Offset, req.Size, resp)
+		}
+	}
+
+	// 3. Lazy streaming from remote server via BlobFetcher
+	if f.fs != nil && f.fs.Fetcher != nil && f.blobHash != "" {
+		cachedPath, err := f.fs.Fetcher.EnsureBlob(ctx, f.blobHash)
+		if err == nil && cachedPath != "" {
+			f.blobPath = cachedPath
 			return readFromFileAt(f.blobPath, req.Offset, req.Size, resp)
 		}
 	}
@@ -78,22 +88,66 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 	return nil
 }
 
+func (f *File) ensureScratchPromoted(ctx context.Context) error {
+	if f.isScratch || f.fs == nil || f.fs.ScratchDir == "" {
+		return nil
+	}
+
+	targetPath := filepath.Join(f.fs.ScratchDir, f.path)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		return err
+	}
+
+	// If base blob is not yet cached locally, stream it first so scratch gets the full base content
+	if (f.blobPath == "" || !fileExists(f.blobPath)) && f.fs.Fetcher != nil && f.blobHash != "" {
+		if cachedPath, err := f.fs.Fetcher.EnsureBlob(ctx, f.blobHash); err == nil {
+			f.blobPath = cachedPath
+		}
+	}
+
+	// If base blob exists, copy it first to initialize scratch file
+	if f.blobPath != "" && fileExists(f.blobPath) {
+		if data, err := os.ReadFile(f.blobPath); err == nil {
+			_ = os.WriteFile(targetPath, data, 0644)
+		}
+	}
+
+	f.scratchPath = targetPath
+	f.isScratch = true
+	if f.fs != nil && f.fs.Cache != nil {
+		f.fs.Cache.ClearNegative(f.path)
+	}
+	return nil
+}
+
+// Setattr handles truncation (ftruncate/O_TRUNC) and metadata attribute changes.
+func (f *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+	if err := f.ensureScratchPromoted(ctx); err != nil {
+		return err
+	}
+
+	if f.scratchPath != "" {
+		if req.Valid.Size() {
+			if err := os.Truncate(f.scratchPath, int64(req.Size)); err != nil {
+				return err
+			}
+			f.size = int64(req.Size)
+		}
+		if req.Valid.Mode() {
+			if err := os.Chmod(f.scratchPath, req.Mode); err != nil {
+				return err
+			}
+			f.mode = uint32(req.Mode)
+		}
+	}
+
+	return f.Attr(ctx, &resp.Attr)
+}
+
 // Write writes data to the file, promoting it to the local CoW scratch overlay if needed.
 func (f *File) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	// If writing to virtual CAS file, promote to scratch copy-on-write
-	if !f.isScratch && f.fs != nil && f.fs.ScratchDir != "" {
-		targetPath := filepath.Join(f.fs.ScratchDir, f.path)
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-			return err
-		}
-		// If base blob exists, copy it first to initialize scratch file
-		if f.blobPath != "" {
-			if data, err := os.ReadFile(f.blobPath); err == nil {
-				_ = os.WriteFile(targetPath, data, 0644)
-			}
-		}
-		f.scratchPath = targetPath
-		f.isScratch = true
+	if err := f.ensureScratchPromoted(ctx); err != nil {
+		return err
 	}
 
 	if f.scratchPath != "" {
@@ -113,6 +167,11 @@ func (f *File) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.Wri
 
 	resp.Size = len(req.Data)
 	return nil
+}
+
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
 }
 
 func readFromFileAt(filePath string, offset int64, size int, resp *fuse.ReadResponse) error {

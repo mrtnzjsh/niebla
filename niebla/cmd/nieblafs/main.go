@@ -8,11 +8,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
 	"niebla/cmd/nieblafs/internal/fs"
 	"niebla/cmd/nieblafs/internal/metadata"
+	"niebla/cmd/nieblafs/internal/remote"
+	"niebla/pkg/cas"
 	"niebla/pkg/nieblafs/control"
 )
 
@@ -21,8 +24,9 @@ var (
 	serverAddr = flag.String("server", "127.0.0.1:50051", "Niebla gRPC repository server address")
 	scratchDir = flag.String("scratch", "", "Scratch directory for local copy-on-write overlay")
 	cacheDir   = flag.String("cache", "", "CAS blob cache directory")
-	treeHash   = flag.String("tree-hash", "", "Initial root Merkle tree hash")
-	socketPath = flag.String("socket", "", "Unix domain control socket path for nieblafs IPC")
+	treeHash        = flag.String("tree-hash", "", "Initial root Merkle tree hash")
+	socketPath      = flag.String("socket", "", "Unix domain control socket path for nieblafs IPC")
+	maxCacheEntries = flag.Int("max-cache-entries", metadata.DefaultMaxCacheEntries, "Maximum number of in-memory metadata entries to retain before LRU eviction")
 )
 
 type daemonControlHandler struct {
@@ -64,7 +68,7 @@ func main() {
 	log.Printf("NieblaFS FUSE daemon starting (mount: %q, server: %q, scratch: %q, socket: %q)",
 		*mountPoint, *serverAddr, *scratchDir, *socketPath)
 
-	metaCache := metadata.NewMetadataCache()
+	metaCache := metadata.NewMetadataCacheWithLimit(*maxCacheEntries)
 	if *treeHash != "" {
 		metaCache.SetRootTreeHash(*treeHash)
 	}
@@ -80,6 +84,43 @@ func main() {
 		}
 	}
 
+	var casStorage *cas.Storage
+	if *cacheDir != "" {
+		var err error
+		casStorage, err = cas.NewStorage(*cacheDir)
+		if err != nil {
+			log.Printf("warning: failed to initialize CAS storage at %s: %v", *cacheDir, err)
+		}
+	}
+
+	var remoteClient remote.Client
+	var fetcher *remote.BlobFetcher
+	if *serverAddr != "" {
+		dialCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		client, err := remote.NewClient(dialCtx, *serverAddr)
+		cancel()
+		if err != nil {
+			log.Printf("warning: failed to connect to niebla-server at %s: %v (lazy remote fetches disabled)", *serverAddr, err)
+		} else {
+			remoteClient = client
+			defer remoteClient.Close()
+			if casStorage != nil {
+				fetcher = remote.NewBlobFetcher(casStorage, remoteClient)
+			}
+		}
+	}
+
+	var fsOpts []fs.Option
+	if casStorage != nil {
+		fsOpts = append(fsOpts, fs.WithCASStorage(casStorage))
+	}
+	if remoteClient != nil {
+		fsOpts = append(fsOpts, fs.WithRemoteClient(remoteClient))
+	}
+	if fetcher != nil {
+		fsOpts = append(fsOpts, fs.WithFetcher(fetcher))
+	}
+
 	var fuseConn *fuse.Conn
 	if *mountPoint != "" {
 		c, err := fuse.Mount(
@@ -91,7 +132,7 @@ func main() {
 			log.Printf("warning: FUSE mount failed on %s: %v", *mountPoint, err)
 		} else {
 			fuseConn = c
-			fsInstance := fs.NewFS(*scratchDir, *cacheDir, metaCache)
+			fsInstance := fs.NewFS(*scratchDir, *cacheDir, metaCache, fsOpts...)
 			go func() {
 				if err := fusefs.Serve(fuseConn, fsInstance); err != nil {
 					log.Printf("fusefs.Serve terminated: %v", err)

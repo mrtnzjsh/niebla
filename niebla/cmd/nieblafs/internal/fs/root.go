@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -10,25 +11,97 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"niebla/cmd/nieblafs/internal/metadata"
+	"niebla/cmd/nieblafs/internal/remote"
+	"niebla/pkg/cas"
+	"niebla/pkg/tree"
 )
 
 // FS represents the virtual Niebla filesystem backend.
 type FS struct {
-	ScratchDir string
-	CacheDir   string
-	Cache      *metadata.MetadataCache
+	ScratchDir   string
+	CacheDir     string
+	Cache        *metadata.MetadataCache
+	CASStorage   *cas.Storage
+	RemoteClient remote.Client
+	Fetcher      *remote.BlobFetcher
 }
 
-// NewFS constructs an initialized FS instance.
-func NewFS(scratchDir, cacheDir string, cache *metadata.MetadataCache) *FS {
+// Option configures optional FS dependencies.
+type Option func(*FS)
+
+// WithRemoteClient binds a remote gRPC client to FS.
+func WithRemoteClient(rc remote.Client) Option {
+	return func(f *FS) {
+		f.RemoteClient = rc
+	}
+}
+
+// WithFetcher binds a BlobFetcher to FS.
+func WithFetcher(bf *remote.BlobFetcher) Option {
+	return func(f *FS) {
+		f.Fetcher = bf
+	}
+}
+
+// WithCASStorage binds a local CAS Storage instance to FS.
+func WithCASStorage(cs *cas.Storage) Option {
+	return func(f *FS) {
+		f.CASStorage = cs
+	}
+}
+
+// NewFS constructs an initialized FS instance with optional remote capabilities.
+func NewFS(scratchDir, cacheDir string, cache *metadata.MetadataCache, opts ...Option) *FS {
 	if cache == nil {
 		cache = metadata.NewMetadataCache()
 	}
-	return &FS{
+	f := &FS{
 		ScratchDir: scratchDir,
 		CacheDir:   cacheDir,
 		Cache:      cache,
 	}
+	for _, opt := range opts {
+		opt(f)
+	}
+	return f
+}
+
+// EnsureDirectoryLoaded fetches directory entries lazily from the remote server if not yet cached, using paged streaming.
+func (f *FS) EnsureDirectoryLoaded(ctx context.Context, dir string) error {
+	if f.Cache == nil || f.Cache.IsDirectoryLoaded(dir) {
+		return nil
+	}
+	if f.RemoteClient == nil {
+		return nil
+	}
+
+	subTreeHash, ok := f.Cache.GetSubtreeHash(dir)
+	if !ok || len(subTreeHash) == 0 {
+		return nil
+	}
+
+	err := f.RemoteClient.FetchTreePaged(ctx, subTreeHash, 5000, func(batch []tree.Entry) error {
+		f.Cache.PopulateDir(dir, batch)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to fetch tree entries for %q: %w", dir, err)
+	}
+
+	return nil
+}
+
+// ResolveBlobPath returns the expected local path for a cached CAS blob.
+func (f *FS) ResolveBlobPath(sha256Hex string) string {
+	if f.CASStorage != nil && sha256Hex != "" {
+		if p, err := f.CASStorage.BlobPath(sha256Hex); err == nil {
+			return p
+		}
+	}
+	if f.CacheDir != "" && sha256Hex != "" {
+		return filepath.Join(f.CacheDir, sha256Hex)
+	}
+	return ""
 }
 
 // Root returns the root virtual directory node.
@@ -84,10 +157,18 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		relPath = filepath.Join(d.path, name)
 	}
 
-	// 1. Check Scratch Directory (Copy-on-Write overlay takes precedence)
+	// 1. Check Negative Lookup Cache first to suppress redundant remote calls
+	if d.fs != nil && d.fs.Cache != nil && d.fs.Cache.IsNegative(relPath) {
+		return nil, syscall.ENOENT
+	}
+
+	// 2. Check Scratch Directory (Copy-on-Write overlay takes precedence)
 	if d.fs != nil && d.fs.ScratchDir != "" {
 		scratchPath := filepath.Join(d.fs.ScratchDir, relPath)
 		if fi, err := os.Lstat(scratchPath); err == nil {
+			if d.fs.Cache != nil {
+				d.fs.Cache.ClearNegative(relPath)
+			}
 			if fi.IsDir() {
 				return &Dir{
 					fs:    d.fs,
@@ -108,7 +189,12 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		}
 	}
 
-	// 2. Check In-Memory Metadata Cache (base Merkle tree entries)
+	// 3. Ensure parent directory entries are loaded from remote server if needed
+	if d.fs != nil {
+		_ = d.fs.EnsureDirectoryLoaded(ctx, d.path)
+	}
+
+	// 4. Check In-Memory Metadata Cache (base Merkle tree entries)
 	if d.fs != nil && d.fs.Cache != nil {
 		if meta, ok := d.fs.Cache.Get(relPath); ok {
 			if meta.SubTreeHash != "" || (meta.Mode&syscall.S_IFDIR != 0) {
@@ -118,10 +204,7 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 					inode: hashPathToInode(relPath),
 				}, nil
 			}
-			blobPath := ""
-			if d.fs.CacheDir != "" && meta.BlobSHA256 != "" {
-				blobPath = filepath.Join(d.fs.CacheDir, meta.BlobSHA256)
-			}
+			blobPath := d.fs.ResolveBlobPath(meta.BlobSHA256)
 			return &File{
 				fs:        d.fs,
 				path:      relPath,
@@ -134,6 +217,8 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 				inode:     hashPathToInode(relPath),
 			}, nil
 		}
+		// Negative hit: record missing entry to suppress redundant lookups
+		d.fs.Cache.SetNegative(relPath, 5*time.Second)
 	}
 
 	return nil, syscall.ENOENT
@@ -162,7 +247,12 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 		}
 	}
 
-	// 2. Read entries from metadata cache
+	// 2. Ensure parent directory entries are loaded from remote server if needed
+	if d.fs != nil {
+		_ = d.fs.EnsureDirectoryLoaded(ctx, d.path)
+	}
+
+	// 3. Read entries from metadata cache
 	if d.fs != nil && d.fs.Cache != nil {
 		cachedMetas := d.fs.Cache.ListDir(d.path)
 		for _, meta := range cachedMetas {

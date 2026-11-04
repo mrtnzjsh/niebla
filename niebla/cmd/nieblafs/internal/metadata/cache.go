@@ -1,21 +1,59 @@
 package metadata
 
 import (
+	"container/list"
+	"encoding/hex"
+	"path"
+	"strings"
 	"sync"
+	"time"
+
+	"niebla/pkg/tree"
 )
 
-// MetadataCache stores resolved Merkle tree node attributes in-memory to avoid redundant lookups.
+const (
+	// DefaultMaxCacheEntries is the default capacity for in-memory inodes (e.g. ~100k entries ~= 250MB RSS).
+	DefaultMaxCacheEntries = 100000
+
+	// DefaultNegativeTTL is the duration negative lookups (ENOENT) are cached to suppress redundant RPCs.
+	DefaultNegativeTTL = 5 * time.Second
+)
+
+type cacheItem struct {
+	path string
+	meta Metadata
+}
+
+// MetadataCache stores resolved Merkle tree node attributes in-memory with bounded LRU eviction.
 type MetadataCache struct {
-	cache        map[string]Metadata
+	maxEntries   int
+	cache        map[string]*list.Element
+	lruList      *list.List
+	dirChildren  map[string]map[string]bool
+	loadedDirs   map[string]bool
+	negativeHits map[string]time.Time
 	rootTreeHash string
 	clID         int64
 	mutex        sync.RWMutex
 }
 
-// NewMetadataCache initializes an empty MetadataCache.
+// NewMetadataCache initializes an empty MetadataCache with the default entry ceiling.
 func NewMetadataCache() *MetadataCache {
+	return NewMetadataCacheWithLimit(DefaultMaxCacheEntries)
+}
+
+// NewMetadataCacheWithLimit initializes a MetadataCache with an explicit maximum entry capacity.
+func NewMetadataCacheWithLimit(maxEntries int) *MetadataCache {
+	if maxEntries <= 0 {
+		maxEntries = DefaultMaxCacheEntries
+	}
 	return &MetadataCache{
-		cache: make(map[string]Metadata),
+		maxEntries:   maxEntries,
+		cache:        make(map[string]*list.Element),
+		lruList:      list.New(),
+		dirChildren:  make(map[string]map[string]bool),
+		loadedDirs:   make(map[string]bool),
+		negativeHits: make(map[string]time.Time),
 	}
 }
 
@@ -28,29 +66,217 @@ type Metadata struct {
 	SubTreeHash string
 }
 
-// Get retrieves cached metadata for a relative path.
-func (mc *MetadataCache) Get(name string) (Metadata, bool) {
+func normalizeDir(dir string) string {
+	cleaned := strings.TrimPrefix(path.Clean(dir), "/")
+	if cleaned == "." || cleaned == "" {
+		return ""
+	}
+	return cleaned
+}
+
+func pathParent(p string) string {
+	idx := strings.LastIndexByte(p, '/')
+	if idx == -1 {
+		return ""
+	}
+	return p[:idx]
+}
+
+// IsDirectoryLoaded returns true if the entries for the given directory have already been fetched and cached.
+func (mc *MetadataCache) IsDirectoryLoaded(dir string) bool {
 	mc.mutex.RLock()
 	defer mc.mutex.RUnlock()
-	meta, exists := mc.cache[name]
-	return meta, exists
+	return mc.loadedDirs[normalizeDir(dir)]
+}
+
+// GetSubtreeHash returns the Merkle tree hash bytes for the specified directory path.
+func (mc *MetadataCache) GetSubtreeHash(dir string) ([]byte, bool) {
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
+
+	norm := normalizeDir(dir)
+	if norm == "" {
+		if mc.rootTreeHash == "" {
+			return nil, false
+		}
+		h, err := hex.DecodeString(mc.rootTreeHash)
+		return h, err == nil && len(h) > 0
+	}
+
+	elem, exists := mc.cache[norm]
+	if !exists {
+		return nil, false
+	}
+	mc.lruList.MoveToFront(elem)
+	meta := elem.Value.(*cacheItem).meta
+	if meta.SubTreeHash == "" {
+		return nil, false
+	}
+	h, err := hex.DecodeString(meta.SubTreeHash)
+	return h, err == nil && len(h) > 0
+}
+
+func (mc *MetadataCache) evictOldestLocked() {
+	elem := mc.lruList.Back()
+	if elem == nil {
+		return
+	}
+	mc.lruList.Remove(elem)
+	item, ok := elem.Value.(*cacheItem)
+	if !ok || item == nil {
+		return
+	}
+	delete(mc.cache, item.path)
+	parent := pathParent(item.path)
+	if children, exists := mc.dirChildren[parent]; exists {
+		delete(children, item.path)
+		if len(children) == 0 {
+			delete(mc.dirChildren, parent)
+		}
+	}
+}
+
+func (mc *MetadataCache) putLocked(relPath string, meta Metadata) {
+	if elem, exists := mc.cache[relPath]; exists {
+		mc.lruList.MoveToFront(elem)
+		elem.Value.(*cacheItem).meta = meta
+		return
+	}
+
+	for len(mc.cache) >= mc.maxEntries && mc.maxEntries > 0 {
+		mc.evictOldestLocked()
+	}
+
+	item := &cacheItem{path: relPath, meta: meta}
+	elem := mc.lruList.PushFront(item)
+	mc.cache[relPath] = elem
+}
+
+func entryToMetadata(e tree.Entry) Metadata {
+	blobHex := ""
+	if len(e.BlobSHA256) > 0 {
+		blobHex = hex.EncodeToString(e.BlobSHA256)
+	}
+	subHex := ""
+	if len(e.SubTreeHash) > 0 {
+		subHex = hex.EncodeToString(e.SubTreeHash)
+	}
+
+	return Metadata{
+		Name:        e.Name,
+		Mode:        e.Mode,
+		ByteSize:    int64(e.Size),
+		BlobSHA256:  blobHex,
+		SubTreeHash: subHex,
+	}
+}
+
+// PopulateDir records all child entries for dir and marks the directory as loaded.
+func (mc *MetadataCache) PopulateDir(dir string, entries []tree.Entry) {
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
+
+	norm := normalizeDir(dir)
+	if mc.dirChildren[norm] == nil {
+		mc.dirChildren[norm] = make(map[string]bool, len(entries))
+	}
+
+	for _, e := range entries {
+		var relPath string
+		if norm == "" {
+			relPath = e.Name
+		} else {
+			relPath = norm + "/" + e.Name
+		}
+
+		meta := entryToMetadata(e)
+		mc.putLocked(relPath, meta)
+		mc.dirChildren[norm][relPath] = true
+	}
+	mc.loadedDirs[norm] = true
+}
+
+// Get retrieves cached metadata for a relative path, updating LRU recency.
+func (mc *MetadataCache) Get(name string) (Metadata, bool) {
+	norm := normalizeDir(name)
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
+
+	elem, exists := mc.cache[norm]
+	if !exists {
+		return Metadata{}, false
+	}
+	mc.lruList.MoveToFront(elem)
+	return elem.Value.(*cacheItem).meta, true
 }
 
 // Set stores metadata for a relative path.
 func (mc *MetadataCache) Set(name string, meta Metadata) {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
-	mc.cache[name] = meta
+
+	norm := normalizeDir(name)
+	if meta.Name == "" {
+		meta.Name = path.Base(norm)
+	}
+	mc.putLocked(norm, meta)
+	parent := pathParent(norm)
+	if mc.dirChildren[parent] == nil {
+		mc.dirChildren[parent] = make(map[string]bool)
+	}
+	mc.dirChildren[parent][norm] = true
+	delete(mc.negativeHits, norm)
+}
+
+// SetNegative records a negative lookup (ENOENT) with an expiration TTL.
+func (mc *MetadataCache) SetNegative(name string, ttl time.Duration) {
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
+	if ttl <= 0 {
+		ttl = DefaultNegativeTTL
+	}
+	mc.negativeHits[normalizeDir(name)] = time.Now().Add(ttl)
+}
+
+// IsNegative returns true if the relative path is currently recorded as a non-existent entry.
+func (mc *MetadataCache) IsNegative(name string) bool {
+	mc.mutex.RLock()
+	defer mc.mutex.RUnlock()
+
+	norm := normalizeDir(name)
+	expiry, exists := mc.negativeHits[norm]
+	if !exists {
+		return false
+	}
+	return time.Now().Before(expiry)
+}
+
+// ClearNegative removes any negative lookup cache for a path.
+func (mc *MetadataCache) ClearNegative(name string) {
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
+	delete(mc.negativeHits, normalizeDir(name))
 }
 
 // Invalidate removes a specific path from the cache.
-func (mc *MetadataCache) Invalidate(path string) bool {
+func (mc *MetadataCache) Invalidate(p string) bool {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
-	_, exists := mc.cache[path]
+	norm := normalizeDir(p)
+	elem, exists := mc.cache[norm]
 	if exists {
-		delete(mc.cache, path)
+		mc.lruList.Remove(elem)
+		delete(mc.cache, norm)
+		parent := pathParent(norm)
+		if children, cExists := mc.dirChildren[parent]; cExists {
+			delete(children, norm)
+			if len(children) == 0 {
+				delete(mc.dirChildren, parent)
+			}
+		}
 	}
+	delete(mc.loadedDirs, norm)
+	delete(mc.negativeHits, norm)
 	return exists
 }
 
@@ -59,7 +285,11 @@ func (mc *MetadataCache) Purge() int {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
 	count := len(mc.cache)
-	mc.cache = make(map[string]Metadata)
+	mc.cache = make(map[string]*list.Element)
+	mc.lruList.Init()
+	mc.dirChildren = make(map[string]map[string]bool)
+	mc.loadedDirs = make(map[string]bool)
+	mc.negativeHits = make(map[string]time.Time)
 	return count
 }
 
@@ -82,6 +312,7 @@ func (mc *MetadataCache) SetRootTreeHash(h string) {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
 	mc.rootTreeHash = h
+	delete(mc.loadedDirs, "")
 }
 
 // CLID returns the currently bound changelist ID.
@@ -98,32 +329,21 @@ func (mc *MetadataCache) SetCLID(id int64) {
 	mc.clID = id
 }
 
-// ListDir returns all direct children metadata in the specified relative directory path.
+// ListDir returns direct children metadata in the specified relative directory path in O(k) time.
 func (mc *MetadataCache) ListDir(dir string) []Metadata {
 	mc.mutex.RLock()
 	defer mc.mutex.RUnlock()
 
-	cleanDir := dir
-	if cleanDir == "." || cleanDir == "/" {
-		cleanDir = ""
+	cleanDir := normalizeDir(dir)
+	children := mc.dirChildren[cleanDir]
+	if len(children) == 0 {
+		return nil
 	}
 
-	var results []Metadata
-	for p, meta := range mc.cache {
-		parent := ""
-		idx := -1
-		for i := len(p) - 1; i >= 0; i-- {
-			if p[i] == '/' {
-				idx = i
-				break
-			}
-		}
-		if idx != -1 {
-			parent = p[:idx]
-		}
-
-		if parent == cleanDir {
-			results = append(results, meta)
+	results := make([]Metadata, 0, len(children))
+	for childPath := range children {
+		if elem, ok := mc.cache[childPath]; ok {
+			results = append(results, elem.Value.(*cacheItem).meta)
 		}
 	}
 	return results
@@ -134,7 +354,11 @@ func (mc *MetadataCache) Reanchor(newRootTreeHash string, clID int64) int {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
 	count := len(mc.cache)
-	mc.cache = make(map[string]Metadata)
+	mc.cache = make(map[string]*list.Element)
+	mc.lruList.Init()
+	mc.dirChildren = make(map[string]map[string]bool)
+	mc.loadedDirs = make(map[string]bool)
+	mc.negativeHits = make(map[string]time.Time)
 	mc.rootTreeHash = newRootTreeHash
 	if clID > 0 {
 		mc.clID = clID

@@ -107,6 +107,7 @@ func executeWorkspaceCreate(
 	baseCL int64,
 	mountDir string,
 	noFuse bool,
+	noHooks bool,
 ) error {
 	serverAddr := ResolveServerAddr(rootFlags.Server)
 
@@ -183,6 +184,12 @@ func executeWorkspaceCreate(
 		}
 	}()
 
+	if !noHooks {
+		if err := runPostCreateHooks(ctx, resolvedMountDir, name, resp.BaseCl, serverAddr); err != nil {
+			return fmt.Errorf("post_create hooks failed: %w", err)
+		}
+	}
+
 	if rootFlags.JSON {
 		return writeJSON(cmd.OutOrStdout(), wsConfig)
 	}
@@ -205,19 +212,21 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 	var baseCL int64
 	var mountDir string
 	var noFuse bool
+	var noHooks bool
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create and mount a new Niebla virtual workspace",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeWorkspaceCreate(cmd, rootFlags, args[0], baseCL, mountDir, noFuse)
+			return executeWorkspaceCreate(cmd, rootFlags, args[0], baseCL, mountDir, noFuse, noHooks)
 		},
 	}
 
 	cmd.Flags().Int64Var(&baseCL, "cl", 0, "Base Changelist ID to branch workspace from (0 = trunk head)")
 	cmd.Flags().StringVar(&mountDir, "mount-dir", "", "Custom mount directory (defaults to /niebla/workspaces/<name>)")
 	cmd.Flags().BoolVar(&noFuse, "no-fuse", false, "Materialize workspace directly to disk without mounting FUSE")
+	cmd.Flags().BoolVar(&noHooks, "no-hooks", false, "Skip client post_create lifecycle hooks")
 
 	return cmd
 }

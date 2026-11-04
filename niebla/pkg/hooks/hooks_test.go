@@ -12,6 +12,18 @@ command = "gofmt -l ."
 fail_on_output = true
 description = "Verify Go files are formatted"
 
+[[client.post_create]]
+name = "init-rust-project"
+command = "bazel run @rules_rust//tools/rust_analyzer:gen_rust_project"
+fail_on_error = false
+description = "Generate rust-project.json"
+
+[[client.post_sync]]
+name = "refresh-indexes"
+command = "bazel run @rules_rust//tools/rust_analyzer:gen_rust_project"
+fail_on_error = true
+description = "Refresh rust-analyzer indexes on sync"
+
 [[server.presubmit]]
 name = "conventional-commits"
 type = "metadata"
@@ -48,6 +60,20 @@ args = ["--warn-only"]
 	}
 	if cfg.Client.Presubmit[0].Name != "check-fmt" || !cfg.Client.Presubmit[0].FailOnOutput {
 		t.Errorf("unexpected client hook: %+v", cfg.Client.Presubmit[0])
+	}
+
+	if len(cfg.Client.PostCreate) != 1 {
+		t.Fatalf("expected 1 client post_create, got %d", len(cfg.Client.PostCreate))
+	}
+	if cfg.Client.PostCreate[0].Name != "init-rust-project" || cfg.Client.PostCreate[0].FailOnError {
+		t.Errorf("unexpected post_create hook: %+v", cfg.Client.PostCreate[0])
+	}
+
+	if len(cfg.Client.PostSync) != 1 {
+		t.Fatalf("expected 1 client post_sync, got %d", len(cfg.Client.PostSync))
+	}
+	if cfg.Client.PostSync[0].Name != "refresh-indexes" || !cfg.Client.PostSync[0].FailOnError {
+		t.Errorf("unexpected post_sync hook: %+v", cfg.Client.PostSync[0])
 	}
 
 	if len(cfg.Server.Presubmit) != 3 {

@@ -20,9 +20,11 @@ type Config struct {
 	Server ServerConfig `toml:"server"`
 }
 
-// ClientConfig holds client-side presubmit hooks executed before gRPC dispatch.
+// ClientConfig holds client-side presubmit and lifecycle hooks.
 type ClientConfig struct {
-	Presubmit []ClientHook `toml:"presubmit"`
+	Presubmit  []ClientHook `toml:"presubmit"`
+	PostCreate []ClientHook `toml:"post_create"`
+	PostSync   []ClientHook `toml:"post_sync"`
 }
 
 // ServerConfig holds server-side presubmit and postsubmit hooks.
@@ -31,11 +33,12 @@ type ServerConfig struct {
 	Postsubmit []ServerHook `toml:"postsubmit"`
 }
 
-// ClientHook represents a command executed locally in the user's workspace before submit.
+// ClientHook represents a command executed locally in the user's workspace before submit or during lifecycle events.
 type ClientHook struct {
 	Name         string `toml:"name"`
 	Command      string `toml:"command"`
 	FailOnOutput bool   `toml:"fail_on_output"`
+	FailOnError  bool   `toml:"fail_on_error"`
 	Description  string `toml:"description"`
 }
 
