@@ -1,0 +1,46 @@
+name: Release Candidate Comprehensive Verification
+
+on:
+  push:
+    branches:
+      - 'rc/**'
+    tags:
+      - 'v*-rc*'
+
+concurrency:
+  group: rc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rc-verification:
+    name: Multi-Region Concurrency & Cotejo UI Verification
+    runs-on: self-hosted
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Verify Container Runtime Availability
+        run: |
+          docker info || podman info
+
+      - name: Run Release Candidate Integration Suite
+        env:
+          CGO_ENABLED: '0'
+          TESTCONTAINERS_RYUK_DISABLED: 'false'
+        run: |
+          go test -v -tags=rc -timeout=35m ./test/rc/...
+
+      - name: Report Status
+        if: always()
+        run: |
+          echo "RC verification completed with exit status: $?"
