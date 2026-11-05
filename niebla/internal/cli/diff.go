@@ -196,15 +196,16 @@ func renderColoredDiff(out io.Writer, diffText string) {
 			continue
 		}
 
-		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+		switch {
+		case strings.HasPrefix(line, "---"), strings.HasPrefix(line, "+++"):
 			fmt.Fprintf(out, "\033[1m%s\033[0m\n", line) // Bold
-		} else if strings.HasPrefix(line, "@@") {
+		case strings.HasPrefix(line, "@@"):
 			fmt.Fprintf(out, "\033[36m%s\033[0m\n", line) // Cyan
-		} else if strings.HasPrefix(line, "+") {
+		case strings.HasPrefix(line, "+"):
 			fmt.Fprintf(out, "\033[32m%s\033[0m\n", line) // Green
-		} else if strings.HasPrefix(line, "-") {
+		case strings.HasPrefix(line, "-"):
 			fmt.Fprintf(out, "\033[31m%s\033[0m\n", line) // Red
-		} else {
+		default:
 			fmt.Fprintln(out, line)
 		}
 	}

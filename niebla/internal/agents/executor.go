@@ -245,12 +245,11 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 
 	report, diags := agents.ParseReviewOutput(string(output))
 	if report != nil {
-		if report.Verdict.IsBlocking() {
+		switch {
+		case report.Verdict.IsBlocking():
 			passed = false
-		} else if report.Verdict.IsApproval() {
-			if runErr == nil {
-				passed = true
-			}
+		case report.Verdict.IsApproval() && runErr == nil:
+			passed = true
 		}
 	}
 

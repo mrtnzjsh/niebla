@@ -83,30 +83,8 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 		})
 	}
 
-	if req.TreeHash != "" && p.cfg.TreeFetcher != nil {
-		treeHashBytes, err := hex.DecodeString(strings.TrimSpace(req.TreeHash))
-		if err == nil && len(treeHashBytes) > 0 {
-			opts := materialize.Options{
-				Concurrency: p.cfg.Concurrency,
-				HardlinkCAS: p.cfg.CASStorage,
-			}
-			_, matErr := materialize.MaterializeTree(ctx, treeHashBytes, destDir, p.cfg.TreeFetcher, p.cfg.BlobFetcher, opts)
-			if matErr != nil {
-				endTime := time.Now().UTC()
-				if p.cfg.Reporter != nil {
-					_ = p.cfg.Reporter.ReportStatus(ctx, ci.CheckRunReport{
-						CLID:           req.CLID,
-						PatchsetNumber: req.Patchset,
-						RunnerName:     p.cfg.Name,
-						Provider:       "local",
-						Status:         string(types.CheckRunStatusFailed),
-						StartedAt:      &startTime,
-						CompletedAt:    &endTime,
-					})
-				}
-				return destDir, fmt.Errorf("failed to materialize tree: %w", matErr)
-			}
-		}
+	if err := p.materializeIfRequested(ctx, req, destDir, startTime); err != nil {
+		return destDir, err
 	}
 
 	timeout := time.Duration(p.cfg.TimeoutSeconds) * time.Second
@@ -167,4 +145,35 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 	}
 
 	return destDir, nil
+}
+
+func (p *Provider) materializeIfRequested(ctx context.Context, req ci.DispatchRequest, destDir string, startTime time.Time) error {
+	if req.TreeHash == "" || p.cfg.TreeFetcher == nil {
+		return nil
+	}
+	treeHashBytes, err := hex.DecodeString(strings.TrimSpace(req.TreeHash))
+	if err != nil || len(treeHashBytes) == 0 {
+		return nil
+	}
+	opts := materialize.Options{
+		Concurrency: p.cfg.Concurrency,
+		HardlinkCAS: p.cfg.CASStorage,
+	}
+	_, matErr := materialize.MaterializeTree(ctx, treeHashBytes, destDir, p.cfg.TreeFetcher, p.cfg.BlobFetcher, opts)
+	if matErr != nil {
+		endTime := time.Now().UTC()
+		if p.cfg.Reporter != nil {
+			_ = p.cfg.Reporter.ReportStatus(ctx, ci.CheckRunReport{
+				CLID:           req.CLID,
+				PatchsetNumber: req.Patchset,
+				RunnerName:     p.cfg.Name,
+				Provider:       "local",
+				Status:         string(types.CheckRunStatusFailed),
+				StartedAt:      &startTime,
+				CompletedAt:    &endTime,
+			})
+		}
+		return fmt.Errorf("failed to materialize tree: %w", matErr)
+	}
+	return nil
 }

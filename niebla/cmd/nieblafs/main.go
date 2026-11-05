@@ -93,21 +93,9 @@ func main() {
 		}
 	}
 
-	var remoteClient remote.Client
-	var fetcher *remote.BlobFetcher
-	if *serverAddr != "" {
-		dialCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		client, err := remote.NewClient(dialCtx, *serverAddr)
-		cancel()
-		if err != nil {
-			log.Printf("warning: failed to connect to niebla-server at %s: %v (lazy remote fetches disabled)", *serverAddr, err)
-		} else {
-			remoteClient = client
-			defer remoteClient.Close()
-			if casStorage != nil {
-				fetcher = remote.NewBlobFetcher(casStorage, remoteClient)
-			}
-		}
+	remoteClient, fetcher := initRemoteClient(*serverAddr, casStorage)
+	if remoteClient != nil {
+		defer remoteClient.Close()
 	}
 
 	var fsOpts []fs.Option
@@ -155,4 +143,22 @@ func main() {
 	if *mountPoint != "" {
 		_ = fuse.Unmount(*mountPoint)
 	}
+}
+
+func initRemoteClient(addr string, casStorage *cas.Storage) (remote.Client, *remote.BlobFetcher) {
+	if addr == "" {
+		return nil, nil
+	}
+	dialCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := remote.NewClient(dialCtx, addr)
+	if err != nil {
+		log.Printf("warning: failed to connect to niebla-server at %s: %v (lazy remote fetches disabled)", addr, err)
+		return nil, nil
+	}
+	var fetcher *remote.BlobFetcher
+	if casStorage != nil {
+		fetcher = remote.NewBlobFetcher(casStorage, client)
+	}
+	return client, fetcher
 }

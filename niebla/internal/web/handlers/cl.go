@@ -486,17 +486,15 @@ func (h *CLHandler) renderActionsBar(w http.ResponseWriter, r *http.Request, clI
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	target := r.Header.Get("HX-Target")
-	if target == "reviewers-control" {
+	switch r.Header.Get("HX-Target") {
+	case "reviewers-control":
 		_ = views.ReviewersControl(data).Render(r.Context(), w)
-		_ = views.SubmitButtonOOB(data).Render(r.Context(), w)
-	} else if target == "approvals-control" {
+	case "approvals-control":
 		_ = views.ApprovalsControl(data).Render(r.Context(), w)
-		_ = views.SubmitButtonOOB(data).Render(r.Context(), w)
-	} else {
+	default:
 		_ = views.CLActionsBar(data).Render(r.Context(), w)
-		_ = views.SubmitButtonOOB(data).Render(r.Context(), w)
 	}
+	_ = views.SubmitButtonOOB(data).Render(r.Context(), w)
 }
 
 // HandleFileReview marks a file as reviewed or not reviewed for the active reviewer.

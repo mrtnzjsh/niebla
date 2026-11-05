@@ -314,17 +314,18 @@ func MatchAgentAuthor(author string, patterns []string) bool {
 				return true
 			}
 		}
-		if strings.HasPrefix(patternLower, "*") && strings.HasSuffix(patternLower, "*") {
+		switch {
+		case strings.HasPrefix(patternLower, "*") && strings.HasSuffix(patternLower, "*"):
 			substr := strings.Trim(patternLower, "*")
 			if strings.Contains(authorLower, substr) {
 				return true
 			}
-		} else if strings.HasPrefix(patternLower, "*") {
+		case strings.HasPrefix(patternLower, "*"):
 			suffix := strings.TrimPrefix(patternLower, "*")
 			if strings.HasSuffix(authorLower, suffix) {
 				return true
 			}
-		} else if strings.HasSuffix(patternLower, "*") {
+		case strings.HasSuffix(patternLower, "*"):
 			prefix := strings.TrimSuffix(patternLower, "*")
 			if strings.HasPrefix(authorLower, prefix) {
 				return true

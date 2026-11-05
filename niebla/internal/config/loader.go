@@ -130,33 +130,36 @@ func LoadFromPath(path string) (*Config, error) {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 
-	if os.IsNotExist(statErr) {
-		if base == "config.toml" {
-			existing, _ := DiscoverConfigFiles(dir)
-			if len(existing) == 0 {
-				if err := os.MkdirAll(dir, 0755); err != nil {
-					return nil, fmt.Errorf("failed to create config directory %s: %w", dir, err)
-				}
-				if err := os.WriteFile(path, BaseConfigBytes, 0644); err != nil {
-					return nil, fmt.Errorf("failed to write default config to %s: %w", path, err)
-				}
-			}
-			return LoadFromDir(dir)
-		}
-		return nil, fmt.Errorf("failed to read config file %s: %w", path, statErr)
-	}
 	if statErr != nil {
-		return nil, fmt.Errorf("failed to stat config file %s: %w", path, statErr)
+		if !os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("failed to stat config file %s: %w", path, statErr)
+		}
+		if base != "config.toml" {
+			return nil, fmt.Errorf("failed to read config file %s: %w", path, statErr)
+		}
+		existing, _ := DiscoverConfigFiles(dir)
+		if len(existing) == 0 {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create config directory %s: %w", dir, err)
+			}
+			if err := os.WriteFile(path, BaseConfigBytes, 0644); err != nil {
+				return nil, fmt.Errorf("failed to write default config to %s: %w", path, err)
+			}
+		}
+		return LoadFromDir(dir)
 	}
 
 	// Determine whether this file should be combined with sibling *.toml files in dir.
 	combineDir := false
-	if base == "config.toml" {
+	switch {
+	case base == "config.toml":
 		combineDir = true
-	} else if defDir, err := DefaultConfigDir(); err == nil && filepath.Clean(dir) == filepath.Clean(defDir) {
-		combineDir = true
-	} else if _, err := os.Stat(filepath.Join(dir, "config.toml")); err == nil {
-		combineDir = true
+	default:
+		if defDir, err := DefaultConfigDir(); err == nil && filepath.Clean(dir) == filepath.Clean(defDir) {
+			combineDir = true
+		} else if _, err := os.Stat(filepath.Join(dir, "config.toml")); err == nil {
+			combineDir = true
+		}
 	}
 
 	if combineDir {
@@ -444,11 +447,12 @@ func findUnquotedEquals(s string) int {
 	inSingle := false
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
-		if ch == '"' && !inSingle {
+		switch {
+		case ch == '"' && !inSingle:
 			inDouble = !inDouble
-		} else if ch == '\'' && !inDouble {
+		case ch == '\'' && !inDouble:
 			inSingle = !inSingle
-		} else if ch == '=' && !inDouble && !inSingle {
+		case ch == '=' && !inDouble && !inSingle:
 			return i
 		}
 	}
@@ -545,12 +549,15 @@ func expandConfigEnv(cfg *Config) {
 
 	reviewer := strings.TrimSpace(os.ExpandEnv(cfg.Critique.DefaultReviewer))
 	if reviewer == "" || reviewer == "$USER" {
-		if osUser := os.Getenv("USER"); osUser != "" {
-			reviewer = osUser
-		} else if cur, err := user.Current(); err == nil && cur.Username != "" {
-			reviewer = cur.Username
-		} else {
-			reviewer = "reviewer"
+		switch {
+		case os.Getenv("USER") != "":
+			reviewer = os.Getenv("USER")
+		default:
+			if cur, err := user.Current(); err == nil && cur.Username != "" {
+				reviewer = cur.Username
+			} else {
+				reviewer = "reviewer"
+			}
 		}
 	}
 	cfg.Critique.DefaultReviewer = reviewer

@@ -75,13 +75,14 @@ func (h *CLHandler) resolveFileDiffDetail(ctx context.Context, targetFile string
 
 	changeType := "M"
 	var baseBlobSHA, modBlobSHA []byte
-	if baseEntry == nil && modEntry != nil {
+	switch {
+	case baseEntry == nil && modEntry != nil:
 		changeType = "A"
 		modBlobSHA = modEntry.BlobSHA256
-	} else if baseEntry != nil && modEntry == nil {
+	case baseEntry != nil && modEntry == nil:
 		changeType = "D"
 		baseBlobSHA = baseEntry.BlobSHA256
-	} else if baseEntry != nil && modEntry != nil {
+	case baseEntry != nil && modEntry != nil:
 		baseBlobSHA = baseEntry.BlobSHA256
 		modBlobSHA = modEntry.BlobSHA256
 	}
@@ -232,16 +233,17 @@ func (h *CLHandler) classifyInboxRows(allCLs []db.Changelist, currentUser string
 		}
 		all = append(all, row)
 
-		if types.CLStatus(cl.Status).IsSubmitted() {
+		switch {
+		case types.CLStatus(cl.Status).IsSubmitted():
 			counts.Submitted++
 			submitted = append(submitted, row)
-		} else if isAgent {
+		case isAgent:
 			counts.Agents++
 			agents = append(agents, row)
-		} else if isAuthor {
+		case isAuthor:
 			counts.Outgoing++
 			outgoing = append(outgoing, row)
-		} else if isAssigned || len(assignedCLIDs) == 0 {
+		case isAssigned || len(assignedCLIDs) == 0:
 			counts.MyReviews++
 			myReviews = append(myReviews, row)
 		}
@@ -254,16 +256,16 @@ func resolveActiveTab(tab string, counts views.InboxCounts) string {
 	if tab != "" {
 		return tab
 	}
-	if counts.MyReviews > 0 {
+	switch {
+	case counts.MyReviews > 0:
 		return "my-reviews"
-	}
-	if counts.Outgoing > 0 {
+	case counts.Outgoing > 0:
 		return "outgoing"
-	}
-	if counts.Agents > 0 {
+	case counts.Agents > 0:
 		return "agents"
+	default:
+		return "all"
 	}
-	return "all"
 }
 
 // selectActiveRows returns the slice of rows corresponding to the active tab.

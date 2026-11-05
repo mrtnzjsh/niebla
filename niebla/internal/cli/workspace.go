@@ -542,20 +542,16 @@ func unmountWorkspace(mountDir string) error {
 	// Try fusermount3 first
 	if fuserPath, err := exec.LookPath("fusermount3"); err == nil {
 		cmd := exec.Command(fuserPath, "-u", mountDir)
-		if output, err := cmd.CombinedOutput(); err == nil {
+		if _, err := cmd.CombinedOutput(); err == nil {
 			return nil
-		} else {
-			_ = output
 		}
 	}
 
 	// Try fusermount
 	if fuserPath, err := exec.LookPath("fusermount"); err == nil {
 		cmd := exec.Command(fuserPath, "-u", mountDir)
-		if output, err := cmd.CombinedOutput(); err == nil {
+		if _, err := cmd.CombinedOutput(); err == nil {
 			return nil
-		} else {
-			_ = output
 		}
 	}
 

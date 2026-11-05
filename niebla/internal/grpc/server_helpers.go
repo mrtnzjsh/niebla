@@ -442,17 +442,20 @@ func (s *Server) assignReviewersAndAgents(ctx context.Context, clID int64, paren
 	touchedFiles, _ := tree.DiffTreeFiles(baseTree, rootTreeHash, fetchTree)
 
 	var explicitAgents []string
-	if len(touchedFiles) > 0 {
-		ownersEval := s.newOwnersEvaluator(ctx, rootTreeHash, fetchTree)
-		if policy, pErr := ownersEval.ResolvePolicy(touchedFiles); pErr == nil && policy != nil {
-			explicitAgents = policy.Agents
-			var ownersReviewers []string
-			ownersReviewers = append(ownersReviewers, policy.Reviewers...)
-			ownersReviewers = append(ownersReviewers, policy.Agents...)
-			if len(ownersReviewers) > 0 {
-				if err := s.db.AddReviewers(ctx, clID, ownersReviewers); err != nil {
-					log.Printf("warning: failed to auto-assign OWNERS reviewers/agents to CL %d: %v", clID, err)
-				}
+	if len(touchedFiles) == 0 {
+		s.dispatchAgentPersonas(ctx, clID, patchsetNumber, rootTreeHash, touchedFiles, explicitAgents, fetchTree)
+		return
+	}
+
+	ownersEval := s.newOwnersEvaluator(ctx, rootTreeHash, fetchTree)
+	policy, pErr := ownersEval.ResolvePolicy(touchedFiles)
+	if pErr == nil && policy != nil {
+		explicitAgents = policy.Agents
+		ownersReviewers := append([]string{}, policy.Reviewers...)
+		ownersReviewers = append(ownersReviewers, policy.Agents...)
+		if len(ownersReviewers) > 0 {
+			if err := s.db.AddReviewers(ctx, clID, ownersReviewers); err != nil {
+				log.Printf("warning: failed to auto-assign OWNERS reviewers/agents to CL %d: %v", clID, err)
 			}
 		}
 	}

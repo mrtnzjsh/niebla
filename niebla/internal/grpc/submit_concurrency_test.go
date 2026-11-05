@@ -237,12 +237,13 @@ func TestSubmitCL_ConcurrentConflictingEdits(t *testing.T) {
 			defer wg.Done()
 			<-startGate
 			_, err := client.SubmitCL(ctx, &nieblav1.SubmitCLRequest{ClId: id})
-			if err == nil {
+			switch {
+			case err == nil:
 				atomic.AddInt32(&successes, 1)
-			} else if status.Code(err) == codes.FailedPrecondition {
+			case status.Code(err) == codes.FailedPrecondition:
 				atomic.AddInt32(&conflicts, 1)
 				atomic.StoreInt64(&failedCLID, id)
-			} else {
+			default:
 				t.Errorf("unexpected error for CL %d: %v", id, err)
 			}
 		}(clID)

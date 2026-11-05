@@ -225,11 +225,12 @@ func buildChangeRows(delLines, insLines []string, baseHighlighted, modHighlighte
 		hasDel := k < len(delLines)
 		hasIns := k < len(insLines)
 
-		if hasDel && hasIns {
+		switch {
+		case hasDel && hasIns:
 			rowType = "modify"
-		} else if hasDel {
+		case hasDel:
 			rowType = "delete"
-		} else {
+		default:
 			rowType = "add"
 		}
 

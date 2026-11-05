@@ -151,27 +151,32 @@ func defaultBlobCacheDirs() []string {
 	return dirs
 }
 
+func tryReadBlobFromCache(cacheDir string, sha256Bytes []byte, shaHex string, w io.Writer) bool {
+	if casStorage, err := cas.NewStorage(cacheDir); err == nil {
+		if file, _, openErr := casStorage.OpenBlob(sha256Bytes); openErr == nil {
+			defer file.Close()
+			if _, copyErr := io.Copy(w, file); copyErr == nil {
+				return true
+			}
+		}
+	}
+	flatPath := filepath.Join(cacheDir, shaHex)
+	if file, err := os.Open(flatPath); err == nil {
+		defer file.Close()
+		if _, copyErr := io.Copy(w, file); copyErr == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func makeBlobFetcher(client nieblav1.NieblaServiceClient, cacheDirs []string) materialize.BlobFetcher {
 	return func(ctx context.Context, sha256Bytes []byte, w io.Writer) error {
 		shaHex := hex.EncodeToString(sha256Bytes)
 
 		for _, cacheDir := range cacheDirs {
-			if casStorage, err := cas.NewStorage(cacheDir); err == nil {
-				if file, _, openErr := casStorage.OpenBlob(sha256Bytes); openErr == nil {
-					_, copyErr := io.Copy(w, file)
-					_ = file.Close()
-					if copyErr == nil {
-						return nil
-					}
-				}
-			}
-			flatPath := filepath.Join(cacheDir, shaHex)
-			if file, err := os.Open(flatPath); err == nil {
-				_, copyErr := io.Copy(w, file)
-				_ = file.Close()
-				if copyErr == nil {
-					return nil
-				}
+			if tryReadBlobFromCache(cacheDir, sha256Bytes, shaHex, w) {
+				return nil
 			}
 		}
 

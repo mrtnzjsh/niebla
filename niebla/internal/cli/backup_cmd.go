@@ -61,13 +61,11 @@ func resolveMasterKey(cfg *config.Config) ([]byte, [16]byte, error) {
 	}
 
 	if keyCfg.Source == "" {
-		if os.Getenv("NIEBLA_MASTER_KEY") != "" {
-			keyCfg.Source = "env"
-			keyCfg.EnvVar = "NIEBLA_MASTER_KEY"
-		} else if os.Getenv("NIEBLA_BACKUP_PASSPHRASE") != "" {
+		switch {
+		case os.Getenv("NIEBLA_BACKUP_PASSPHRASE") != "":
 			keyCfg.Source = "passphrase"
 			keyCfg.PassphraseEnv = "NIEBLA_BACKUP_PASSPHRASE"
-		} else {
+		default:
 			keyCfg.Source = "env"
 			keyCfg.EnvVar = "NIEBLA_MASTER_KEY"
 		}
@@ -104,11 +102,12 @@ func resolveDriver(cfg *config.Config, target string, customDir string) (drivers
 	}
 
 	if targetLower == "" {
-		if cfg.Resilience.S3.Enabled {
+		switch {
+		case cfg.Resilience.S3.Enabled:
 			targetLower = "s3"
-		} else if cfg.Resilience.Nextcloud.Enabled {
+		case cfg.Resilience.Nextcloud.Enabled:
 			targetLower = "nextcloud"
-		} else {
+		default:
 			targetLower = "filesystem"
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -236,12 +237,13 @@ func Unpack(ctx context.Context, r io.Reader, masterKey []byte) (*UnpackResult, 
 			return nil, fmt.Errorf("failed to read tar entry %s: %w", entryHeader.Name, err)
 		}
 
-		if entryHeader.Name == "manifest.json" {
+		switch {
+		case entryHeader.Name == "manifest.json":
 			_ = json.Unmarshal(data, &result.Manifest)
-		} else if entryHeader.Name == "database.sql" {
+		case entryHeader.Name == "database.sql":
 			result.DBDump = data
-		} else if len(entryHeader.Name) > 6 && entryHeader.Name[:6] == "blobs/" {
-			sha := entryHeader.Name[6:]
+		case strings.HasPrefix(entryHeader.Name, "blobs/"):
+			sha := strings.TrimPrefix(entryHeader.Name, "blobs/")
 			result.Blobs[sha] = data
 		}
 	}

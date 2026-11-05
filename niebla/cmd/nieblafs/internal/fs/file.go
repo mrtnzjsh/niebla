@@ -122,20 +122,21 @@ func (f *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 	if err := f.ensureScratchPromoted(ctx); err != nil {
 		return err
 	}
+	if f.scratchPath == "" {
+		return f.Attr(ctx, &resp.Attr)
+	}
 
-	if f.scratchPath != "" {
-		if req.Valid.Size() {
-			if err := os.Truncate(f.scratchPath, int64(req.Size)); err != nil {
-				return err
-			}
-			f.size = int64(req.Size)
+	if req.Valid.Size() {
+		if err := os.Truncate(f.scratchPath, int64(req.Size)); err != nil {
+			return err
 		}
-		if req.Valid.Mode() {
-			if err := os.Chmod(f.scratchPath, req.Mode); err != nil {
-				return err
-			}
-			f.mode = uint32(req.Mode)
+		f.size = int64(req.Size)
+	}
+	if req.Valid.Mode() {
+		if err := os.Chmod(f.scratchPath, req.Mode); err != nil {
+			return err
 		}
+		f.mode = uint32(req.Mode)
 	}
 
 	return f.Attr(ctx, &resp.Attr)
@@ -146,23 +147,22 @@ func (f *File) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.Wri
 	if err := f.ensureScratchPromoted(ctx); err != nil {
 		return err
 	}
-
-	if f.scratchPath != "" {
-		file, err := os.OpenFile(f.scratchPath, os.O_CREATE|os.O_RDWR, 0644)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		n, err := file.WriteAt(req.Data, req.Offset)
-		if err != nil {
-			return err
-		}
-		resp.Size = n
+	if f.scratchPath == "" {
+		resp.Size = len(req.Data)
 		return nil
 	}
 
-	resp.Size = len(req.Data)
+	file, err := os.OpenFile(f.scratchPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	n, err := file.WriteAt(req.Data, req.Offset)
+	if err != nil {
+		return err
+	}
+	resp.Size = n
 	return nil
 }
 

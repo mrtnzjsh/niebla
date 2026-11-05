@@ -40,6 +40,11 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
+	if !*stdinContentFlag && *fileFlag == "" {
+		fmt.Fprintln(os.Stderr, "error: either --file or --stdin-content is required")
+		os.Exit(1)
+	}
+
 	var fileContent string
 	if *stdinContentFlag {
 		b, err := io.ReadAll(os.Stdin)
@@ -48,16 +53,13 @@ func main() {
 			os.Exit(1)
 		}
 		fileContent = string(b)
-	} else if *fileFlag != "" {
+	} else {
 		b, err := os.ReadFile(*fileFlag)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading file %s: %v\n", *fileFlag, err)
 			os.Exit(1)
 		}
 		fileContent = string(b)
-	} else {
-		fmt.Fprintln(os.Stderr, "error: either --file or --stdin-content is required")
-		os.Exit(1)
 	}
 
 	promptPath := *promptFlag

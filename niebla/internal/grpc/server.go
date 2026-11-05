@@ -123,20 +123,27 @@ func (s *Server) getTreeEntries(ctx context.Context, treeHash []byte) ([]tree.En
 	if len(dbEntries) > 0 {
 		return dbEntries, nil
 	}
-	if s.casStorage != nil && s.casStorage.Exists(treeHash) {
-		f, _, openErr := s.casStorage.OpenBlob(treeHash)
-		if openErr == nil {
-			data, readErr := io.ReadAll(f)
-			_ = f.Close()
-			if readErr == nil {
-				if entries, uErr := tree.UnmarshalManifest(data); uErr == nil && len(entries) > 0 {
-					_ = s.db.InsertTreeNodes(ctx, treeHash, entries)
-					return entries, nil
-				}
-			}
-		}
+	if s.casStorage == nil || !s.casStorage.Exists(treeHash) {
+		return dbEntries, nil
 	}
-	return dbEntries, nil
+	f, _, openErr := s.casStorage.OpenBlob(treeHash)
+	if openErr != nil {
+		return dbEntries, nil
+	}
+	defer f.Close()
+
+	data, readErr := io.ReadAll(f)
+	if readErr != nil {
+		return dbEntries, nil
+	}
+
+	entries, uErr := tree.UnmarshalManifest(data)
+	if uErr != nil || len(entries) == 0 {
+		return dbEntries, nil
+	}
+
+	_ = s.db.InsertTreeNodes(ctx, treeHash, entries)
+	return entries, nil
 }
 
 // GetTree returns directory entries for a given tree hash, utilizing an LRU cache and supporting pagination.

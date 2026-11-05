@@ -175,24 +175,24 @@ func (d *DB) GetPatchset(ctx context.Context, clID int64, patchsetNumber int) (*
 		PatchsetNumber: int32(patchsetNumber),
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Fallback: If asking for patchset 1 and it's not yet recorded, inspect the CL
-			if patchsetNumber == 1 {
-				cl, clErr := d.GetCL(ctx, clID)
-				if clErr == nil && len(cl.RootTreeHash) > 0 {
-					return &Patchset{
-						PatchsetID:     0,
-						CLID:           clID,
-						PatchsetNumber: 1,
-						RootTreeHash:   cl.RootTreeHash,
-						CreatedAt:      cl.CommittedAt,
-						IsAutoRebase:   false,
-					}, nil
-				}
-			}
-			return nil, ErrNotFound
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("failed to query patchset %d for cl %d: %w", patchsetNumber, clID, err)
 		}
-		return nil, fmt.Errorf("failed to query patchset %d for cl %d: %w", patchsetNumber, clID, err)
+		// Fallback: If asking for patchset 1 and it's not yet recorded, inspect the CL
+		if patchsetNumber == 1 {
+			cl, clErr := d.GetCL(ctx, clID)
+			if clErr == nil && len(cl.RootTreeHash) > 0 {
+				return &Patchset{
+					PatchsetID:     0,
+					CLID:           clID,
+					PatchsetNumber: 1,
+					RootTreeHash:   cl.RootTreeHash,
+					CreatedAt:      cl.CommittedAt,
+					IsAutoRebase:   false,
+				}, nil
+			}
+		}
+		return nil, ErrNotFound
 	}
 	p := Patchset{
 		PatchsetID:     int64(row.PatchsetID),

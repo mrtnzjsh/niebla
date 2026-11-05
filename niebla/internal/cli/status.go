@@ -231,30 +231,31 @@ func classifyRegularScratchFile(
 	fetchTree tree.FetchTreeFunc,
 ) *FileChange {
 	baseEntry, resolveErr := tree.ResolvePath(rootTreeHash, rel, fetchTree)
-	if resolveErr == nil && baseEntry != nil && !baseEntry.IsDir() {
-		if len(baseEntry.BlobSHA256) == 32 {
-			if data, readErr := os.ReadFile(diskPath); readErr == nil {
-				sum := sha256.Sum256(data)
-				diskExec := (info.Mode() & 0111) != 0
-				baseExec := (baseEntry.Mode & 0111) != 0
-				if bytes.Equal(sum[:], baseEntry.BlobSHA256) && diskExec == baseExec {
-					return nil
-				}
-			}
-		}
+	if resolveErr != nil || baseEntry == nil || baseEntry.IsDir() {
 		return &FileChange{
 			Path:      rel,
-			Type:      ChangeModified,
+			Type:      ChangeAdded,
 			DiskPath:  diskPath,
-			BaseEntry: baseEntry,
+			BaseEntry: nil,
+		}
+	}
+
+	if len(baseEntry.BlobSHA256) == 32 {
+		if data, readErr := os.ReadFile(diskPath); readErr == nil {
+			sum := sha256.Sum256(data)
+			diskExec := (info.Mode() & 0111) != 0
+			baseExec := (baseEntry.Mode & 0111) != 0
+			if bytes.Equal(sum[:], baseEntry.BlobSHA256) && diskExec == baseExec {
+				return nil
+			}
 		}
 	}
 
 	return &FileChange{
 		Path:      rel,
-		Type:      ChangeAdded,
+		Type:      ChangeModified,
 		DiskPath:  diskPath,
-		BaseEntry: nil,
+		BaseEntry: baseEntry,
 	}
 }
 
