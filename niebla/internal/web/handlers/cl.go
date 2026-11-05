@@ -138,14 +138,14 @@ func (h *CLHandler) resolveReviewer(r *http.Request) string {
 func (h *CLHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	currentUser := h.resolveReviewer(r)
 	allCLs, assignedCLIDs := h.fetchIndexData(r.Context(), currentUser)
-	myReviews, outgoing, agents, submitted, all, counts := h.classifyInboxRows(allCLs, currentUser, assignedCLIDs)
+	partitions := h.classifyInboxRows(allCLs, currentUser, assignedCLIDs)
 
-	tab := resolveActiveTab(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tab"))), counts)
-	activeRows := selectActiveRows(tab, myReviews, outgoing, agents, submitted, all)
+	tab := resolveActiveTab(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tab"))), partitions.Counts)
+	activeRows := selectActiveRows(tab, partitions)
 
 	inboxData := views.InboxViewData{
 		ActiveTab:       tab,
-		Counts:          counts,
+		Counts:          partitions.Counts,
 		Changelists:     activeRows,
 		CurrentUserName: currentUser,
 	}
@@ -406,13 +406,13 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clStatus, needsRebase, approvalsCount, unresolvedCount, reqApprovals, allowUnresolved, requireGreen, requiredCIRunners, err := h.getSubmitCLMetadata(r.Context(), clID)
+	meta, err := h.getSubmitCLMetadata(r.Context(), clID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	if err := h.validateSubmitBlockers(clID, clStatus, needsRebase, allowUnresolved, unresolvedCount); err != nil {
+	if err := h.validateSubmitBlockers(clID, meta.CLStatus, meta.NeedsRebase, meta.Policy.AllowUnresolved, meta.UnresolvedCount); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -424,12 +424,12 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reviewer := h.resolveReviewer(r)
-	if err := h.validateSubmitApprovals(clID, reqApprovals, approvalsCount, justification, reviewer); err != nil {
+	if err := h.validateSubmitApprovals(clID, meta.Policy.ReqApprovals, meta.ApprovalsCount, justification, reviewer); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err := h.validateSubmitCI(r.Context(), clID, requireGreen, requiredCIRunners, justification, reviewer); err != nil {
+	if err := h.validateSubmitCI(r.Context(), clID, meta.Policy.RequireGreen, meta.Policy.RequiredCIRunners, justification, reviewer); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -469,20 +469,20 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 
 func (h *CLHandler) renderActionsBar(w http.ResponseWriter, r *http.Request, clID int64) {
 	author := h.resolveReviewer(r)
-	clStatus, approvals, reviewers, approvedCount, unresolvedCount, draftCount, reqApprovals, allowUnresolved := h.fetchActionsBarData(r.Context(), clID, author)
+	barData := h.fetchActionsBarData(r.Context(), clID, author)
 
 	data := views.CLDetailData{
 		CL: &db.Changelist{
 			CLID:   clID,
-			Status: clStatus,
+			Status: barData.CLStatus,
 		},
-		Approvals:                 approvals,
-		Reviewers:                 reviewers,
-		RequiredApprovals:         reqApprovals,
-		ApprovedCount:             approvedCount,
-		AllowSubmitWithUnresolved: allowUnresolved,
-		UnresolvedComments:        unresolvedCount,
-		DraftCommentsCount:        draftCount,
+		Approvals:                 barData.Approvals,
+		Reviewers:                 barData.Reviewers,
+		RequiredApprovals:         barData.ReqApprovals,
+		ApprovedCount:             barData.ApprovedCount,
+		AllowSubmitWithUnresolved: barData.AllowUnresolved,
+		UnresolvedComments:        barData.UnresolvedCount,
+		DraftCommentsCount:        barData.DraftCount,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -683,8 +683,8 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 	}
 	approvedCount, _ := h.db.CountApprovals(ctx, clID)
 
-	reqApprovals, allowUnresolved, _, requiredCIRunners := h.resolveCLPolicy(ctx, cl)
-	ciRunners := h.buildCIRunnerItems(ctx, clID, currentPS, requiredCIRunners)
+	policy := h.resolveCLPolicy(ctx, cl)
+	ciRunners := h.buildCIRunnerItems(ctx, clID, currentPS, policy.RequiredCIRunners)
 
 	data := views.CLDetailData{
 		CL:                        cl,
@@ -697,9 +697,9 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 		CommentsByLine:            commentsByLine,
 		Approvals:                 approvals,
 		Reviewers:                 reviewers,
-		RequiredApprovals:         reqApprovals,
+		RequiredApprovals:         policy.ReqApprovals,
 		ApprovedCount:             approvedCount,
-		AllowSubmitWithUnresolved: allowUnresolved,
+		AllowSubmitWithUnresolved: policy.AllowUnresolved,
 		UnresolvedComments:        unresolvedTotal,
 		ActiveReviewer:            reviewer,
 		ReviewedFilesCount:        reviewedCount,
@@ -712,14 +712,15 @@ func (h *CLHandler) renderCLPage(w http.ResponseWriter, r *http.Request, clID in
 	_ = views.CLDetail(data).Render(ctx, w)
 }
 
-func (h *CLHandler) resolveCLPolicy(ctx context.Context, cl *db.Changelist) (reqApprovals int, allowUnresolved bool, requireGreen bool, ciRunners []string) {
+func (h *CLHandler) resolveCLPolicy(ctx context.Context, cl *db.Changelist) SubmitPolicy {
+	var policy SubmitPolicy
 	if h.config != nil {
-		reqApprovals = h.config.Critique.GetRequiredApprovals()
-		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
-		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
+		policy.ReqApprovals = h.config.Critique.GetRequiredApprovals()
+		policy.AllowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+		policy.RequireGreen = h.config.Critique.GetRequireGreenCheckRuns()
 	}
 	if h.db == nil || h.cas == nil || cl == nil || len(cl.RootTreeHash) == 0 {
-		return reqApprovals, allowUnresolved, requireGreen, nil
+		return policy
 	}
 
 	baseTree := tree.EmptyTreeHash
@@ -734,7 +735,7 @@ func (h *CLHandler) resolveCLPolicy(ctx context.Context, cl *db.Changelist) (req
 	}
 	touchedFiles, err := tree.DiffTreeFiles(baseTree, cl.RootTreeHash, fetchTree)
 	if err != nil || len(touchedFiles) == 0 {
-		return reqApprovals, allowUnresolved, requireGreen, nil
+		return policy
 	}
 
 	ownersProvider := func(dir string) ([]byte, error) {
@@ -750,13 +751,12 @@ func (h *CLHandler) resolveCLPolicy(ctx context.Context, cl *db.Changelist) (req
 	}
 
 	evaluator := owners.NewEvaluator(ownersProvider, nil)
-	policy, err := evaluator.ResolvePolicy(touchedFiles)
-	if err != nil || policy == nil {
-		return reqApprovals, allowUnresolved, requireGreen, nil
+	ownersPol, err := evaluator.ResolvePolicy(touchedFiles)
+	if err != nil || ownersPol == nil {
+		return policy
 	}
 
-	reqApprovals, allowUnresolved, requireGreen = mergeOwnersPolicy(policy, reqApprovals, allowUnresolved, requireGreen)
-	return reqApprovals, allowUnresolved, requireGreen, policy.CIRunners
+	return mergeOwnersPolicy(ownersPol, policy)
 }
 
 func (h *CLHandler) readBlobBytes(sha256Bytes []byte) ([]byte, error) {

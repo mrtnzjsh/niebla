@@ -21,14 +21,21 @@ import (
 	"niebla/pkg/types"
 )
 
+// SubmitContext encapsulates the evaluated state required to commit a CL and run presubmits.
+type SubmitContext struct {
+	CL           *db.Changelist
+	TouchedFiles []string
+	OwnersEval   *owners.EvaluationResult
+}
+
 // validateSubmitPreconditions verifies that a CL is ready to be committed to trunk.
-func (s *Server) validateSubmitPreconditions(ctx context.Context, clID int64) (*db.Changelist, []string, *owners.EvaluationResult, error) {
+func (s *Server) validateSubmitPreconditions(ctx context.Context, clID int64) (*SubmitContext, error) {
 	clInfo, err := s.db.GetCL(ctx, clID)
 	if err != nil {
-		return nil, nil, nil, status.Errorf(codes.NotFound, "changelist %d not found: %v", clID, err)
+		return nil, status.Errorf(codes.NotFound, "changelist %d not found: %v", clID, err)
 	}
 	if clInfo.NeedsRebase {
-		return nil, nil, nil, status.Errorf(codes.FailedPrecondition,
+		return nil, status.Errorf(codes.FailedPrecondition,
 			"cannot submit CL %d: changelist has unresolved rebase conflicts with parent CL. Run 'niebla sync' in workspace to resolve",
 			clID)
 	}
@@ -62,19 +69,23 @@ func (s *Server) validateSubmitPreconditions(ctx context.Context, clID int64) (*
 	}
 
 	if err := s.checkUnresolvedComments(ctx, clID, ownersEval); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if err := s.checkRequiredApprovals(ctx, clID, ownersEval); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if err := s.checkGreenCI(ctx, clID, ownersEval); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if err := s.checkOwnersSatisfaction(clID, ownersEval); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
-	return clInfo, touchedFiles, ownersEval, nil
+	return &SubmitContext{
+		CL:           clInfo,
+		TouchedFiles: touchedFiles,
+		OwnersEval:   ownersEval,
+	}, nil
 }
 
 func (s *Server) checkUnresolvedComments(ctx context.Context, clID int64, ownersEval *owners.EvaluationResult) error {
@@ -145,19 +156,19 @@ func (s *Server) checkGreenCI(ctx context.Context, clID int64, ownersEval *owner
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to get latest patchset for CL %d: %v", clID, err)
 	}
-	green, total, pending, failed, err := s.db.AreCheckRunsGreen(ctx, clID, latestPS)
+	ciSummary, err := s.db.AreCheckRunsGreen(ctx, clID, latestPS)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to check CI check runs: %v", err)
 	}
-	if !green {
-		if total == 0 {
+	if !ciSummary.Green {
+		if ciSummary.Total == 0 {
 			return status.Errorf(codes.FailedPrecondition,
 				"cannot submit CL %d: no CI check runs found for patchset %d (policy requires green check runs)",
 				clID, latestPS)
 		}
 		return status.Errorf(codes.FailedPrecondition,
 			"cannot submit CL %d: CI check runs not passing for patchset %d (%d pending/running, %d failed out of %d total)",
-			clID, latestPS, pending, failed, total)
+			clID, latestPS, ciSummary.Pending, ciSummary.Failed, ciSummary.Total)
 	}
 
 	if ownersEval != nil && len(ownersEval.Policy.CIRunners) > 0 {
@@ -239,7 +250,13 @@ func checkPresubmitFailures(evalRes hooks.EvaluationResult, clID int64) error {
 }
 
 // executePresubmitHooks evaluates .niebla/hooks.toml server presubmits.
-func (s *Server) executePresubmitHooks(ctx context.Context, clInfo *db.Changelist, touchedFiles []string, ownersEval *owners.EvaluationResult) error {
+func (s *Server) executePresubmitHooks(ctx context.Context, sCtx *SubmitContext) error {
+	if sCtx == nil || sCtx.CL == nil {
+		return nil
+	}
+	clInfo := sCtx.CL
+	touchedFiles := sCtx.TouchedFiles
+	ownersEval := sCtx.OwnersEval
 	fetchTree := func(th []byte) ([]tree.Entry, error) {
 		return s.getTreeEntries(ctx, th)
 	}
@@ -332,12 +349,12 @@ func (s *Server) performTrunkMerge(mCtx context.Context, cl *db.Changelist, head
 		return io.ReadAll(f)
 	}
 	writeBlob := func(data []byte) ([]byte, error) {
-		hashBytes, _, size, storagePath, err := s.casStorage.Put(bytes.NewReader(data))
+		blobInfo, err := s.casStorage.Put(bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
-		_ = s.db.InsertBlob(mCtx, hashBytes, size, storagePath)
-		return hashBytes, nil
+		_ = s.db.InsertBlob(mCtx, blobInfo.HashBytes, blobInfo.Size, blobInfo.StoragePath)
+		return blobInfo.HashBytes, nil
 	}
 	writeTree := func(entries []tree.Entry) ([]byte, error) {
 		treeHash := tree.ComputeTreeHash(entries)
@@ -378,16 +395,27 @@ func (s *Server) performTrunkMerge(mCtx context.Context, cl *db.Changelist, head
 	return mergedHash, nil
 }
 
+// ShelvedPatchsetResult contains the identifiers and metadata of a recorded or updated patchset.
+type ShelvedPatchsetResult struct {
+	CLID           int64
+	OldRootTree    []byte
+	PatchsetNumber int
+	ParentCLID     int64
+	Description    string
+}
+
 // recordShelvedPatchset creates or updates the shelved changelist record.
-func (s *Server) recordShelvedPatchset(ctx context.Context, req *nieblav1.ShelveCLRequest) (clID int64, oldRootTree []byte, patchsetNumber int, parentCLID int64, description string, err error) {
-	patchsetNumber = 1
-	parentCLID = req.ParentCl
-	description = req.Description
+func (s *Server) recordShelvedPatchset(ctx context.Context, req *nieblav1.ShelveCLRequest) (*ShelvedPatchsetResult, error) {
+	patchsetNumber := 1
+	parentCLID := req.ParentCl
+	description := req.Description
+	var oldRootTree []byte
+	clID := req.ClId
 
 	if req.ClId > 0 {
 		existingCL, getErr := s.db.GetCL(ctx, req.ClId)
 		if getErr != nil {
-			return 0, nil, 0, 0, "", status.Errorf(codes.NotFound, "changelist %d not found: %v", req.ClId, getErr)
+			return nil, status.Errorf(codes.NotFound, "changelist %d not found: %v", req.ClId, getErr)
 		}
 		clID = req.ClId
 		oldRootTree = existingCL.RootTreeHash
@@ -400,26 +428,38 @@ func (s *Server) recordShelvedPatchset(ctx context.Context, req *nieblav1.Shelve
 
 		nextPS, psErr := s.db.GetNextPatchsetNumber(ctx, clID)
 		if psErr != nil {
-			return 0, nil, 0, 0, "", status.Errorf(codes.Internal, "failed to get next patchset number: %v", psErr)
+			return nil, status.Errorf(codes.Internal, "failed to get next patchset number: %v", psErr)
 		}
 		patchsetNumber = nextPS
 
 		if err := s.db.CreatePatchset(ctx, clID, nextPS, req.RootTreeHash); err != nil {
-			return 0, nil, 0, 0, "", status.Errorf(codes.Internal, "failed to create patchset %d: %v", nextPS, err)
+			return nil, status.Errorf(codes.Internal, "failed to create patchset %d: %v", nextPS, err)
 		}
 		if err := s.db.UpdateCLRootTreeHash(ctx, clID, req.RootTreeHash); err != nil {
-			return 0, nil, 0, 0, "", status.Errorf(codes.Internal, "failed to update root tree hash: %v", err)
+			return nil, status.Errorf(codes.Internal, "failed to update root tree hash: %v", err)
 		}
 		_ = s.db.ClearCLRebaseConflict(ctx, clID)
-		return clID, oldRootTree, patchsetNumber, parentCLID, description, nil
+		return &ShelvedPatchsetResult{
+			CLID:           clID,
+			OldRootTree:    oldRootTree,
+			PatchsetNumber: patchsetNumber,
+			ParentCLID:     parentCLID,
+			Description:    description,
+		}, nil
 	}
 
 	newID, createErr := s.db.CreateShelvedCL(ctx, req.Author, req.Description, req.RootTreeHash, req.ParentCl)
 	if createErr != nil {
-		return 0, nil, 0, 0, "", status.Errorf(codes.Internal, "failed to shelve CL: %v", createErr)
+		return nil, status.Errorf(codes.Internal, "failed to shelve CL: %v", createErr)
 	}
 	_ = s.db.CreatePatchset(ctx, newID, 1, req.RootTreeHash)
-	return newID, nil, 1, parentCLID, description, nil
+	return &ShelvedPatchsetResult{
+		CLID:           newID,
+		OldRootTree:    nil,
+		PatchsetNumber: 1,
+		ParentCLID:     parentCLID,
+		Description:    description,
+	}, nil
 }
 
 // assignReviewersAndAgents auto-assigns human reviewers and AI review agents based on OWNERS.toml and agents.toml.

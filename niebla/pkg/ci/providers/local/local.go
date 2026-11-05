@@ -121,9 +121,9 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 
 	var logHashHex string
 	if p.cfg.CASStorage != nil && outputBuf.Len() > 0 {
-		hashBytes, _, _, _, err := p.cfg.CASStorage.Put(bytes.NewReader(outputBuf.Bytes()))
+		blobInfo, err := p.cfg.CASStorage.Put(bytes.NewReader(outputBuf.Bytes()))
 		if err == nil {
-			logHashHex = hex.EncodeToString(hashBytes)
+			logHashHex = blobInfo.HexHash
 		}
 	}
 

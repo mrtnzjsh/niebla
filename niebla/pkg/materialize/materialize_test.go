@@ -163,7 +163,7 @@ func TestMaterializeTree_HardlinkCASFastPath(t *testing.T) {
 		if _, err := bw.Write(content); err != nil {
 			t.Fatalf("bw.Write: %v", err)
 		}
-		if _, _, _, _, err := bw.Commit(); err != nil {
+		if _, err := bw.Commit(); err != nil {
 			t.Fatalf("bw.Commit: %v", err)
 		}
 	}

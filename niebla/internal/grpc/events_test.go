@@ -77,14 +77,14 @@ func setupEventsTestServer(t *testing.T) (*Server, *db.DB, *cas.Storage, *pkgeve
 
 func putTestBlob(t *testing.T, s *cas.Storage, database *db.DB, content []byte) ([]byte, int64) {
 	t.Helper()
-	h, _, size, path, err := s.Put(bytes.NewReader(content))
+	b, err := s.Put(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("cas Put: %v", err)
 	}
-	if err := database.InsertBlob(context.Background(), h, size, path); err != nil {
+	if err := database.InsertBlob(context.Background(), b.HashBytes, b.Size, b.StoragePath); err != nil {
 		t.Fatalf("InsertBlob: %v", err)
 	}
-	return h, size
+	return b.HashBytes, b.Size
 }
 
 func putTestTree(t *testing.T, database *db.DB, entries []tree.Entry) []byte {

@@ -40,21 +40,21 @@ func (s *Server) CascadeStackRebase(
 	for _, child := range children {
 		oldChildTree := child.RootTreeHash
 
-		mergedHash, nextPS, conflicts, mergeErr := s.rebaseChild(ctx, parentCLID, oldParentTree, newParentTree, child)
-		if mergeErr != nil || len(conflicts) > 0 {
+		rebaseRes, mergeErr := s.rebaseChild(ctx, parentCLID, oldParentTree, newParentTree, child)
+		if mergeErr != nil || (rebaseRes != nil && len(rebaseRes.Conflicts) > 0) {
 			// Halt recursion down this branch until author resolves the conflict
 			continue
 		}
 
 		rebased = append(rebased, child.CLID)
-		log.Printf("[CascadeRebase] Successfully auto-rebased CL %d (Patchset %d) onto parent %d", child.CLID, nextPS, parentCLID)
+		log.Printf("[CascadeRebase] Successfully auto-rebased CL %d (Patchset %d) onto parent %d", child.CLID, rebaseRes.PatchsetNumber, parentCLID)
 
 		// Recurse down to child's children under branch lock
 		var unlock func()
 		if s.rebaseQueue != nil {
 			unlock = s.rebaseQueue.locks.Lock(child.CLID)
 		}
-		downstream, err := s.CascadeStackRebase(ctx, child.CLID, oldChildTree, mergedHash)
+		downstream, err := s.CascadeStackRebase(ctx, child.CLID, oldChildTree, rebaseRes.MergedTreeHash)
 		if unlock != nil {
 			unlock()
 		}
@@ -66,13 +66,20 @@ func (s *Server) CascadeStackRebase(
 	return rebased, nil
 }
 
+// RebaseResult contains the outcome of a 3-way tree merge for a child CL.
+type RebaseResult struct {
+	MergedTreeHash []byte
+	PatchsetNumber int
+	Conflicts      []tree.Conflict
+}
+
 // rebaseChild executes a 3-way Merkle tree merge for a single child CL against updated parent trees.
 func (s *Server) rebaseChild(
 	ctx context.Context,
 	parentCLID int64,
 	oldParentTree, newParentTree []byte,
 	child db.Changelist,
-) ([]byte, int, []tree.Conflict, error) {
+) (*RebaseResult, error) {
 	fetchTree := func(treeHash []byte) ([]tree.Entry, error) {
 		return s.getTreeEntries(ctx, treeHash)
 	}
@@ -87,12 +94,12 @@ func (s *Server) rebaseChild(
 	}
 
 	writeBlob := func(data []byte) ([]byte, error) {
-		hashBytes, _, size, storagePath, err := s.casStorage.Put(bytes.NewReader(data))
+		blobInfo, err := s.casStorage.Put(bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
-		_ = s.db.InsertBlob(ctx, hashBytes, size, storagePath)
-		return hashBytes, nil
+		_ = s.db.InsertBlob(ctx, blobInfo.HashBytes, blobInfo.Size, blobInfo.StoragePath)
+		return blobInfo.HashBytes, nil
 	}
 
 	writeTree := func(entries []tree.Entry) ([]byte, error) {
@@ -152,24 +159,28 @@ func (s *Server) rebaseChild(
 			))
 		}
 
-		return nil, 0, conflicts, mergeErr
+		return &RebaseResult{
+			MergedTreeHash: nil,
+			PatchsetNumber: 0,
+			Conflicts:      conflicts,
+		}, mergeErr
 	}
 
 	// Clean merge: create automated patchset
 	nextPS, err := s.db.GetNextPatchsetNumber(ctx, child.CLID)
 	if err != nil {
 		log.Printf("[CascadeRebase] failed to get next patchset number for CL %d: %v", child.CLID, err)
-		return nil, 0, nil, err
+		return nil, err
 	}
 
 	if err := s.db.CreateAutoRebasePatchset(ctx, child.CLID, nextPS, mergedHash); err != nil {
 		log.Printf("[CascadeRebase] failed to record auto-rebase patchset for CL %d: %v", child.CLID, err)
-		return nil, 0, nil, err
+		return nil, err
 	}
 
 	if err := s.db.UpdateCLRootTreeHash(ctx, child.CLID, mergedHash); err != nil {
 		log.Printf("[CascadeRebase] failed to update root tree hash for CL %d: %v", child.CLID, err)
-		return nil, 0, nil, err
+		return nil, err
 	}
 
 	if parentPSNum, err := s.db.GetNextPatchsetNumber(ctx, parentCLID); err == nil && parentPSNum > 1 {
@@ -193,7 +204,11 @@ func (s *Server) rebaseChild(
 		))
 	}
 
-	return mergedHash, nextPS, nil, nil
+	return &RebaseResult{
+		MergedTreeHash: mergedHash,
+		PatchsetNumber: nextPS,
+		Conflicts:      nil,
+	}, nil
 }
 
 // SyncThrough ensures a child CL is immediately re-parented onto its parent's latest root tree.
@@ -236,7 +251,7 @@ func (s *Server) SyncThrough(ctx context.Context, childCLID int64) error {
 		return nil
 	}
 
-	_, _, _, err = s.rebaseChild(ctx, parentCLID, oldParentTree, newParentTree, *child)
+	_, err = s.rebaseChild(ctx, parentCLID, oldParentTree, newParentTree, *child)
 	if errors.Is(err, tree.ErrMergeConflict) {
 		return nil
 	}

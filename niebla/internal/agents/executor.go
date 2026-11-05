@@ -118,10 +118,10 @@ func (e *Executor) saveExecutionLogs(execCtx context.Context, req ExecutionReque
 	if !req.Agent.CaptureLogs || len(output) == 0 || e.casStorage == nil {
 		return nil
 	}
-	hashBytes, _, size, storagePath, pErr := e.casStorage.Put(bytes.NewReader(output))
+	blobInfo, pErr := e.casStorage.Put(bytes.NewReader(output))
 	if pErr == nil {
-		_ = e.db.InsertBlob(execCtx, hashBytes, size, storagePath)
-		return hashBytes
+		_ = e.db.InsertBlob(execCtx, blobInfo.HashBytes, blobInfo.Size, blobInfo.StoragePath)
+		return blobInfo.HashBytes
 	}
 	return nil
 }

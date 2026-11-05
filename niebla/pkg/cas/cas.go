@@ -216,11 +216,19 @@ func (w *BlobWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// BlobInfo encapsulates metadata and relative storage details of a committed CAS blob.
+type BlobInfo struct {
+	HashBytes   []byte
+	HexHash     string
+	Size        int64
+	StoragePath string
+}
+
 // Commit finalizes the blob, atomically moves it to its hash-partitioned path,
-// and returns the raw SHA-256 hash bytes, hex hash string, total byte size, and portable relative storage key.
-func (w *BlobWriter) Commit() (hashBytes []byte, hexHash string, size int64, storagePath string, err error) {
+// and returns the committed blob metadata and portable relative storage key.
+func (w *BlobWriter) Commit() (*BlobInfo, error) {
 	if w.closed {
-		return nil, "", 0, "", errors.New("BlobWriter is already closed")
+		return nil, errors.New("BlobWriter is already closed")
 	}
 	w.closed = true
 
@@ -228,38 +236,43 @@ func (w *BlobWriter) Commit() (hashBytes []byte, hexHash string, size int64, sto
 	if syncErr := w.tmpFile.Sync(); syncErr != nil {
 		_ = w.tmpFile.Close()
 		_ = os.Remove(w.tmpFile.Name())
-		return nil, "", 0, "", fmt.Errorf("failed to sync temp blob: %w", syncErr)
+		return nil, fmt.Errorf("failed to sync temp blob: %w", syncErr)
 	}
 	tmpName := w.tmpFile.Name()
 	if closeErr := w.tmpFile.Close(); closeErr != nil {
 		_ = os.Remove(tmpName)
-		return nil, "", 0, "", fmt.Errorf("failed to close temp blob: %w", closeErr)
+		return nil, fmt.Errorf("failed to close temp blob: %w", closeErr)
 	}
 
-	hashBytes = w.hashState.Sum(nil)
-	hexHash = hex.EncodeToString(hashBytes)
-	size = w.bytesWritten
+	hashBytes := w.hashState.Sum(nil)
+	hexHash := hex.EncodeToString(hashBytes)
+	size := w.bytesWritten
 
 	relKey, err := RelativeBlobPath(hexHash)
 	if err != nil {
 		_ = os.Remove(tmpName)
-		return nil, "", 0, "", err
+		return nil, err
 	}
 	targetPath := w.storage.ResolveStoragePath(relKey)
 
 	targetDir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		_ = os.Remove(tmpName)
-		return nil, "", 0, "", fmt.Errorf("failed to create blob directory %s: %w", targetDir, err)
+		return nil, fmt.Errorf("failed to create blob directory %s: %w", targetDir, err)
 	}
 
 	// Atomic rename within the same filesystem
 	if err := os.Rename(tmpName, targetPath); err != nil {
 		_ = os.Remove(tmpName)
-		return nil, "", 0, "", fmt.Errorf("failed to atomically rename blob to %s: %w", targetPath, err)
+		return nil, fmt.Errorf("failed to atomically rename blob to %s: %w", targetPath, err)
 	}
 
-	return hashBytes, hexHash, size, relKey, nil
+	return &BlobInfo{
+		HashBytes:   hashBytes,
+		HexHash:     hexHash,
+		Size:        size,
+		StoragePath: relKey,
+	}, nil
 }
 
 // Abort cancels the write and cleans up the temporary file.
@@ -274,10 +287,10 @@ func (w *BlobWriter) Abort() {
 }
 
 // Put writes an entire reader's content into CAS storage atomically.
-func (s *Storage) Put(reader io.Reader) (hashBytes []byte, hexHash string, size int64, storagePath string, err error) {
+func (s *Storage) Put(reader io.Reader) (*BlobInfo, error) {
 	writer, err := s.BeginWriter()
 	if err != nil {
-		return nil, "", 0, "", err
+		return nil, err
 	}
 	defer func() {
 		if err != nil {
@@ -287,7 +300,7 @@ func (s *Storage) Put(reader io.Reader) (hashBytes []byte, hexHash string, size 
 
 	buf := make([]byte, DefaultChunkSize)
 	if _, err = io.CopyBuffer(writer, reader, buf); err != nil {
-		return nil, "", 0, "", fmt.Errorf("failed to write blob content: %w", err)
+		return nil, fmt.Errorf("failed to write blob content: %w", err)
 	}
 
 	return writer.Commit()

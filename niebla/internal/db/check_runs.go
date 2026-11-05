@@ -103,20 +103,29 @@ func (d *DB) ListCheckRunsForPatchset(ctx context.Context, clID int64, patchsetN
 	return runs, nil
 }
 
+// CheckRunsSummary contains aggregate evaluation metrics for a set of CI check runs.
+type CheckRunsSummary struct {
+	Green   bool
+	Total   int
+	Pending int
+	Failed  int
+}
+
 // EvaluateCheckRuns aggregates status counts and returns whether all check runs passed.
-func EvaluateCheckRuns(runs []CheckRun) (green bool, total int, pending int, failed int) {
-	total = len(runs)
+func EvaluateCheckRuns(runs []CheckRun) CheckRunsSummary {
+	var summary CheckRunsSummary
+	summary.Total = len(runs)
 	for _, run := range runs {
 		status := types.CheckRunStatus(run.Status).Canonical()
 		switch status {
 		case types.CheckRunStatusQueued, types.CheckRunStatusPending, types.CheckRunStatusRunning:
-			pending++
+			summary.Pending++
 		case types.CheckRunStatusFailed, types.CheckRunStatusCanceled:
-			failed++
+			summary.Failed++
 		}
 	}
-	green = (total > 0) && (pending == 0) && (failed == 0)
-	return green, total, pending, failed
+	summary.Green = (summary.Total > 0) && (summary.Pending == 0) && (summary.Failed == 0)
+	return summary
 }
 
 // FindMissingRequiredRunners returns runner names that are required by policy but not green.
@@ -153,11 +162,10 @@ func (d *DB) GetLatestPatchsetNumber(ctx context.Context, clID int64) (int, erro
 }
 
 // AreCheckRunsGreen determines if all check runs for a CL patchset have completed successfully.
-func (d *DB) AreCheckRunsGreen(ctx context.Context, clID int64, patchsetNumber int) (green bool, total int, pending int, failed int, err error) {
+func (d *DB) AreCheckRunsGreen(ctx context.Context, clID int64, patchsetNumber int) (CheckRunsSummary, error) {
 	runs, err := d.ListCheckRunsForPatchset(ctx, clID, patchsetNumber)
 	if err != nil {
-		return false, 0, 0, 0, err
+		return CheckRunsSummary{}, err
 	}
-	green, total, pending, failed = EvaluateCheckRuns(runs)
-	return green, total, pending, failed, nil
+	return EvaluateCheckRuns(runs), nil
 }

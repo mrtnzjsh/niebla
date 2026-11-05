@@ -78,6 +78,13 @@ func resolveWorkspaceMountDir(mountDir, name string) (string, error) {
 	return resolved, nil
 }
 
+// WorkspaceFSInfo contains connection and process details for a mounted workspace.
+type WorkspaceFSInfo struct {
+	DaemonPID  int
+	SocketPath string
+	ScratchDir string
+}
+
 func setupWorkspaceFS(
 	ctx context.Context,
 	cmd *cobra.Command,
@@ -85,19 +92,23 @@ func setupWorkspaceFS(
 	name, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr string,
 	client nieblav1.NieblaServiceClient,
 	rootTreeHash []byte,
-) (daemonPID int, socketPath string, finalScratchDir string, err error) {
+) (*WorkspaceFSInfo, error) {
 	if noFuse {
-		finalScratchDir = resolvedMountDir
 		fetchTree := makeTreeFetcher(ctx, client)
 		fetchBlob := makeBlobFetcher(client, append([]string{cacheDir}, defaultBlobCacheDirs()...))
 		if _, err := materialize.MaterializeTree(ctx, rootTreeHash, resolvedMountDir, fetchTree, fetchBlob, materialize.Options{}); err != nil {
-			return 0, "", "", fmt.Errorf("failed to materialize workspace %q in --no-fuse mode: %w", name, err)
+			return nil, fmt.Errorf("failed to materialize workspace %q in --no-fuse mode: %w", name, err)
 		}
-		return 0, "", finalScratchDir, nil
+		return &WorkspaceFSInfo{
+			DaemonPID:  0,
+			SocketPath: "",
+			ScratchDir: resolvedMountDir,
+		}, nil
 	}
 
 	checkDevFuse()
-	socketPath = filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
+	socketPath := filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
+	var daemonPID int
 	nieblafsBin, err := findNieblafsBinary()
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: nieblafs binary not found in PATH or next to niebla; FUSE daemon not started.\n")
@@ -109,7 +120,11 @@ func setupWorkspaceFS(
 			daemonPID = pid
 		}
 	}
-	return daemonPID, socketPath, scratchDir, nil
+	return &WorkspaceFSInfo{
+		DaemonPID:  daemonPID,
+		SocketPath: socketPath,
+		ScratchDir: scratchDir,
+	}, nil
 }
 
 func executeWorkspaceCreate(
@@ -163,7 +178,7 @@ func executeWorkspaceCreate(
 		return err
 	}
 
-	daemonPID, socketPath, finalScratchDir, err := setupWorkspaceFS(
+	fsInfo, err := setupWorkspaceFS(
 		ctx, cmd, noFuse, name, resolvedMountDir, scratchDir, cacheDir, rootTreeHashHex, serverAddr, client, resp.RootTreeHash,
 	)
 	if err != nil {
@@ -176,18 +191,18 @@ func executeWorkspaceCreate(
 		BaseCL:       resp.BaseCl,
 		RootTreeHash: rootTreeHashHex,
 		MountDir:     resolvedMountDir,
-		ScratchDir:   finalScratchDir,
-		PID:          daemonPID,
+		ScratchDir:   fsInfo.ScratchDir,
+		PID:          fsInfo.DaemonPID,
 		NoFuse:       noFuse,
-		SocketPath:   socketPath,
+		SocketPath:   fsInfo.SocketPath,
 	}
 
 	if err := mgr.Save(wsConfig); err != nil {
 		return fmt.Errorf("failed to write workspace metadata: %w", err)
 	}
 
-	if daemonPID > 0 {
-		pollMountActive(cmd.OutOrStdout(), daemonPID, resolvedMountDir, socketPath, finalScratchDir)
+	if fsInfo.DaemonPID > 0 {
+		pollMountActive(cmd.OutOrStdout(), fsInfo.DaemonPID, resolvedMountDir, fsInfo.SocketPath, fsInfo.ScratchDir)
 	}
 
 	go func() {
@@ -210,11 +225,11 @@ func executeWorkspaceCreate(
 	fmt.Fprintf(cmd.OutOrStdout(), "  Base CL   : %d\n", resp.BaseCl)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Tree Hash : %s\n", rootTreeHashHex)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Mount Dir : %s\n", resolvedMountDir)
-	fmt.Fprintf(cmd.OutOrStdout(), "  Scratch   : %s\n", finalScratchDir)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Scratch   : %s\n", fsInfo.ScratchDir)
 	if noFuse {
 		fmt.Fprintf(cmd.OutOrStdout(), "  Mode      : NO-FUSE (direct materialization)\n")
-	} else if daemonPID > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Daemon PID: %d\n", daemonPID)
+	} else if fsInfo.DaemonPID > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Daemon PID: %d\n", fsInfo.DaemonPID)
 	}
 
 	return nil

@@ -188,13 +188,12 @@ func (h *CIHandler) resolveCLAndPatchset(r *http.Request) (int64, int, error) {
 	return clID, patchsetNum, nil
 }
 
-func evaluateDemoCheckRuns(clID int64, patchsetNum int) (runs []db.CheckRun, green bool, total, pending, failed int) {
+func evaluateDemoCheckRuns(clID int64, patchsetNum int) ([]db.CheckRun, db.CheckRunsSummary) {
 	demoCheckRunsMu.RLock()
-	runs = demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, patchsetNum)]
+	runs := demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, patchsetNum)]
 	demoCheckRunsMu.RUnlock()
 
-	green, total, pending, failed = db.EvaluateCheckRuns(runs)
-	return
+	return runs, db.EvaluateCheckRuns(runs)
 }
 
 // HandleGetCheckRuns lists check runs and calculates aggregate green status for a patchset.
@@ -208,19 +207,15 @@ func (h *CIHandler) HandleGetCheckRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var runs []db.CheckRun
-	var green bool
-	var total, pending, failed int
+	var summary db.CheckRunsSummary
 
 	if h.db != nil {
-		g, tot, pend, fail, err := h.db.AreCheckRunsGreen(r.Context(), clID, patchsetNum)
+		s, err := h.db.AreCheckRunsGreen(r.Context(), clID, patchsetNum)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to get check runs: %v", err), http.StatusInternalServerError)
 			return
 		}
-		green = g
-		total = tot
-		pending = pend
-		failed = fail
+		summary = s
 
 		rList, err := h.db.ListCheckRunsForPatchset(r.Context(), clID, patchsetNum)
 		if err != nil {
@@ -229,7 +224,7 @@ func (h *CIHandler) HandleGetCheckRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		runs = rList
 	} else {
-		runs, green, total, pending, failed = evaluateDemoCheckRuns(clID, patchsetNum)
+		runs, summary = evaluateDemoCheckRuns(clID, patchsetNum)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -237,10 +232,10 @@ func (h *CIHandler) HandleGetCheckRuns(w http.ResponseWriter, r *http.Request) {
 		"status":          "ok",
 		"cl_id":           clID,
 		"patchset_number": patchsetNum,
-		"green":           green,
-		"total":           total,
-		"pending":         pending,
-		"failed":          failed,
+		"green":           summary.Green,
+		"total":           summary.Total,
+		"pending":         summary.Pending,
+		"failed":          summary.Failed,
 		"check_runs":      runs,
 	})
 }

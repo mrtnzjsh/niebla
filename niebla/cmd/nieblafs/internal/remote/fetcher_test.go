@@ -71,7 +71,7 @@ func TestBlobFetcher_EnsureBlob_FastPathExisting(t *testing.T) {
 	}
 
 	content := []byte("already existing blob content")
-	_, hexHash, _, _, err := storage.Put(bytes.NewReader(content))
+	blobInfo, err := storage.Put(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("failed to put blob: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestBlobFetcher_EnsureBlob_FastPathExisting(t *testing.T) {
 	mock := &mockRemoteClient{}
 	fetcher := NewBlobFetcher(storage, mock)
 
-	path, err := fetcher.EnsureBlob(context.Background(), hexHash)
+	path, err := fetcher.EnsureBlob(context.Background(), blobInfo.HexHash)
 	if err != nil {
 		t.Fatalf("EnsureBlob failed: %v", err)
 	}

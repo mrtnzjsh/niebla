@@ -44,16 +44,16 @@ func putHierarchicalTree(t *testing.T, ctx context.Context, database *db.DB, cas
 	persistNode = func(n *dirNode) []byte {
 		var entries []tree.Entry
 		for fName, data := range n.files {
-			hashBytes, _, size, storagePath, err := casStorage.Put(bytes.NewReader(data))
+			blobInfo, err := casStorage.Put(bytes.NewReader(data))
 			if err != nil {
 				t.Fatalf("cas.Put failed: %v", err)
 			}
-			_ = database.InsertBlob(ctx, hashBytes, size, storagePath)
+			_ = database.InsertBlob(ctx, blobInfo.HashBytes, blobInfo.Size, blobInfo.StoragePath)
 			entries = append(entries, tree.Entry{
 				Name:       fName,
 				Mode:       0100644,
-				Size:       uint64(size),
-				BlobSHA256: hashBytes,
+				Size:       uint64(blobInfo.Size),
+				BlobSHA256: blobInfo.HashBytes,
 			})
 		}
 		for subName, subNode := range n.subdirs {

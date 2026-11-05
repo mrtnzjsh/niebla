@@ -184,11 +184,11 @@ func (h *CommentsHandler) applySuggestionPatchset(ctx context.Context, clID int6
 	}
 
 	if h.cas != nil {
-		blobHash, _, blobSize, storagePath, err := h.cas.Put(bytes.NewReader([]byte(patchedContent)))
+		blobInfo, err := h.cas.Put(bytes.NewReader([]byte(patchedContent)))
 		if err != nil {
 			return 0, fmt.Errorf("failed to store patched blob in CAS: %w", err)
 		}
-		_ = h.db.InsertBlob(ctx, blobHash, blobSize, storagePath)
+		_ = h.db.InsertBlob(ctx, blobInfo.HashBytes, blobInfo.Size, blobInfo.StoragePath)
 
 		fetchTree := func(th []byte) ([]tree.Entry, error) {
 			return h.db.GetTreeEntries(ctx, th)
@@ -197,7 +197,7 @@ func (h *CommentsHandler) applySuggestionPatchset(ctx context.Context, clID int6
 			return h.db.InsertTreeNodes(ctx, th, entries)
 		}
 
-		newRootHash, err := tree.UpdateFileEntry(currentRootTree, targetComment.FilePath, blobHash, uint64(blobSize), fetchTree, saveTree)
+		newRootHash, err := tree.UpdateFileEntry(currentRootTree, targetComment.FilePath, blobInfo.HashBytes, uint64(blobInfo.Size), fetchTree, saveTree)
 		if err != nil {
 			return 0, fmt.Errorf("failed to update Merkle tree: %w", err)
 		}

@@ -263,26 +263,35 @@ func parentDirectory(dir string) string {
 	return parent
 }
 
-func matchPerFileApprovers(cfg *Config, fileName string) (matched bool, stopParent bool, rule string, approvers []string) {
+// PerFileMatch represents the result of evaluating per-file approver patterns.
+type PerFileMatch struct {
+	Matched    bool
+	StopParent bool
+	Rule       string
+	Approvers  []string
+}
+
+func matchPerFileApprovers(cfg *Config, fileName string) PerFileMatch {
 	patterns := make([]string, 0, len(cfg.PerFile))
 	for pattern := range cfg.PerFile {
 		patterns = append(patterns, pattern)
 	}
 	sort.Strings(patterns)
 
+	var res PerFileMatch
 	for _, pattern := range patterns {
 		owners := cfg.PerFile[pattern]
 		if ok, err := path.Match(pattern, fileName); err == nil && ok {
-			matched = true
-			rule = fmt.Sprintf("per_file: %s", pattern)
-			approvers = append(approvers, owners...)
+			res.Matched = true
+			res.Rule = fmt.Sprintf("per_file: %s", pattern)
+			res.Approvers = append(res.Approvers, owners...)
 			if pfRule, ok := cfg.PerFileRules[pattern]; ok && pfRule.SetNoParent {
-				stopParent = true
+				res.StopParent = true
 			}
 			break
 		}
 	}
-	return
+	return res
 }
 
 // resolvePath traverses up from the file's directory to repo root collecting approvers.
@@ -311,17 +320,17 @@ func (e *Evaluator) resolvePath(cleanPath string) (*Requirement, error) {
 				governingDir = dir
 			}
 
-			matched, pfStop, pfRule, pfApprovers := matchPerFileApprovers(cfg, fileName)
-			if matched {
-				rule = pfRule
-				accumulatedApprovers = append(accumulatedApprovers, pfApprovers...)
+			pf := matchPerFileApprovers(cfg, fileName)
+			if pf.Matched {
+				rule = pf.Rule
+				accumulatedApprovers = append(accumulatedApprovers, pf.Approvers...)
 			}
 
-			if (!matched || len(accumulatedApprovers) == 0) && len(cfg.Approvers) > 0 {
+			if (!pf.Matched || len(accumulatedApprovers) == 0) && len(cfg.Approvers) > 0 {
 				accumulatedApprovers = append(accumulatedApprovers, cfg.Approvers...)
 			}
 
-			if pfStop || cfg.SetNoParent {
+			if pf.StopParent || cfg.SetNoParent {
 				break
 			}
 		}

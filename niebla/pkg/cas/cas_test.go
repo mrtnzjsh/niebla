@@ -26,28 +26,28 @@ func TestStoragePartitioningAndWrite(t *testing.T) {
 	expectedHex := hex.EncodeToString(expectedHash[:])
 
 	// 1. Test Put
-	hashBytes, hexHash, size, storagePath, err := storage.Put(bytes.NewReader(testData))
+	blobInfo, err := storage.Put(bytes.NewReader(testData))
 	if err != nil {
 		t.Fatalf("Put failed: %v", err)
 	}
 
-	if hexHash != expectedHex {
-		t.Errorf("expected hash %s, got %s", expectedHex, hexHash)
+	if blobInfo.HexHash != expectedHex {
+		t.Errorf("expected hash %s, got %s", expectedHex, blobInfo.HexHash)
 	}
-	if !bytes.Equal(hashBytes, expectedHash[:]) {
+	if !bytes.Equal(blobInfo.HashBytes, expectedHash[:]) {
 		t.Errorf("hash bytes mismatch")
 	}
-	if size != int64(len(testData)) {
-		t.Errorf("expected size %d, got %d", len(testData), size)
+	if blobInfo.Size != int64(len(testData)) {
+		t.Errorf("expected size %d, got %d", len(testData), blobInfo.Size)
 	}
 
 	expectedRelPath := filepath.ToSlash(filepath.Join(expectedHex[0:2], expectedHex[2:4], expectedHex))
-	if storagePath != expectedRelPath {
-		t.Errorf("expected portable relative key %s, got %s", expectedRelPath, storagePath)
+	if blobInfo.StoragePath != expectedRelPath {
+		t.Errorf("expected portable relative key %s, got %s", expectedRelPath, blobInfo.StoragePath)
 	}
 
 	expectedAbsPath := filepath.Join(tmpDir, filepath.FromSlash(expectedRelPath))
-	if resolved := storage.ResolveStoragePath(storagePath); resolved != expectedAbsPath {
+	if resolved := storage.ResolveStoragePath(blobInfo.StoragePath); resolved != expectedAbsPath {
 		t.Errorf("expected resolved path %s, got %s", expectedAbsPath, resolved)
 	}
 
@@ -127,12 +127,12 @@ func TestStorageRelocationWithRelativeKeys(t *testing.T) {
 	}
 
 	payload := []byte("portable relative CAS storage key verification")
-	hashBytes, _, _, relKey, err := storageA.Put(bytes.NewReader(payload))
+	blobInfo, err := storageA.Put(bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("Put failed: %v", err)
 	}
-	if filepath.IsAbs(relKey) {
-		t.Fatalf("expected relative storage key, got absolute path %q", relKey)
+	if filepath.IsAbs(blobInfo.StoragePath) {
+		t.Fatalf("expected relative storage key, got absolute path %q", blobInfo.StoragePath)
 	}
 
 	// Simulate relocating the entire CAS directory to a new mount/host path
@@ -147,12 +147,12 @@ func TestStorageRelocationWithRelativeKeys(t *testing.T) {
 		t.Fatalf("NewStorage(dirB) failed: %v", err)
 	}
 
-	if !storageB.Exists(hashBytes) {
+	if !storageB.Exists(blobInfo.HashBytes) {
 		t.Fatalf("expected blob to exist after relocating baseDir")
 	}
 
 	var out []byte
-	if err := storageB.StreamBlob(hashBytes, 0, 0, 16, func(chunk []byte) error {
+	if err := storageB.StreamBlob(blobInfo.HashBytes, 0, 0, 16, func(chunk []byte) error {
 		out = append(out, chunk...)
 		return nil
 	}); err != nil {

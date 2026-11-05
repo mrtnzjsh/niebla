@@ -31,7 +31,7 @@ func TestRawBlobHandler(t *testing.T) {
 	}
 
 	content := []byte("hello world from critique raw blob test")
-	hashBytes, hashHex, _, _, err := storage.Put(bytes.NewReader(content))
+	blobInfo, err := storage.Put(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("failed to put blob in CAS: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestRawBlobHandler(t *testing.T) {
 	rawHandler := NewRawHandler(nil, storage)
 
 	// 1. Success case
-	req := httptest.NewRequest("GET", "/cl/1/raw?hash="+hashHex, nil)
+	req := httptest.NewRequest("GET", "/cl/1/raw?hash="+blobInfo.HexHash, nil)
 	rec := httptest.NewRecorder()
 	rawHandler.ServeRawBlob(rec, req)
 
@@ -67,7 +67,7 @@ func TestRawBlobHandler(t *testing.T) {
 		t.Errorf("expected status 404 for missing blob, got %d", rec.Code)
 	}
 
-	_ = hashBytes
+	_ = blobInfo.HashBytes
 }
 
 func TestCIRunnersBlock_RenderingInCLView(t *testing.T) {

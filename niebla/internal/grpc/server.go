@@ -268,20 +268,20 @@ func (s *Server) UploadBlob(stream nieblav1.NieblaService_UploadBlobServer) erro
 		}
 	}
 
-	hashBytes, _, size, storagePath, err := writer.Commit()
+	blobInfo, err := writer.Commit()
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to commit blob to storage: %v", err)
 	}
 
 	// Register blob record in PostgreSQL
 	ctx := stream.Context()
-	if err := s.db.InsertBlob(ctx, hashBytes, size, storagePath); err != nil {
+	if err := s.db.InsertBlob(ctx, blobInfo.HashBytes, blobInfo.Size, blobInfo.StoragePath); err != nil {
 		return status.Errorf(codes.Internal, "failed to record blob in database: %v", err)
 	}
 
 	return stream.SendAndClose(&nieblav1.UploadBlobResponse{
-		Sha256: hashBytes,
-		Size:   uint64(size),
+		Sha256: blobInfo.HashBytes,
+		Size:   uint64(blobInfo.Size),
 	})
 }
 
@@ -320,20 +320,20 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 		return nil, status.Error(codes.InvalidArgument, "root_tree_hash cannot be empty")
 	}
 
-	clID, oldRootTree, patchsetNumber, parentCLID, description, err := s.recordShelvedPatchset(ctx, req)
+	shelved, err := s.recordShelvedPatchset(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	s.assignReviewersAndAgents(ctx, clID, parentCLID, patchsetNumber, req.RootTreeHash, req.Reviewers)
+	s.assignReviewersAndAgents(ctx, shelved.CLID, shelved.ParentCLID, shelved.PatchsetNumber, req.RootTreeHash, req.Reviewers)
 
 	// Offload cascading rebase to background queue for sub-100ms shelve response
-	if len(oldRootTree) > 0 && !bytes.Equal(oldRootTree, req.RootTreeHash) {
+	if len(shelved.OldRootTree) > 0 && !bytes.Equal(shelved.OldRootTree, req.RootTreeHash) {
 		if s.rebaseQueue != nil {
-			s.rebaseQueue.Enqueue(clID, oldRootTree, req.RootTreeHash)
+			s.rebaseQueue.Enqueue(shelved.CLID, shelved.OldRootTree, req.RootTreeHash)
 		} else {
 			go func() {
-				_, _ = s.CascadeStackRebase(context.Background(), clID, oldRootTree, req.RootTreeHash)
+				_, _ = s.CascadeStackRebase(context.Background(), shelved.CLID, shelved.OldRootTree, req.RootTreeHash)
 			}()
 		}
 	}
@@ -342,20 +342,20 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 		s.emitter.Emit(ctx, pkgevents.New(
 			pkgevents.TypeCLCreated,
 			"niebla-server",
-			fmt.Sprintf("cl/%d", clID),
+			fmt.Sprintf("cl/%d", shelved.CLID),
 			pkgevents.CLCreatedPayload{
-				CLID:           fmt.Sprintf("%d", clID),
+				CLID:           fmt.Sprintf("%d", shelved.CLID),
 				Author:         req.Author,
-				Description:    description,
+				Description:    shelved.Description,
 				RootTreeHash:   hex.EncodeToString(req.RootTreeHash),
-				ParentCLID:     fmt.Sprintf("%d", parentCLID),
-				PatchsetNumber: patchsetNumber,
+				ParentCLID:     fmt.Sprintf("%d", shelved.ParentCLID),
+				PatchsetNumber: shelved.PatchsetNumber,
 				Reviewers:      req.Reviewers,
 			},
 		))
 	}
 
-	return &nieblav1.ShelveCLResponse{ClId: clID}, nil
+	return &nieblav1.ShelveCLResponse{ClId: shelved.CLID}, nil
 }
 
 // SubmitCL atomically transitions a changelist to 'submitted' in a single transaction.
@@ -365,11 +365,11 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 	}
 
 	if !req.Force {
-		clInfo, touchedFiles, ownersEval, err := s.validateSubmitPreconditions(ctx, req.ClId)
+		sCtx, err := s.validateSubmitPreconditions(ctx, req.ClId)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.executePresubmitHooks(ctx, clInfo, touchedFiles, ownersEval); err != nil {
+		if err := s.executePresubmitHooks(ctx, sCtx); err != nil {
 			return nil, err
 		}
 	}

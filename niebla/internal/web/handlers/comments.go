@@ -336,9 +336,27 @@ func (h *CommentsHandler) HandleCreateComment(w http.ResponseWriter, r *http.Req
 	_ = component.Render(h.renderContext(r.Context()), w)
 }
 
-func discardDemoDraftComment(commentID int64, author string) (clID int64, psNum int, filePath string, line, endLine int, side string, comments []db.Comment, found bool) {
+// DiscardDraftResult describes a discarded draft comment's location and updated thread comments.
+type DiscardDraftResult struct {
+	CLID           int64
+	PatchsetNumber int
+	FilePath       string
+	LineNumber     int
+	EndLineNumber  int
+	Side           string
+	Comments       []db.Comment
+	Found          bool
+}
+
+func discardDemoDraftComment(commentID int64, author string) DiscardDraftResult {
 	demoCommentsMu.Lock()
 	defer demoCommentsMu.Unlock()
+
+	var clID int64
+	var psNum int
+	var filePath string
+	var line, endLine int
+	var side string
 
 	var matchedKey string
 	for k, list := range demoCommentsStore {
@@ -363,10 +381,19 @@ func discardDemoDraftComment(commentID int64, author string) (clID int64, psNum 
 		}
 	}
 	if matchedKey != "" {
-		comments = filterVisibleComments(demoCommentsStore[matchedKey], author)
-		return clID, psNum, filePath, line, endLine, side, comments, true
+		comments := filterVisibleComments(demoCommentsStore[matchedKey], author)
+		return DiscardDraftResult{
+			CLID:           clID,
+			PatchsetNumber: psNum,
+			FilePath:       filePath,
+			LineNumber:     line,
+			EndLineNumber:  endLine,
+			Side:           side,
+			Comments:       comments,
+			Found:          true,
+		}
 	}
-	return 0, 0, "", 0, 0, "", nil, false
+	return DiscardDraftResult{}
 }
 
 // HandleDiscardComment deletes an unposted draft comment.
@@ -430,12 +457,18 @@ func (h *CommentsHandler) HandleDiscardComment(w http.ResponseWriter, r *http.Re
 		}
 		comments = filterVisibleComments(rawComments, author)
 	} else {
-		var found bool
-		clID, patchsetNumber, filePath, line, endLine, side, comments, found = discardDemoDraftComment(commentID, author)
-		if !found {
+		res := discardDemoDraftComment(commentID, author)
+		if !res.Found {
 			http.Error(w, "draft comment not found", http.StatusNotFound)
 			return
 		}
+		clID = res.CLID
+		patchsetNumber = res.PatchsetNumber
+		filePath = res.FilePath
+		line = res.LineNumber
+		endLine = res.EndLineNumber
+		side = res.Side
+		comments = res.Comments
 	}
 
 	draftCount := h.countDrafts(r, clID, author)

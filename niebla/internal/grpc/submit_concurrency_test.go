@@ -22,18 +22,18 @@ func putBlobAndTree(t *testing.T, ctx context.Context, database *db.DB, casStora
 	var treeEntries []tree.Entry
 	for name, content := range entries {
 		data := []byte(content)
-		hashBytes, _, size, storagePath, err := casStorage.Put(bytes.NewReader(data))
+		blobInfo, err := casStorage.Put(bytes.NewReader(data))
 		if err != nil {
 			t.Fatalf("casStorage.Put(%s) failed: %v", name, err)
 		}
-		if err := database.InsertBlob(ctx, hashBytes, size, storagePath); err != nil {
+		if err := database.InsertBlob(ctx, blobInfo.HashBytes, blobInfo.Size, blobInfo.StoragePath); err != nil {
 			t.Fatalf("database.InsertBlob(%s) failed: %v", name, err)
 		}
 		treeEntries = append(treeEntries, tree.Entry{
 			Name:       name,
 			Mode:       0100644,
-			Size:       uint64(size),
-			BlobSHA256: hashBytes,
+			Size:       uint64(blobInfo.Size),
+			BlobSHA256: blobInfo.HashBytes,
 		})
 	}
 	rootHash := tree.ComputeTreeHash(treeEntries)

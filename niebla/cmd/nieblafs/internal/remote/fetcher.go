@@ -102,13 +102,13 @@ func (f *BlobFetcher) streamAndCommitBlob(ctx context.Context, shaBytes []byte, 
 		return "", fmt.Errorf("failed to stream blob %s from server: %w", sha256Hex, err)
 	}
 
-	committedHash, _, _, _, err := blobWriter.Commit()
+	blobInfo, err := blobWriter.Commit()
 	if err != nil {
 		return "", fmt.Errorf("failed to commit blob %s to CAS: %w", sha256Hex, err)
 	}
 
-	if !bytes.Equal(committedHash, shaBytes) {
-		return "", fmt.Errorf("committed blob hash %x did not match requested %x", committedHash, shaBytes)
+	if !bytes.Equal(blobInfo.HashBytes, shaBytes) {
+		return "", fmt.Errorf("committed blob hash %x did not match requested %x", blobInfo.HashBytes, shaBytes)
 	}
 
 	return f.casStorage.BlobPath(sha256Hex)

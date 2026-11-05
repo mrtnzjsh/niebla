@@ -41,13 +41,12 @@ func TestCheckRunsOperations(t *testing.T) {
 	}
 
 	// 4. Test AreCheckRunsGreen when no check runs exist
-	green, total, pending, failed, err := database.AreCheckRunsGreen(ctx, clID, 1)
+	summary, err := database.AreCheckRunsGreen(ctx, clID, 1)
 	if err != nil {
 		t.Fatalf("failed to check green status: %v", err)
 	}
-	if green || total != 0 || pending != 0 || failed != 0 {
-		t.Fatalf("expected green=false, total=0, pending=0, failed=0 for empty runs; got green=%v, total=%d, pending=%d, failed=%d",
-			green, total, pending, failed)
+	if summary.Green || summary.Total != 0 || summary.Pending != 0 || summary.Failed != 0 {
+		t.Fatalf("expected green=false, total=0, pending=0, failed=0 for empty runs; got %+v", summary)
 	}
 
 	// 5. Upsert check run 1: queued
@@ -66,13 +65,12 @@ func TestCheckRunsOperations(t *testing.T) {
 	}
 
 	// Check AreCheckRunsGreen: pending=1, green=false
-	green, total, pending, failed, err = database.AreCheckRunsGreen(ctx, clID, 1)
+	summary, err = database.AreCheckRunsGreen(ctx, clID, 1)
 	if err != nil {
 		t.Fatalf("failed to check green status: %v", err)
 	}
-	if green || total != 1 || pending != 1 || failed != 0 {
-		t.Fatalf("expected green=false, total=1, pending=1, failed=0; got green=%v, total=%d, pending=%d, failed=%d",
-			green, total, pending, failed)
+	if summary.Green || summary.Total != 1 || summary.Pending != 1 || summary.Failed != 0 {
+		t.Fatalf("expected green=false, total=1, pending=1, failed=0; got %+v", summary)
 	}
 
 	// 6. Transition run 1: running
@@ -110,13 +108,12 @@ func TestCheckRunsOperations(t *testing.T) {
 	}
 
 	// Check AreCheckRunsGreen: total=1, pending=0, failed=0 -> green=true!
-	green, total, pending, failed, err = database.AreCheckRunsGreen(ctx, clID, 1)
+	summary, err = database.AreCheckRunsGreen(ctx, clID, 1)
 	if err != nil {
 		t.Fatalf("failed to check green status: %v", err)
 	}
-	if !green || total != 1 || pending != 0 || failed != 0 {
-		t.Fatalf("expected green=true, total=1, pending=0, failed=0; got green=%v, total=%d, pending=%d, failed=%d",
-			green, total, pending, failed)
+	if !summary.Green || summary.Total != 1 || summary.Pending != 0 || summary.Failed != 0 {
+		t.Fatalf("expected green=true, total=1, pending=0, failed=0; got %+v", summary)
 	}
 
 	// 8. Add a second runner that fails
@@ -131,13 +128,12 @@ func TestCheckRunsOperations(t *testing.T) {
 		t.Fatalf("failed to upsert failed check run: %v", err)
 	}
 
-	green, total, pending, failed, err = database.AreCheckRunsGreen(ctx, clID, 1)
+	summary, err = database.AreCheckRunsGreen(ctx, clID, 1)
 	if err != nil {
 		t.Fatalf("failed to check green status: %v", err)
 	}
-	if green || total != 2 || pending != 0 || failed != 1 {
-		t.Fatalf("expected green=false, total=2, pending=0, failed=1; got green=%v, total=%d, pending=%d, failed=%d",
-			green, total, pending, failed)
+	if summary.Green || summary.Total != 2 || summary.Pending != 0 || summary.Failed != 1 {
+		t.Fatalf("expected green=false, total=2, pending=0, failed=1; got %+v", summary)
 	}
 
 	// 9. Re-run forgejo-lint and it passes
@@ -152,13 +148,12 @@ func TestCheckRunsOperations(t *testing.T) {
 		t.Fatalf("failed to update forgejo-lint to passed: %v", err)
 	}
 
-	green, total, pending, failed, err = database.AreCheckRunsGreen(ctx, clID, 1)
+	summary, err = database.AreCheckRunsGreen(ctx, clID, 1)
 	if err != nil {
 		t.Fatalf("failed to check green status: %v", err)
 	}
-	if !green || total != 2 || pending != 0 || failed != 0 {
-		t.Fatalf("expected green=true, total=2, pending=0, failed=0; got green=%v, total=%d, pending=%d, failed=%d",
-			green, total, pending, failed)
+	if !summary.Green || summary.Total != 2 || summary.Pending != 0 || summary.Failed != 0 {
+		t.Fatalf("expected green=true, total=2, pending=0, failed=0; got %+v", summary)
 	}
 
 	// 10. List check runs

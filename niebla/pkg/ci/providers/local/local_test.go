@@ -45,7 +45,7 @@ func setupTestCASAndTree(t *testing.T) (*cas.Storage, string, tree.FetchTreeFunc
 
 	// Write a test file into CAS
 	fileContent := []byte("echo 'Niebla Local CI Runner works!'")
-	fHash, _, _, _, err := casStorage.Put(bytes.NewReader(fileContent))
+	blobInfo, err := casStorage.Put(bytes.NewReader(fileContent))
 	if err != nil {
 		t.Fatalf("casStorage.Put: %v", err)
 	}
@@ -55,7 +55,7 @@ func setupTestCASAndTree(t *testing.T) (*cas.Storage, string, tree.FetchTreeFunc
 			Name:       "test.sh",
 			Mode:       0100755,
 			Size:       uint64(len(fileContent)),
-			BlobSHA256: fHash,
+			BlobSHA256: blobInfo.HashBytes,
 		},
 	}
 	tree.SortEntries(entries)

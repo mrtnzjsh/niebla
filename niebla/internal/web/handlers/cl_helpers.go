@@ -207,11 +207,49 @@ func (h *CLHandler) fetchIndexData(ctx context.Context, currentUser string) ([]d
 	return cls, assignedCLIDs
 }
 
+// InboxPartitions groups changelists across review buckets and aggregates badge counts.
+type InboxPartitions struct {
+	MyReviews []views.CLRowData
+	Outgoing  []views.CLRowData
+	Agents    []views.CLRowData
+	Submitted []views.CLRowData
+	All       []views.CLRowData
+	Counts    views.InboxCounts
+}
+
+// SubmitPolicy contains criteria that must be satisfied before a CL can be submitted.
+type SubmitPolicy struct {
+	ReqApprovals      int
+	AllowUnresolved   bool
+	RequireGreen      bool
+	RequiredCIRunners []string
+}
+
+// SubmitCLMetadata bundles CL status, approval counts, and submission policies.
+type SubmitCLMetadata struct {
+	CLStatus        string
+	NeedsRebase     bool
+	ApprovalsCount  int
+	UnresolvedCount int
+	Policy          SubmitPolicy
+}
+
+// ActionsBarData loads stats, reviewers, and policy gates required for rendering the actions bar.
+type ActionsBarData struct {
+	CLStatus        string
+	Approvals       []db.Approval
+	Reviewers       []db.ReviewerAssignment
+	ApprovedCount   int
+	UnresolvedCount int
+	DraftCount      int
+	ReqApprovals    int
+	AllowUnresolved bool
+}
+
 // classifyInboxRows categorizes changelists into partitioned inbox queues.
-func (h *CLHandler) classifyInboxRows(allCLs []db.Changelist, currentUser string, assignedCLIDs map[int64]bool) (
-	myReviews, outgoing, agents, submitted, all []views.CLRowData, counts views.InboxCounts,
-) {
-	counts.All = len(allCLs)
+func (h *CLHandler) classifyInboxRows(allCLs []db.Changelist, currentUser string, assignedCLIDs map[int64]bool) InboxPartitions {
+	var p InboxPartitions
+	p.Counts.All = len(allCLs)
 	isAgentAuthor := func(author string) bool {
 		if h.config != nil {
 			return h.config.Critique.IsAgentAuthor(author)
@@ -231,24 +269,24 @@ func (h *CLHandler) classifyInboxRows(allCLs []db.Changelist, currentUser string
 			IsAgent:    isAgent,
 			IsReviewer: isAssigned,
 		}
-		all = append(all, row)
+		p.All = append(p.All, row)
 
 		switch {
 		case types.CLStatus(cl.Status).IsSubmitted():
-			counts.Submitted++
-			submitted = append(submitted, row)
+			p.Counts.Submitted++
+			p.Submitted = append(p.Submitted, row)
 		case isAgent:
-			counts.Agents++
-			agents = append(agents, row)
+			p.Counts.Agents++
+			p.Agents = append(p.Agents, row)
 		case isAuthor:
-			counts.Outgoing++
-			outgoing = append(outgoing, row)
+			p.Counts.Outgoing++
+			p.Outgoing = append(p.Outgoing, row)
 		case isAssigned || len(assignedCLIDs) == 0:
-			counts.MyReviews++
-			myReviews = append(myReviews, row)
+			p.Counts.MyReviews++
+			p.MyReviews = append(p.MyReviews, row)
 		}
 	}
-	return myReviews, outgoing, agents, submitted, all, counts
+	return p
 }
 
 // resolveActiveTab determines which tab to display based on parameter and counts.
@@ -269,56 +307,54 @@ func resolveActiveTab(tab string, counts views.InboxCounts) string {
 }
 
 // selectActiveRows returns the slice of rows corresponding to the active tab.
-func selectActiveRows(tab string, myReviews, outgoing, agents, submitted, all []views.CLRowData) []views.CLRowData {
+func selectActiveRows(tab string, p InboxPartitions) []views.CLRowData {
 	switch tab {
 	case "my-reviews":
-		return myReviews
+		return p.MyReviews
 	case "outgoing":
-		return outgoing
+		return p.Outgoing
 	case "agents":
-		return agents
+		return p.Agents
 	case string(types.CLStatusSubmitted):
-		return submitted
+		return p.Submitted
 	default:
-		return all
+		return p.All
 	}
 }
 
 // getSubmitCLMetadata retrieves CL status, approvals count, and policies for submission.
-func (h *CLHandler) getSubmitCLMetadata(ctx context.Context, clID int64) (
-	clStatus string, needsRebase bool, approvalsCount, unresolvedCount int,
-	reqApprovals int, allowUnresolved, requireGreen bool, requiredCIRunners []string, err error,
-) {
+func (h *CLHandler) getSubmitCLMetadata(ctx context.Context, clID int64) (*SubmitCLMetadata, error) {
+	meta := &SubmitCLMetadata{}
 	if h.config != nil {
-		reqApprovals = h.config.Critique.GetRequiredApprovals()
-		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
-		requireGreen = h.config.Critique.GetRequireGreenCheckRuns()
+		meta.Policy.ReqApprovals = h.config.Critique.GetRequiredApprovals()
+		meta.Policy.AllowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+		meta.Policy.RequireGreen = h.config.Critique.GetRequireGreenCheckRuns()
 	}
 
 	if h.db != nil {
 		cl, clErr := h.db.GetCL(ctx, clID)
 		if clErr != nil || cl == nil {
-			return "", false, 0, 0, 0, false, false, nil, fmt.Errorf("CL %d not found", clID)
+			return nil, fmt.Errorf("CL %d not found", clID)
 		}
-		clStatus = cl.Status
-		needsRebase = cl.NeedsRebase
-		approvalsCount, _ = h.db.CountApprovals(ctx, clID)
-		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
-		reqApprovals, allowUnresolved, requireGreen, requiredCIRunners = h.resolveCLPolicy(ctx, cl)
-		return clStatus, needsRebase, approvalsCount, unresolvedCount, reqApprovals, allowUnresolved, requireGreen, requiredCIRunners, nil
+		meta.CLStatus = cl.Status
+		meta.NeedsRebase = cl.NeedsRebase
+		meta.ApprovalsCount, _ = h.db.CountApprovals(ctx, clID)
+		meta.UnresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
+		meta.Policy = h.resolveCLPolicy(ctx, cl)
+		return meta, nil
 	}
 
 	demoCLStatusMu.RLock()
-	clStatus = demoCLStatusStore[clID]
-	if clStatus == "" {
-		clStatus = string(types.CLStatusShelved)
+	meta.CLStatus = demoCLStatusStore[clID]
+	if meta.CLStatus == "" {
+		meta.CLStatus = string(types.CLStatusShelved)
 	}
 	demoCLStatusMu.RUnlock()
 
 	demoApprovalsMu.RLock()
 	for _, approval := range demoApprovalsStore[clID] {
 		if types.Verdict(approval.Verdict).IsApproval() {
-			approvalsCount++
+			meta.ApprovalsCount++
 		}
 	}
 	demoApprovalsMu.RUnlock()
@@ -327,13 +363,13 @@ func (h *CLHandler) getSubmitCLMetadata(ctx context.Context, clID int64) (
 	for _, list := range demoCommentsStore {
 		for _, comment := range list {
 			if comment.CLID == clID && !comment.IsDraft && !comment.Resolved {
-				unresolvedCount++
+				meta.UnresolvedCount++
 			}
 		}
 	}
 	demoCommentsMu.RUnlock()
 
-	return clStatus, false, approvalsCount, unresolvedCount, reqApprovals, allowUnresolved, requireGreen, nil, nil
+	return meta, nil
 }
 
 // validateSubmitBlockers checks for rebase conflicts, shelved status, and unresolved comment blockers.
@@ -384,28 +420,27 @@ func (h *CLHandler) validateSubmitCI(ctx context.Context, clID int64, requireGre
 		return nil
 	}
 
-	var green bool
-	var total, pending, failed int
+	var summary db.CheckRunsSummary
 	var psNum int = 1
 
 	if h.db != nil {
 		if latestPS, err := h.db.GetLatestPatchsetNumber(ctx, clID); err == nil {
 			psNum = latestPS
-			green, total, pending, failed, _ = h.db.AreCheckRunsGreen(ctx, clID, latestPS)
+			summary, _ = h.db.AreCheckRunsGreen(ctx, clID, latestPS)
 		}
 	} else {
 		demoCheckRunsMu.RLock()
 		runs := demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, 1)]
 		demoCheckRunsMu.RUnlock()
-		green, total, pending, failed = db.EvaluateCheckRuns(runs)
+		summary = db.EvaluateCheckRuns(runs)
 	}
 
-	if !green {
+	if !summary.Green {
 		if justification == "" {
-			if total == 0 {
+			if summary.Total == 0 {
 				return fmt.Errorf("CL %d requires green CI check runs before submission (found 0 check runs for patchset %d)", clID, psNum)
 			}
-			return fmt.Errorf("CL %d requires green CI check runs before submission (%d pending, %d failed out of %d total for patchset %d)", clID, pending, failed, total, psNum)
+			return fmt.Errorf("CL %d requires green CI check runs before submission (%d pending, %d failed out of %d total for patchset %d)", clID, summary.Pending, summary.Failed, summary.Total, psNum)
 		}
 		log.Printf("CL %d: CI green check runs requirement overridden by %q with justification: %q", clID, reviewer, justification)
 		return nil
@@ -580,78 +615,82 @@ func resolveDemoCLComments(clID int64, targetFile, reviewer string) (map[int][]d
 }
 
 // mergeOwnersPolicy updates approval and CI gates according to an evaluated policy.
-func mergeOwnersPolicy(policy *owners.SubtreePolicy, reqApprovals int, allowUnresolved, requireGreen bool) (int, bool, bool) {
+func mergeOwnersPolicy(policy *owners.SubtreePolicy, base SubmitPolicy) SubmitPolicy {
 	if policy == nil {
-		return reqApprovals, allowUnresolved, requireGreen
+		return base
 	}
-	if policy.RequiredApprovals != nil && *policy.RequiredApprovals > reqApprovals {
-		reqApprovals = *policy.RequiredApprovals
+	if policy.RequiredApprovals != nil && *policy.RequiredApprovals > base.ReqApprovals {
+		base.ReqApprovals = *policy.RequiredApprovals
 	}
 	if policy.AllowUnresolvedComments != nil {
-		allowUnresolved = *policy.AllowUnresolvedComments
+		base.AllowUnresolved = *policy.AllowUnresolvedComments
 	}
 	if policy.RequireGreenCI != nil && *policy.RequireGreenCI {
-		requireGreen = true
+		base.RequireGreen = true
 	}
-	return reqApprovals, allowUnresolved, requireGreen
+	if len(policy.CIRunners) > 0 {
+		base.RequiredCIRunners = policy.CIRunners
+	}
+	return base
 }
 
 // fetchActionsBarData loads all stats and policies needed to render the actions bar.
-func (h *CLHandler) fetchActionsBarData(ctx context.Context, clID int64, author string) (
-	clStatus string, approvals []db.Approval, reviewers []db.ReviewerAssignment,
-	approvedCount, unresolvedCount, draftCount int, reqApprovals int, allowUnresolved bool,
-) {
-	clStatus = "shelved"
+func (h *CLHandler) fetchActionsBarData(ctx context.Context, clID int64, author string) ActionsBarData {
+	data := ActionsBarData{
+		CLStatus: "shelved",
+	}
 	if h.config != nil {
-		reqApprovals = h.config.Critique.GetRequiredApprovals()
-		allowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
+		data.ReqApprovals = h.config.Critique.GetRequiredApprovals()
+		data.AllowUnresolved = h.config.Critique.GetAllowSubmitWithUnresolvedComments()
 	}
 
 	if h.db != nil {
 		if cl, err := h.db.GetCL(ctx, clID); err == nil && cl != nil {
-			clStatus = cl.Status
-			reqApprovals, allowUnresolved, _, _ = h.resolveCLPolicy(ctx, cl)
+			data.CLStatus = cl.Status
+			policy := h.resolveCLPolicy(ctx, cl)
+			data.ReqApprovals = policy.ReqApprovals
+			data.AllowUnresolved = policy.AllowUnresolved
 		}
-		approvals, _ = h.db.ListApprovals(ctx, clID)
-		reviewers, _ = h.db.ListReviewers(ctx, clID)
-		approvedCount, _ = h.db.CountApprovals(ctx, clID)
-		unresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
+		data.Approvals, _ = h.db.ListApprovals(ctx, clID)
+		data.Reviewers, _ = h.db.ListReviewers(ctx, clID)
+		data.ApprovedCount, _ = h.db.CountApprovals(ctx, clID)
+		data.UnresolvedCount, _ = h.db.CountUnresolvedComments(ctx, clID)
 		drafts, _ := h.db.ListDraftComments(ctx, clID, author)
-		draftCount = len(drafts)
-		return
+		data.DraftCount = len(drafts)
+		return data
 	}
 
 	demoCLStatusMu.RLock()
 	if s, ok := demoCLStatusStore[clID]; ok && s != "" {
-		clStatus = s
+		data.CLStatus = s
 	}
 	demoCLStatusMu.RUnlock()
 
 	demoApprovalsMu.RLock()
-	approvals = demoApprovalsStore[clID]
+	data.Approvals = demoApprovalsStore[clID]
 	demoApprovalsMu.RUnlock()
-	approvedCount = countApprovedVerdicts(approvals)
+	data.ApprovedCount = countApprovedVerdicts(data.Approvals)
 
 	demoReviewersMu.RLock()
 	rawReviewers := demoReviewersStore[clID]
 	demoReviewersMu.RUnlock()
-	reviewers = consolidateReviewersWithApprovals(rawReviewers, approvals, clID)
+	data.Reviewers = consolidateReviewersWithApprovals(rawReviewers, data.Approvals, clID)
 
 	demoCommentsMu.RLock()
 	for _, list := range demoCommentsStore {
 		for _, comment := range list {
 			if comment.CLID == clID {
 				if comment.IsDraft && comment.Author == author {
-					draftCount++
+					data.DraftCount++
 				}
 				if !comment.IsDraft && !comment.Resolved {
-					unresolvedCount++
+					data.UnresolvedCount++
 				}
 			}
 		}
 	}
 	demoCommentsMu.RUnlock()
-	return
+	return data
 }
 
 
