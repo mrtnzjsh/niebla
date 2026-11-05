@@ -152,3 +152,4 @@ func TestCotejoFullReviewLifecycle(t *testing.T) {
 		t.Errorf("Merged tab did not contain submitted CL %d", clID)
 	}
 }
+

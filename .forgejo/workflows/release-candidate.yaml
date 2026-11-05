@@ -38,9 +38,10 @@ jobs:
           CGO_ENABLED: '0'
           TESTCONTAINERS_RYUK_DISABLED: 'false'
         run: |
-          go test -v -tags=rc -timeout=35m ./test/rc/...
+          cd niebla && go test -v -tags=rc -timeout=35m ./test/rc/...
 
       - name: Report Status
         if: always()
         run: |
           echo "RC verification completed with exit status: $?"
+

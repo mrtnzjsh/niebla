@@ -77,3 +77,4 @@ func TestAuthAndGroupFederation(t *testing.T) {
 		t.Errorf("Dave unexpectedly saw CL %d in my-reviews despite not belonging to @backend-core", clID)
 	}
 }
+
