@@ -20,15 +20,18 @@ port = 50051
 # PostgreSQL connection URI (PostgreSQL socket or TCP URL)
 db_url = "postgres:///niebla?host=/run/postgresql"
 
+# Automatically spawn local PostgreSQL (via native pg_ctl or Docker) if not running on loopback
+auto_db = true
+
 # Local root path for content-addressable storage (CAS) blob store
-blob_path = "/devpool/niebla_blobs"
+blob_path = "$HOME/.cache/niebla/blobs"
 
 # Maximum number of tree nodes cached in LRU memory
 cache_size = 10000
 
 [fs]
-# Root mount directory for virtual FUSE workspaces
-mount_base = "/niebla"
+# Root mount directory for virtual FUSE workspaces (supports $HOME expansion)
+mount_base = "$HOME/niebla/workspaces"
 
 # Cache directory for local blob chunks (supports $HOME expansion)
 cache_dir = "$HOME/.cache/niebla/blobs"

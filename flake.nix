@@ -33,6 +33,11 @@
           src = ./niebla;
           subPackages = [ "cmd/niebla-server" ];
           vendorHash = null;
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postInstall = ''
+            wrapProgram $out/bin/niebla-server \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.postgresql_16 ]}
+          '';
         };
 
         cotejoPkg = pkgs.buildGoModule {
@@ -103,7 +108,7 @@ blob_path = "$HOME/.cache/niebla/blobs"
 cache_size = 10000
 
 [fs]
-mount_base = "/niebla"
+mount_base = "$HOME/niebla/workspaces"
 cache_dir = "$HOME/.cache/niebla/blobs"
 
 [critique]

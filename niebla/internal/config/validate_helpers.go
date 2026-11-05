@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2/styles"
@@ -112,12 +113,13 @@ func validateServerAuthTokens(cfg *Config, errs *ValidationErrors) error {
 }
 
 func validateFSConfig(cfg *Config, errs *ValidationErrors) error {
-	if cfg.FS.MountBase != "" && !strings.HasPrefix(cfg.FS.MountBase, "/") {
+	expanded := os.ExpandEnv(cfg.FS.MountBase)
+	if cfg.FS.MountBase != "" && !strings.HasPrefix(expanded, "/") && !strings.HasPrefix(cfg.FS.MountBase, "~") {
 		*errs = append(*errs, ValidationError{
 			Field:   "fs.mount_base",
 			Value:   cfg.FS.MountBase,
 			Message: "mount_base must be an absolute path",
-			Hint:    "Specify an absolute directory path starting with '/' (e.g. '/niebla').",
+			Hint:    "Specify an absolute directory path starting with '/' or '$HOME' (e.g. '$HOME/niebla/workspaces' or '/niebla').",
 		})
 	}
 	return nil

@@ -17,6 +17,7 @@ import (
 
 	"niebla/internal/cli/config"
 	"niebla/internal/cli/skills"
+	toolchaincfg "niebla/internal/config"
 	"niebla/pkg/materialize"
 	"niebla/pkg/nieblafs/control"
 	nieblav1 "niebla/pkg/proto/nieblav1"
@@ -43,9 +44,20 @@ func NewWorkspaceCmd(rootFlags *RootFlags) *cobra.Command {
 func resolveWorkspaceMountDir(mountDir, name string) (string, error) {
 	resolved := mountDir
 	if resolved == "" {
-		defaultRoot := "/niebla/workspaces"
-		if err := os.MkdirAll(defaultRoot, 0755); err == nil {
-			resolved = filepath.Join(defaultRoot, name)
+		mountBase := ""
+		if tcfg, _ := toolchaincfg.Load(); tcfg != nil && tcfg.FS.MountBase != "" {
+			mountBase = os.ExpandEnv(tcfg.FS.MountBase)
+		}
+		if mountBase == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("failed to get user home directory: %w", err)
+			}
+			mountBase = filepath.Join(home, "niebla", "workspaces")
+		}
+
+		if err := os.MkdirAll(mountBase, 0755); err == nil {
+			resolved = filepath.Join(mountBase, name)
 		} else {
 			home, err := os.UserHomeDir()
 			if err != nil {

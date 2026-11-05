@@ -28,6 +28,11 @@
         src = ./.;
         subPackages = [ "cmd/niebla-server" ];
         vendorHash = null;
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        postInstall = ''
+          wrapProgram $out/bin/niebla-server \
+            --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.postgresql_16 ]}
+        '';
       };
 
       cliPkg = pkgs.buildGoModule {

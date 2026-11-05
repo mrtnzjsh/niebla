@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,6 +53,7 @@ type Config struct {
 	MaxConnLifetime   time.Duration
 	MaxConnIdleTime   time.Duration
 	HealthCheckPeriod time.Duration
+	AutoSpawn         bool
 }
 
 // DefaultConfig returns sensible defaults optimized for high-frequency reads.
@@ -63,12 +65,42 @@ func DefaultConfig(url string) Config {
 		MaxConnLifetime:   1 * time.Hour,
 		MaxConnIdleTime:   5 * time.Minute,
 		HealthCheckPeriod: 30 * time.Second,
+		AutoSpawn:         true,
 	}
 }
 
 // Connect establishes a connection pool to PostgreSQL and runs embedded migrations.
 func Connect(ctx context.Context, cfg Config) (*DB, error) {
-	poolConfig, err := pgxpool.ParseConfig(cfg.URL)
+	pool, err := connectPool(ctx, cfg.URL, cfg)
+	if err != nil && cfg.AutoSpawn && isLocalDatabase(cfg.URL) {
+		log.Printf("[db] Failed to connect to %s (%v); attempting to auto-spawn local PostgreSQL...", cfg.URL, err)
+		newURL, spawnErr := AutoSpawnPostgres(ctx)
+		if spawnErr != nil {
+			return nil, fmt.Errorf("initial connection failed (%w) and auto-spawn failed: %v", err, spawnErr)
+		}
+		cfg.URL = newURL
+		pool, err = connectPool(ctx, cfg.URL, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to auto-spawned database at %s: %w", cfg.URL, err)
+		}
+	} else if err != nil {
+		return nil, err
+	}
+
+	database := &DB{
+		pool:    pool,
+		queries: store.New(pool),
+	}
+	if err := database.RunMigrations(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("failed to run database migrations: %w", err)
+	}
+
+	return database, nil
+}
+
+func connectPool(ctx context.Context, rawURL string, cfg Config) (*pgxpool.Pool, error) {
+	poolConfig, err := pgxpool.ParseConfig(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse database url: %w", err)
 	}
@@ -99,16 +131,7 @@ func Connect(ctx context.Context, cfg Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	database := &DB{
-		pool:    pool,
-		queries: store.New(pool),
-	}
-	if err := database.RunMigrations(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("failed to run database migrations: %w", err)
-	}
-
-	return database, nil
+	return pool, nil
 }
 
 // RunMigrations executes embedded SQL migrations to ensure schema is initialized.

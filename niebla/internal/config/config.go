@@ -40,8 +40,17 @@ type ServerConfig struct {
 	DBURL      string          `toml:"db_url"`
 	BlobPath   string          `toml:"blob_path"`
 	CacheSize  int             `toml:"cache_size"`
+	AutoDB     *bool           `toml:"auto_db,omitempty"`
 	AuthTokens []string        `toml:"auth_tokens,omitempty"`
 	TLS        ServerTLSConfig `toml:"tls"`
+}
+
+// ShouldAutoDB returns true if local PostgreSQL auto-spawning is enabled (defaults to true).
+func (s *ServerConfig) ShouldAutoDB() bool {
+	if s != nil && s.AutoDB != nil {
+		return *s.AutoDB
+	}
+	return true
 }
 
 // ServerTLSConfig holds TLS listener configuration for niebla-server.
@@ -399,7 +408,7 @@ func DefaultConfig() *Config {
 			CacheSize: 10000,
 		},
 		FS: FSConfig{
-			MountBase: "/niebla",
+			MountBase: "$HOME/niebla/workspaces",
 			CacheDir:  "$HOME/.cache/niebla/blobs",
 		},
 		Critique: CritiqueConfig{

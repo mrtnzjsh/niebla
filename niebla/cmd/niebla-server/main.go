@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -86,32 +87,80 @@ func buildGRPCServerOptions(cfg *config.Config, tlsFlag bool, tlsCertFlag, tlsKe
 	return grpcOpts
 }
 
+func loadServerConfig(configFlag, hostFlag, dbURLFlag, blobPathFlag string, portFlag, cacheSizeFlag int) *config.Config {
+	var cfg *config.Config
+	var err error
+	if configFlag != "" {
+		cfg, err = config.LoadFromPath(configFlag)
+	} else {
+		cfg, err = config.Load()
+	}
+	if err != nil {
+		log.Printf("Warning: failed to load configuration from %s (%v); using defaults", configFlag, err)
+		cfg = config.DefaultConfig()
+	}
+
+	if hostFlag != "" {
+		cfg.Server.Host = hostFlag
+	}
+	if portFlag != 0 {
+		cfg.Server.Port = portFlag
+	}
+	if dbURLFlag != "" {
+		cfg.Server.DBURL = dbURLFlag
+	}
+	if blobPathFlag != "" {
+		cfg.Server.BlobPath = blobPathFlag
+	}
+	if cacheSizeFlag != 0 {
+		cfg.Server.CacheSize = cacheSizeFlag
+	}
+
+	cfg.Server.BlobPath = os.ExpandEnv(cfg.Server.BlobPath)
+	cfg.FS.MountBase = os.ExpandEnv(cfg.FS.MountBase)
+	cfg.FS.CacheDir = os.ExpandEnv(cfg.FS.CacheDir)
+
+	return cfg
+}
+
 func main() {
-	hostFlag := flag.String("host", getEnv("NIEBLA_HOST", "0.0.0.0"), "Host address for gRPC service")
-	portFlag := flag.Int("port", getEnvInt("NIEBLA_PORT", 50051), "Port number for gRPC service")
-	dbURLFlag := flag.String("db-url", getEnv("DATABASE_URL", "postgres:///niebla?host=/run/postgresql"), "PostgreSQL connection string")
-	blobPathFlag := flag.String("blob-path", getEnv("NIEBLA_BLOB_PATH", "/devpool/niebla_blobs"), "Path to CAS blob storage")
-	cacheSizeFlag := flag.Int("cache-size", 10000, "Maximum number of tree nodes in LRU cache")
+	configFlag := flag.String("config", "", "Path to configuration file (defaults to ~/.config/niebla/config.toml)")
+	hostFlag := flag.String("host", "", "Host address for gRPC service (overrides config)")
+	portFlag := flag.Int("port", 0, "Port number for gRPC service (overrides config)")
+	dbURLFlag := flag.String("db-url", "", "PostgreSQL connection string (overrides config)")
+	blobPathFlag := flag.String("blob-path", "", "Path to CAS blob storage (overrides config)")
+	cacheSizeFlag := flag.Int("cache-size", 0, "Maximum number of tree nodes in LRU cache (overrides config)")
+	autoDBFlag := flag.Bool("auto-db", true, "Automatically spawn local PostgreSQL if not running on loopback")
 	tlsFlag := flag.Bool("tls", false, "Enable TLS transport security")
 	tlsCertFlag := flag.String("tls-cert", getEnv("NIEBLA_TLS_CERT", ""), "Path to TLS server certificate file")
 	tlsKeyFlag := flag.String("tls-key", getEnv("NIEBLA_TLS_KEY", ""), "Path to TLS server private key file")
 	tokenFlag := flag.String("token", getEnv("NIEBLA_TOKEN", ""), "Optional authorization token (enables bearer auth)")
 	flag.Parse()
 
-	log.Printf("Initializing niebla-server...")
-	log.Printf("Target bind address : %s:%d", *hostFlag, *portFlag)
-	log.Printf("CAS blob path       : %s", *blobPathFlag)
-	log.Printf("PostgreSQL URL      : %s", *dbURLFlag)
+	cfg := loadServerConfig(*configFlag, *hostFlag, *dbURLFlag, *blobPathFlag, *portFlag, *cacheSizeFlag)
 
-	casStorage, err := cas.NewStorage(*blobPathFlag)
+	log.Printf("Initializing niebla-server...")
+	log.Printf("Target bind address : %s:%d", cfg.Server.Host, cfg.Server.Port)
+	log.Printf("CAS blob path       : %s", cfg.Server.BlobPath)
+	log.Printf("PostgreSQL URL      : %s", cfg.Server.DBURL)
+	log.Printf("Auto-DB provision   : %v", *autoDBFlag && cfg.Server.ShouldAutoDB())
+
+	casStorage, err := cas.NewStorage(cfg.Server.BlobPath)
 	if err != nil {
-		log.Fatalf("Failed to initialize CAS storage engine at %s: %v", *blobPathFlag, err)
+		log.Printf("Warning: CAS storage initialization at %s returned: %v (falling back to temporary dir)", cfg.Server.BlobPath, err)
+		fallbackDir := filepath.Join(os.TempDir(), "niebla_blobs")
+		casStorage, err = cas.NewStorage(fallbackDir)
+		if err != nil {
+			log.Fatalf("Failed to initialize CAS storage engine: %v", err)
+		}
+		log.Printf("Using fallback CAS directory: %s", fallbackDir)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dbConfig := db.DefaultConfig(*dbURLFlag)
+	dbConfig := db.DefaultConfig(cfg.Server.DBURL)
+	dbConfig.AutoSpawn = *autoDBFlag && cfg.Server.ShouldAutoDB()
 	database, err := db.Connect(ctx, dbConfig)
 	if err != nil {
 		log.Fatalf("Failed to connect to database and apply migrations: %v", err)
@@ -119,12 +168,10 @@ func main() {
 	defer database.Close()
 	log.Printf("Connected to PostgreSQL and verified schema migrations.")
 
-	cfg, _ := config.Load()
-
 	grpcOpts := buildGRPCServerOptions(cfg, *tlsFlag, *tlsCertFlag, *tlsKeyFlag, *tokenFlag)
 
 	grpcServer := grpc.NewServer(grpcOpts...)
-	repoServer, err := internalgrpc.NewServer(database, casStorage, *cacheSizeFlag)
+	repoServer, err := internalgrpc.NewServer(database, casStorage, cfg.Server.CacheSize)
 	if err != nil {
 		log.Fatalf("Failed to create NieblaService server: %v", err)
 	}

@@ -1,13 +1,16 @@
 package auth
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/user"
 	"strings"
-
-	"tailscale.com/client/tailscale"
+	"time"
 
 	"niebla/internal/config"
 )
@@ -77,7 +80,6 @@ func NewUserIdentityResolver(cfg config.CritiqueAuthConfig) UserIdentityResolver
 			DefaultUser:        cfg.DefaultUser,
 			TrustedProxies:     cfg.TrustedProxies,
 			AllowQueryOverride: cfg.AllowQueryOverride,
-			tsClient:           &tailscale.LocalClient{},
 		}
 	case "local", "":
 		fallthrough
@@ -142,12 +144,85 @@ func (h *HeaderResolver) ResolveUser(r *http.Request) string {
 	return CurrentOSUser()
 }
 
+// tailscaleWhoIsResponse represents the JSON response from tailscaled's /localapi/v0/whois endpoint.
+type tailscaleWhoIsResponse struct {
+	Node *struct {
+		Name         string `json:"Name"`
+		ComputedName string `json:"ComputedName"`
+	} `json:"Node"`
+	UserProfile *struct {
+		LoginName   string `json:"LoginName"`
+		DisplayName string `json:"DisplayName"`
+	} `json:"UserProfile"`
+}
+
+var defaultTailscaleSocketPaths = []string{
+	"/run/tailscale/tailscaled.sock",
+	"/var/run/tailscale/tailscaled.sock",
+}
+
+// queryTailscaleWhoIs queries the local tailscaled daemon socket to identify the remote peer.
+func queryTailscaleWhoIs(ctx context.Context, remoteAddr string) (string, error) {
+	var socketPath string
+	for _, p := range defaultTailscaleSocketPaths {
+		if _, err := os.Stat(p); err == nil {
+			socketPath = p
+			break
+		}
+	}
+	if socketPath == "" {
+		return "", fmt.Errorf("tailscaled socket not found")
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socketPath)
+			},
+		},
+		Timeout: 2 * time.Second,
+	}
+
+	reqURL := fmt.Sprintf("http://local-tailscaled.sock/localapi/v0/whois?addr=%s", url.QueryEscape(remoteAddr))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tailscaled whois returned status %d", resp.StatusCode)
+	}
+
+	var whois tailscaleWhoIsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&whois); err != nil {
+		return "", err
+	}
+
+	if whois.UserProfile != nil && whois.UserProfile.LoginName != "" {
+		return whois.UserProfile.LoginName, nil
+	}
+	if whois.Node != nil && whois.Node.ComputedName != "" {
+		return whois.Node.ComputedName, nil
+	}
+	if whois.Node != nil && whois.Node.Name != "" {
+		return whois.Node.Name, nil
+	}
+
+	return "", fmt.Errorf("no user or node identity in tailscale whois response")
+}
+
 // TailscaleResolver resolves identity via the Tailscale daemon WhoIs API or authenticated Tailscale Serve headers.
 type TailscaleResolver struct {
 	DefaultUser        string
 	TrustedProxies     []string
 	AllowQueryOverride bool
-	tsClient           *tailscale.LocalClient
 }
 
 func (t *TailscaleResolver) ResolveUser(r *http.Request) string {
@@ -158,22 +233,17 @@ func (t *TailscaleResolver) ResolveUser(r *http.Request) string {
 			}
 		}
 
-		// 1. Check authenticated Tailscale Serve header if request comes from loopback or trusted proxy
+		// 1. Authenticated Tailscale Serve header if request comes from loopback or trusted proxy
 		if isTrustedRemoteAddr(r.RemoteAddr, t.TrustedProxies) {
 			if tsUser := r.Header.Get("Tailscale-User-Login"); tsUser != "" {
 				return strings.TrimSpace(tsUser)
 			}
 		}
 
-		// 2. Direct Tailnet peer connection: query local tailscaled daemon WhoIs
-		if t.tsClient != nil && r.RemoteAddr != "" {
-			if whois, err := t.tsClient.WhoIs(r.Context(), r.RemoteAddr); err == nil && whois != nil {
-				if whois.UserProfile != nil && whois.UserProfile.LoginName != "" {
-					return whois.UserProfile.LoginName
-				}
-				if whois.Node != nil && whois.Node.Name != "" {
-					return whois.Node.Name
-				}
+		// 2. Direct Tailnet peer connection: query local tailscaled daemon WhoIs socket
+		if r.RemoteAddr != "" {
+			if user, err := queryTailscaleWhoIs(r.Context(), r.RemoteAddr); err == nil && user != "" {
+				return user
 			}
 		}
 	}
