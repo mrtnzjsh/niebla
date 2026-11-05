@@ -6,26 +6,57 @@ import (
 	"time"
 )
 
+// EventType represents the category of a CloudEvents message.
+type EventType string
+
 const (
 	// CloudEvents specification version.
 	SpecVersion10 = "1.0"
 
 	// Standard Niebla event types.
-	TypeCLCreated         = "niebla.cl.created"
-	TypeReviewersAssigned = "niebla.cl.reviewers_assigned"
-	TypeCommentsPublished = "niebla.cl.comments_published"
-	TypeCommentResolved   = "niebla.cl.comment_resolved"
-	TypeApprovalUpdated   = "niebla.cl.approval_updated"
-	TypeCLSubmitted       = "niebla.cl.submitted"
-	TypeCLRebased         = "niebla.cl.rebased"
-	TypeCLRebaseConflict  = "niebla.cl.rebase_conflict"
+	TypeCLCreated         EventType = "niebla.cl.created"
+	TypeReviewersAssigned EventType = "niebla.cl.reviewers_assigned"
+	TypeCommentsPublished EventType = "niebla.cl.comments_published"
+	TypeCommentResolved   EventType = "niebla.cl.comment_resolved"
+	TypeApprovalUpdated   EventType = "niebla.cl.approval_updated"
+	TypeCLSubmitted       EventType = "niebla.cl.submitted"
+	TypeCLRebased         EventType = "niebla.cl.rebased"
+	TypeCLRebaseConflict  EventType = "niebla.cl.rebase_conflict"
 )
+
+// AllEventTypes lists all standard CloudEvents types.
+var AllEventTypes = []EventType{
+	TypeCLCreated,
+	TypeReviewersAssigned,
+	TypeCommentsPublished,
+	TypeCommentResolved,
+	TypeApprovalUpdated,
+	TypeCLSubmitted,
+	TypeCLRebased,
+	TypeCLRebaseConflict,
+}
+
+// IsValid reports whether the event type is recognized.
+func (t EventType) IsValid() bool {
+	switch t {
+	case TypeCLCreated, TypeReviewersAssigned, TypeCommentsPublished,
+		TypeCommentResolved, TypeApprovalUpdated, TypeCLSubmitted,
+		TypeCLRebased, TypeCLRebaseConflict:
+		return true
+	default:
+		return false
+	}
+}
+
+func (t EventType) String() string {
+	return string(t)
+}
 
 // Event represents a standardized CloudEvents 1.0 envelope.
 type Event struct {
 	ID              string            `json:"id"`
 	SpecVersion     string            `json:"specversion"`
-	Type            string            `json:"type"`
+	Type            EventType         `json:"type"`
 	Source          string            `json:"source"`
 	Subject         string            `json:"subject"`
 	Time            time.Time         `json:"time"`
@@ -35,7 +66,7 @@ type Event struct {
 }
 
 // New creates a new Event initialized with a unique UUID and current UTC timestamp.
-func New(eventType, source, subject string, data any) Event {
+func New(eventType EventType, source, subject string, data any) Event {
 	return Event{
 		ID:              generateUUID(),
 		SpecVersion:     SpecVersion10,

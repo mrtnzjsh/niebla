@@ -16,6 +16,7 @@ import (
 	"niebla/internal/web/views"
 	"niebla/pkg/owners"
 	"niebla/pkg/tree"
+	"niebla/pkg/types"
 )
 
 // parsePatchsetQueryParams extracts ?ps= and ?base_ps= from request with defaults.
@@ -176,14 +177,14 @@ func (h *CLHandler) fetchIndexData(ctx context.Context, currentUser string) ([]d
 				CLID:        3,
 				Author:      "agent/linter-bot",
 				Description: "fix: apply automated gofmt and lint repairs across repository",
-				Status:      "shelved",
+				Status:      string(types.CLStatusShelved),
 				CommittedAt: time.Now().Add(-1 * time.Hour),
 			},
 			{
 				CLID:        4,
 				Author:      "developer@corp",
 				Description: "resilience: add native ZFS snapshot streaming driver",
-				Status:      "submitted",
+				Status:      string(types.CLStatusSubmitted),
 				CommittedAt: time.Now().Add(-24 * time.Hour),
 			},
 		}, assignedCLIDs
@@ -231,7 +232,7 @@ func (h *CLHandler) classifyInboxRows(allCLs []db.Changelist, currentUser string
 		}
 		all = append(all, row)
 
-		if cl.Status == "submitted" {
+		if types.CLStatus(cl.Status).IsSubmitted() {
 			counts.Submitted++
 			submitted = append(submitted, row)
 		} else if isAgent {
@@ -274,7 +275,7 @@ func selectActiveRows(tab string, myReviews, outgoing, agents, submitted, all []
 		return outgoing
 	case "agents":
 		return agents
-	case "submitted":
+	case string(types.CLStatusSubmitted):
 		return submitted
 	default:
 		return all
@@ -308,13 +309,13 @@ func (h *CLHandler) getSubmitCLMetadata(ctx context.Context, clID int64) (
 	demoCLStatusMu.RLock()
 	clStatus = demoCLStatusStore[clID]
 	if clStatus == "" {
-		clStatus = "shelved"
+		clStatus = string(types.CLStatusShelved)
 	}
 	demoCLStatusMu.RUnlock()
 
 	demoApprovalsMu.RLock()
 	for _, approval := range demoApprovalsStore[clID] {
-		if approval.Verdict == "approved" || approval.Verdict == "lgtm" {
+		if types.Verdict(approval.Verdict).IsApproval() {
 			approvalsCount++
 		}
 	}
@@ -420,10 +421,10 @@ func (h *CLHandler) publishDBReview(ctx context.Context, clID int64, author, ove
 		log.Printf("error publishing drafts: %v", err)
 	}
 	if overallMsg != "" {
-		_, _ = h.db.CreateComment(ctx, clID, 1, "", 0, 0, "modified", author, overallMsg, nil, false)
+		_, _ = h.db.CreateComment(ctx, clID, 1, "", 0, 0, string(types.CommentSideModified), author, overallMsg, nil, false)
 	}
-	if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
-		_ = h.db.SetApproval(ctx, clID, author, verdict)
+	if v, ok := types.ParseVerdict(verdict); ok && (v.IsApproval() || v == types.VerdictChangesRequested) {
+		_ = h.db.SetApproval(ctx, clID, author, string(v))
 	}
 }
 
@@ -447,7 +448,7 @@ func (h *CLHandler) publishDemoReview(clID int64, author, overallMsg, verdict st
 			FilePath:       "",
 			LineNumber:     0,
 			EndLineNumber:  0,
-			Side:           "modified",
+			Side:           string(types.CommentSideModified),
 			Author:         author,
 			Body:           overallMsg,
 			Resolved:       false,
@@ -459,19 +460,19 @@ func (h *CLHandler) publishDemoReview(clID int64, author, overallMsg, verdict st
 	}
 	demoCommentsMu.Unlock()
 
-	if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
+	if v, ok := types.ParseVerdict(verdict); ok && (v.IsApproval() || v == types.VerdictChangesRequested) {
 		demoApprovalsMu.Lock()
 		apprs := demoApprovalsStore[clID]
 		updated := false
 		for i := range apprs {
 			if strings.EqualFold(apprs[i].Reviewer, author) {
-				apprs[i].Verdict = verdict
+				apprs[i].Verdict = string(v)
 				updated = true
 				break
 			}
 		}
 		if !updated {
-			apprs = append(apprs, db.Approval{CLID: clID, Reviewer: author, Verdict: verdict, UpdatedAt: time.Now()})
+			apprs = append(apprs, db.Approval{CLID: clID, Reviewer: author, Verdict: string(v), UpdatedAt: time.Now()})
 		}
 		demoApprovalsStore[clID] = apprs
 		demoApprovalsMu.Unlock()
@@ -492,13 +493,13 @@ func formatCheckRunDuration(cr db.CheckRun) string {
 // resolveRunnerProvider determines runner provider, checking toolchain config fallback.
 func (h *CLHandler) resolveRunnerProvider(name, rawProvider string) string {
 	provider := rawProvider
-	if (provider == "" || provider == "local") && h.config != nil && h.config.CI.Runners != nil {
+	if (provider == "" || provider == string(config.CIProviderLocal)) && h.config != nil && h.config.CI.Runners != nil {
 		if rCfg, ok := h.config.CI.Runners[name]; ok && rCfg.Provider != "" {
 			provider = rCfg.Provider
 		}
 	}
 	if provider == "" {
-		provider = "local"
+		provider = string(config.CIProviderLocal)
 	}
 	return provider
 }
@@ -535,7 +536,7 @@ func consolidateReviewersWithApprovals(rawReviewers []db.ReviewerAssignment, app
 func countApprovedVerdicts(approvals []db.Approval) int {
 	cnt := 0
 	for _, approval := range approvals {
-		if approval.Verdict == "approved" || approval.Verdict == "lgtm" {
+		if types.Verdict(approval.Verdict).IsApproval() {
 			cnt++
 		}
 	}

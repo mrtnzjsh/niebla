@@ -187,8 +187,8 @@ func validateCritiqueDefaultReviewer(cfg *Config, errs *ValidationErrors) error 
 
 func validateCritiqueAuthMode(cfg *Config, errs *ValidationErrors) error {
 	if cfg.Critique.Auth.Mode != "" {
-		authMode := strings.ToLower(strings.TrimSpace(cfg.Critique.Auth.Mode))
-		if authMode != "local" && authMode != "headers" && authMode != "tailscale" {
+		mode := AuthMode(strings.ToLower(strings.TrimSpace(cfg.Critique.Auth.Mode)))
+		if !mode.IsValid() {
 			*errs = append(*errs, ValidationError{
 				Field:   "critique.auth.mode",
 				Value:   cfg.Critique.Auth.Mode,
@@ -374,13 +374,7 @@ func validateEvents(cfg *Config, errs *ValidationErrors) error {
 		return nil
 	}
 
-	sink := strings.ToLower(strings.TrimSpace(cfg.Events.Sink))
-	validSinks := map[string]bool{
-		"webhook": true,
-		"exec":    true,
-		"log":     true,
-		"noop":    true,
-	}
+	sink := EventSinkType(strings.ToLower(strings.TrimSpace(cfg.Events.Sink)))
 	if sink == "" {
 		*errs = append(*errs, ValidationError{
 			Field:   "events.sink",
@@ -388,7 +382,7 @@ func validateEvents(cfg *Config, errs *ValidationErrors) error {
 			Message: "sink must be specified when events are enabled",
 			Hint:    "Set 'sink = \"webhook\"', 'sink = \"exec\"', or 'sink = \"log\"'.",
 		})
-	} else if !validSinks[sink] {
+	} else if !sink.IsValid() {
 		*errs = append(*errs, ValidationError{
 			Field:   "events.sink",
 			Value:   cfg.Events.Sink,
@@ -397,7 +391,7 @@ func validateEvents(cfg *Config, errs *ValidationErrors) error {
 		})
 	}
 
-	if sink == "webhook" {
+	if sink == EventSinkWebhook {
 		ep := strings.TrimSpace(cfg.Events.Webhook.Endpoint)
 		if ep == "" {
 			*errs = append(*errs, ValidationError{
@@ -434,7 +428,7 @@ func validateEvents(cfg *Config, errs *ValidationErrors) error {
 		}
 	}
 
-	if sink == "exec" {
+	if sink == EventSinkExec {
 		cmd := strings.TrimSpace(cfg.Events.Exec.Command)
 		if cmd == "" {
 			*errs = append(*errs, ValidationError{
@@ -481,8 +475,8 @@ func validateResilienceZFS(cfg *Config, errs *ValidationErrors) {
 
 func validateResilienceEncryption(cfg *Config, errs *ValidationErrors) {
 	if cfg.Resilience.Encryption.Algorithm != "" {
-		algo := strings.ToLower(strings.TrimSpace(cfg.Resilience.Encryption.Algorithm))
-		if algo != "aes-256-gcm" && algo != "chacha20-poly1305" {
+		algo := EncryptionAlgorithm(strings.ToLower(strings.TrimSpace(cfg.Resilience.Encryption.Algorithm)))
+		if !algo.IsValid() {
 			*errs = append(*errs, ValidationError{
 				Field:   "resilience.encryption.algorithm",
 				Value:   cfg.Resilience.Encryption.Algorithm,
@@ -493,8 +487,8 @@ func validateResilienceEncryption(cfg *Config, errs *ValidationErrors) {
 	}
 
 	if cfg.Resilience.Encryption.KeySource != "" {
-		ks := strings.ToLower(strings.TrimSpace(cfg.Resilience.Encryption.KeySource))
-		if ks != "env" && ks != "file" && ks != "passphrase" {
+		ks := KeySource(strings.ToLower(strings.TrimSpace(cfg.Resilience.Encryption.KeySource)))
+		if !ks.IsValid() {
 			*errs = append(*errs, ValidationError{
 				Field:   "resilience.encryption.key_source",
 				Value:   cfg.Resilience.Encryption.KeySource,
@@ -502,7 +496,7 @@ func validateResilienceEncryption(cfg *Config, errs *ValidationErrors) {
 				Hint:    "Supported key sources: 'env', 'file', or 'passphrase'.",
 			})
 		}
-		if ks == "env" && strings.TrimSpace(cfg.Resilience.Encryption.KeyEnv) == "" {
+		if ks == KeySourceEnv && strings.TrimSpace(cfg.Resilience.Encryption.KeyEnv) == "" {
 			*errs = append(*errs, ValidationError{
 				Field:   "resilience.encryption.key_env",
 				Value:   "",
@@ -610,11 +604,11 @@ func validateResilience(cfg *Config, errs *ValidationErrors) error {
 		return nil
 	}
 
-	mode := strings.ToLower(strings.TrimSpace(cfg.Resilience.DefaultMode))
+	mode := ResilienceMode(strings.ToLower(strings.TrimSpace(cfg.Resilience.DefaultMode)))
 	if mode == "" {
-		mode = "zfs_stream"
+		mode = ResilienceModeZFSStream
 	}
-	if mode != "zfs_stream" && mode != "bundle" {
+	if !mode.IsValid() {
 		*errs = append(*errs, ValidationError{
 			Field:   "resilience.default_mode",
 			Value:   cfg.Resilience.DefaultMode,
@@ -623,7 +617,7 @@ func validateResilience(cfg *Config, errs *ValidationErrors) error {
 		})
 	}
 
-	if mode == "zfs_stream" && !cfg.Resilience.ZFS.Enabled {
+	if mode == ResilienceModeZFSStream && !cfg.Resilience.ZFS.Enabled {
 		*errs = append(*errs, ValidationError{
 			Field:   "resilience.zfs.enabled",
 			Value:   "false",
@@ -642,11 +636,11 @@ func validateCIRunnerAuth(name string, r CIRunnerConfig, errs *ValidationErrors)
 	if r.Auth.Mode == "" {
 		return
 	}
-	authMode := strings.ToLower(strings.TrimSpace(r.Auth.Mode))
-	validAuthModes := map[string]bool{
-		"none": true, "bearer": true, "token": true, "basic": true, "header": true, "hmac": true,
+	authMode := CIAuthMode(strings.ToLower(strings.TrimSpace(r.Auth.Mode)))
+	if authMode == "" {
+		authMode = CIAuthModeNone
 	}
-	if !validAuthModes[authMode] {
+	if !authMode.IsValid() {
 		*errs = append(*errs, ValidationError{
 			Field:   fmt.Sprintf("ci.runners.%s.auth.mode", name),
 			Value:   r.Auth.Mode,
@@ -655,7 +649,7 @@ func validateCIRunnerAuth(name string, r CIRunnerConfig, errs *ValidationErrors)
 		})
 	}
 
-	if (authMode == "bearer" || authMode == "token") && r.Auth.Token == "" && r.Auth.TokenEnv == "" && r.Auth.KeyFile == "" {
+	if (authMode == CIAuthModeBearer || authMode == CIAuthModeToken) && r.Auth.Token == "" && r.Auth.TokenEnv == "" && r.Auth.KeyFile == "" {
 		*errs = append(*errs, ValidationError{
 			Field:   fmt.Sprintf("ci.runners.%s.auth", name),
 			Value:   "",
@@ -663,7 +657,7 @@ func validateCIRunnerAuth(name string, r CIRunnerConfig, errs *ValidationErrors)
 			Hint:    "Set 'token = \"...\"' or 'token_env = \"ENV_VAR\"' or 'key_file = \"...\"'.",
 		})
 	}
-	if authMode == "basic" && r.Auth.Username == "" {
+	if authMode == CIAuthModeBasic && r.Auth.Username == "" {
 		*errs = append(*errs, ValidationError{
 			Field:   fmt.Sprintf("ci.runners.%s.auth.username", name),
 			Value:   "",
@@ -671,7 +665,7 @@ func validateCIRunnerAuth(name string, r CIRunnerConfig, errs *ValidationErrors)
 			Hint:    "Set username for basic authentication.",
 		})
 	}
-	if authMode == "header" && strings.TrimSpace(r.Auth.HeaderName) == "" {
+	if authMode == CIAuthModeHeader && strings.TrimSpace(r.Auth.HeaderName) == "" {
 		*errs = append(*errs, ValidationError{
 			Field:   fmt.Sprintf("ci.runners.%s.auth.header_name", name),
 			Value:   "",
@@ -679,7 +673,7 @@ func validateCIRunnerAuth(name string, r CIRunnerConfig, errs *ValidationErrors)
 			Hint:    "Set header_name (e.g. 'X-Api-Key').",
 		})
 	}
-	if authMode == "hmac" && r.Auth.Secret == "" && r.Auth.SecretEnv == "" {
+	if authMode == CIAuthModeHMAC && r.Auth.Secret == "" && r.Auth.SecretEnv == "" {
 		*errs = append(*errs, ValidationError{
 			Field:   fmt.Sprintf("ci.runners.%s.auth", name),
 			Value:   "",
@@ -706,15 +700,15 @@ func validateCI(cfg *Config, errs *ValidationErrors) error {
 	}
 
 	for name, runnerCfg := range cfg.CI.Runners {
-		provider := strings.ToLower(strings.TrimSpace(runnerCfg.Provider))
-		if provider == "" {
+		p := CIProvider(strings.ToLower(strings.TrimSpace(runnerCfg.Provider)))
+		if p == "" {
 			*errs = append(*errs, ValidationError{
 				Field:   fmt.Sprintf("ci.runners.%s.provider", name),
 				Value:   "",
 				Message: "provider cannot be empty",
 				Hint:    "Set provider to 'local', 'forgejo', 'github', or 'webhook'.",
 			})
-		} else if provider != "local" && provider != "forgejo" && provider != "github" && provider != "webhook" {
+		} else if !p.IsValid() {
 			*errs = append(*errs, ValidationError{
 				Field:   fmt.Sprintf("ci.runners.%s.provider", name),
 				Value:   runnerCfg.Provider,
@@ -723,7 +717,7 @@ func validateCI(cfg *Config, errs *ValidationErrors) error {
 			})
 		}
 
-		if provider == "forgejo" || provider == "github" || provider == "webhook" {
+		if p == CIProviderForgejo || p == CIProviderGitHub || p == CIProviderWebhook {
 			endpoint := strings.TrimSpace(runnerCfg.Endpoint)
 			if endpoint == "" || (!strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://")) {
 				*errs = append(*errs, ValidationError{

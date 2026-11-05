@@ -343,8 +343,8 @@ func (c *CritiqueConfig) GetRequiredApprovals() int {
 	if c.RequiredApprovals != nil {
 		return *c.RequiredApprovals
 	}
-	mode := strings.ToLower(strings.TrimSpace(c.Auth.Mode))
-	if mode == "local" || mode == "tailscale" || mode == "" {
+	mode := AuthMode(strings.ToLower(strings.TrimSpace(c.Auth.Mode)))
+	if mode == AuthModeLocal || mode == AuthModeTailscale || mode == "" {
 		return 0
 	}
 	return 1

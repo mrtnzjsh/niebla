@@ -67,21 +67,21 @@ func isTrustedRemoteAddr(remoteAddr string, trustedProxies []string) bool {
 // NewUserIdentityResolver constructs an identity resolver according to the configuration mode.
 func NewUserIdentityResolver(cfg config.CritiqueAuthConfig) UserIdentityResolver {
 	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
-	switch mode {
-	case "headers", "header":
+	switch config.AuthMode(mode) {
+	case config.AuthModeHeaders, "header":
 		return &HeaderResolver{
 			HeaderName:         cfg.HeaderName,
 			DefaultUser:        cfg.DefaultUser,
 			TrustedProxies:     cfg.TrustedProxies,
 			AllowQueryOverride: cfg.AllowQueryOverride,
 		}
-	case "tailscale":
+	case config.AuthModeTailscale:
 		return &TailscaleResolver{
 			DefaultUser:        cfg.DefaultUser,
 			TrustedProxies:     cfg.TrustedProxies,
 			AllowQueryOverride: cfg.AllowQueryOverride,
 		}
-	case "local", "":
+	case config.AuthModeLocal, "":
 		fallthrough
 	default:
 		return &LocalResolver{

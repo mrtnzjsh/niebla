@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"niebla/pkg/types"
 )
 
 // DispatchRequest contains the context needed by a runner to execute a build/test job on a CL patchset.
@@ -134,7 +136,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, runnerName string, req Dispat
 			PatchsetNumber: req.Patchset,
 			RunnerName:     runnerName,
 			Provider:       provider.Name(),
-			Status:         "queued",
+			Status:         string(types.CheckRunStatusQueued),
 		})
 	}
 
@@ -146,7 +148,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, runnerName string, req Dispat
 				PatchsetNumber: req.Patchset,
 				RunnerName:     runnerName,
 				Provider:       provider.Name(),
-				Status:         "failed",
+				Status:         string(types.CheckRunStatusFailed),
 				ExternalURL:    externalURL,
 			})
 		}

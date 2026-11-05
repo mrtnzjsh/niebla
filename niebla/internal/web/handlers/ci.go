@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"niebla/internal/config"
 	"niebla/internal/db"
+	"niebla/pkg/types"
 )
 
 var (
@@ -68,18 +70,14 @@ func (h *CIHandler) HandlePostCheckRunStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if strings.TrimSpace(req.Provider) == "" {
-		req.Provider = "local"
+		req.Provider = string(config.CIProviderLocal)
 	}
-	validStatuses := map[string]bool{
-		"queued": true, "running": true, "passed": true,
-		"failed": true, "canceled": true, "cancelled": true, "skipped": true,
-	}
-	statusLower := strings.ToLower(strings.TrimSpace(req.Status))
-	if !validStatuses[statusLower] {
-		http.Error(w, fmt.Sprintf("invalid status %q: must be one of queued, running, passed, failed, canceled, skipped", req.Status), http.StatusBadRequest)
+	parsedStatus, ok := types.ParseCheckRunStatus(req.Status)
+	if !ok {
+		http.Error(w, fmt.Sprintf("invalid status %q: must be one of %v", req.Status, types.AllCheckRunStatuses), http.StatusBadRequest)
 		return
 	}
-	req.Status = statusLower
+	req.Status = string(parsedStatus.Canonical())
 
 	var logHashBytes []byte
 	if req.LogBlobSHA256 != "" {

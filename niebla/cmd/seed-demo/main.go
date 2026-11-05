@@ -11,6 +11,7 @@ import (
 	"niebla/internal/db"
 	"niebla/pkg/cas"
 	"niebla/pkg/tree"
+	"niebla/pkg/types"
 )
 
 type dirNode struct {
@@ -255,12 +256,12 @@ func ValidateToken(token string) (bool, error) {
 	_ = database.CreatePatchset(ctx, 1, 2, treePS2)
 
 	_ = database.AddReviewers(ctx, 1, []string{"matatan", "alice", "package-builder", "sec-bot"})
-	_ = database.SetApproval(ctx, 1, "alice", "lgtm")
-	_ = database.SetApproval(ctx, 1, "package-builder", "lgtm")
-	_ = database.SetApproval(ctx, 1, "sec-bot", "lgtm")
+	_ = database.SetApproval(ctx, 1, "alice", string(types.VerdictLGTM))
+	_ = database.SetApproval(ctx, 1, "package-builder", string(types.VerdictLGTM))
+	_ = database.SetApproval(ctx, 1, "sec-bot", string(types.VerdictLGTM))
 
 	_, _ = database.CreateCommentWithSuggestion(ctx,
-		1, 2, "pkg/auth/token.go", 10, 14, "modified", "sec-bot",
+		1, 2, "pkg/auth/token.go", 10, 14, string(types.CommentSideModified), "sec-bot",
 		"⚠️ Token expiration timestamp and minimum length validation recommended for production bearer auth.",
 		nil, false, 10, 14,
 		`	if len(token) < 32 {
@@ -269,7 +270,7 @@ func ValidateToken(token string) (bool, error) {
 	// Verified token signature and TTL
 	return true, nil`,
 	)
-	_, _ = database.CreateComment(ctx, 1, 2, "cmd/app/main.go", 17, 18, "modified", "alice",
+	_, _ = database.CreateComment(ctx, 1, 2, "cmd/app/main.go", 17, 18, string(types.CommentSideModified), "alice",
 		"LGTM! Clean entrypoint and proper port configuration matching Cotejo proxy.", nil, false)
 
 	_, _ = database.UpsertCheckRun(ctx, db.CheckRun{
@@ -277,7 +278,7 @@ func ValidateToken(token string) (bool, error) {
 		PatchsetNumber: 2,
 		RunnerName:     "package-builder",
 		Provider:       "agent",
-		Status:         "passed",
+		Status:         string(types.CheckRunStatusPassed),
 		ExternalURL:    "/cl/1/runs/package-builder/logs",
 	})
 	_, _ = database.UpsertCheckRun(ctx, db.CheckRun{
@@ -285,7 +286,7 @@ func ValidateToken(token string) (bool, error) {
 		PatchsetNumber: 2,
 		RunnerName:     "sec-bot",
 		Provider:       "agent",
-		Status:         "passed",
+		Status:         string(types.CheckRunStatusPassed),
 		ExternalURL:    "/cl/1/runs/sec-bot/logs",
 	})
 

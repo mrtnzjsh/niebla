@@ -113,16 +113,13 @@ func NewAuthTransport(base http.RoundTripper, cfg AuthConfig) (http.RoundTripper
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	mode := AuthMode(strings.ToLower(strings.TrimSpace(cfg.Mode)))
 	if mode == "" {
-		mode = "none"
+		mode = AuthModeNone
 	}
-	cfg.Mode = mode
+	cfg.Mode = string(mode)
 
-	validModes := map[string]bool{
-		"none": true, "bearer": true, "token": true, "basic": true, "header": true, "hmac": true,
-	}
-	if !validModes[mode] {
+	if !mode.IsValid() {
 		return nil, fmt.Errorf("unsupported auth mode: %q", cfg.Mode)
 	}
 
@@ -136,21 +133,21 @@ func NewAuthTransport(base http.RoundTripper, cfg AuthConfig) (http.RoundTripper
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clonedReq := req.Clone(req.Context())
 
-	switch t.cfg.Mode {
-	case "bearer":
+	switch AuthMode(t.cfg.Mode) {
+	case AuthModeBearer:
 		token := t.cfg.ResolveToken()
 		if token != "" {
 			clonedReq.Header.Set("Authorization", "Bearer "+token)
 		}
-	case "token":
+	case AuthModeToken:
 		token := t.cfg.ResolveToken()
 		if token != "" {
 			clonedReq.Header.Set("Authorization", "token "+token)
 		}
-	case "basic":
+	case AuthModeBasic:
 		password := t.cfg.ResolvePassword()
 		clonedReq.SetBasicAuth(t.cfg.Username, password)
-	case "header":
+	case AuthModeHeader:
 		token := t.cfg.ResolveToken()
 		hdr := t.cfg.HeaderName
 		if hdr == "" {
@@ -159,7 +156,7 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if token != "" {
 			clonedReq.Header.Set(hdr, token)
 		}
-	case "hmac":
+	case AuthModeHMAC:
 		secret := t.cfg.ResolveSecret()
 		if len(secret) > 0 {
 			var bodyBytes []byte
@@ -183,7 +180,7 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 			clonedReq.Header.Set(hdr, "sha256="+sig)
 		}
-	case "none":
+	case AuthModeNone, "":
 		// no-op
 	}
 

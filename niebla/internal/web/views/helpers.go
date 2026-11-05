@@ -5,6 +5,7 @@ import (
 
 	"niebla/internal/db"
 	"niebla/internal/web/auth"
+	"niebla/pkg/types"
 )
 
 // InboxCounts holds counts for each inbox partition.
@@ -43,4 +44,19 @@ func ActiveUserInitial() string {
 		return strings.ToUpper(string(currentUser[0]))
 	}
 	return "R"
+}
+
+// IsSubmitted reports whether the CL status string represents a submitted changelist.
+func IsSubmitted(status string) bool {
+	return types.CLStatus(status).IsSubmitted()
+}
+
+// IsApprovalVerdict reports whether the verdict satisfies approval requirements.
+func IsApprovalVerdict(verdict string) bool {
+	return types.Verdict(verdict).IsApproval()
+}
+
+// IsBlockingVerdict reports whether the verdict requests changes or blocks submission.
+func IsBlockingVerdict(verdict string) bool {
+	return types.Verdict(verdict).IsBlocking()
 }

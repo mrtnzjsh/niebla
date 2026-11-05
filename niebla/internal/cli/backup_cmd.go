@@ -337,7 +337,7 @@ func newBackupListCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			targetLower := strings.ToLower(strings.TrimSpace(target))
-			if targetLower == "zfs" || (targetLower == "" && cfg.Resilience.DefaultMode == "zfs_stream") {
+			if targetLower == string(config.BackupTargetZFS) || (targetLower == "" && cfg.Resilience.DefaultMode == string(config.ResilienceModeZFSStream)) {
 				dataset := cfg.Resilience.ZFS.LocalDataset
 				mgr := zfs.NewSnapshotManager()
 				snaps, err := mgr.ListSnapshots(ctx, dataset)
@@ -403,7 +403,7 @@ func newBackupVerifyCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			targetLower := strings.ToLower(strings.TrimSpace(target))
-			if targetLower == "zfs" || strings.Contains(backupName, "@") {
+			if targetLower == string(config.BackupTargetZFS) || strings.Contains(backupName, "@") {
 				dataset := cfg.Resilience.ZFS.LocalDataset
 				mgr := zfs.NewSnapshotManager()
 				snaps, err := mgr.ListSnapshots(ctx, dataset)
@@ -637,7 +637,7 @@ func newBackupRestoreCmd(rootFlags *RootFlags) *cobra.Command {
 			}
 
 			targetLower := strings.ToLower(strings.TrimSpace(target))
-			if targetLower == "zfs" || strings.Contains(backupName, "@") {
+			if targetLower == string(config.BackupTargetZFS) || strings.Contains(backupName, "@") {
 				return restoreZFSSnapshot(ctx, cmd, cfg, backupName, dryRun)
 			}
 
@@ -685,7 +685,7 @@ func newBackupPruneCmd(rootFlags *RootFlags) *cobra.Command {
 				retention = 7
 			}
 
-			if targetLower == "zfs" || (targetLower == "" && cfg.Resilience.DefaultMode == "zfs_stream") {
+			if targetLower == string(config.BackupTargetZFS) || (targetLower == "" && cfg.Resilience.DefaultMode == string(config.ResilienceModeZFSStream)) {
 				dataset := cfg.Resilience.ZFS.LocalDataset
 				mgr := zfs.NewSnapshotManager()
 				prefix := cfg.Resilience.ZFS.SnapshotPrefix

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"niebla/internal/db/store"
+	"niebla/pkg/types"
 )
 
 // CheckRun represents a single presubmit CI check or runner status record for a patchset.
@@ -106,10 +107,11 @@ func (d *DB) ListCheckRunsForPatchset(ctx context.Context, clID int64, patchsetN
 func EvaluateCheckRuns(runs []CheckRun) (green bool, total int, pending int, failed int) {
 	total = len(runs)
 	for _, run := range runs {
-		switch run.Status {
-		case "queued", "running":
+		status := types.CheckRunStatus(run.Status).Canonical()
+		switch status {
+		case types.CheckRunStatusQueued, types.CheckRunStatusPending, types.CheckRunStatusRunning:
 			pending++
-		case "failed", "canceled", "cancelled":
+		case types.CheckRunStatusFailed, types.CheckRunStatusCanceled:
 			failed++
 		}
 	}
@@ -124,7 +126,8 @@ func FindMissingRequiredRunners(runs []CheckRun, requiredRunners []string) []str
 	}
 	greenRunners := make(map[string]bool)
 	for _, run := range runs {
-		if run.Status == "passed" || run.Status == "skipped" {
+		status := types.CheckRunStatus(run.Status)
+		if status.IsSuccess() || status == types.CheckRunStatusSkipped {
 			greenRunners[strings.ToLower(strings.TrimSpace(run.RunnerName))] = true
 		}
 	}

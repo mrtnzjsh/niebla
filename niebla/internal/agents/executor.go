@@ -19,6 +19,7 @@ import (
 	"niebla/pkg/ai"
 	"niebla/pkg/cas"
 	"niebla/pkg/httpclient"
+	"niebla/pkg/types"
 )
 
 var agentCommentMu sync.Mutex
@@ -74,7 +75,7 @@ type ExecutionResult struct {
 func (e *Executor) prepareAgentCommand(execCtx context.Context, req ExecutionRequest) (*exec.Cmd, error) {
 	var cmd *exec.Cmd
 	switch req.Agent.Type {
-	case "in_tree":
+	case agents.AgentTypeInTree:
 		entryPath := filepath.Join(req.WorkspaceDir, req.Agent.Entrypoint)
 		info, err := os.Stat(entryPath)
 		if err != nil {
@@ -85,14 +86,14 @@ func (e *Executor) prepareAgentCommand(execCtx context.Context, req ExecutionReq
 		}
 		cmd = exec.CommandContext(execCtx, entryPath, req.Agent.Args...)
 
-	case "cas_binary":
+	case agents.AgentTypeCASBinary:
 		binaryPath, err := e.ensureCASBinary(req.Agent.CasSHA256)
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare CAS binary %s: %w", req.Agent.CasSHA256, err)
 		}
 		cmd = exec.CommandContext(execCtx, binaryPath, req.Agent.Args...)
 
-	case "exec":
+	case agents.AgentTypeExec:
 		cmd = exec.CommandContext(execCtx, "sh", "-c", req.Agent.Command)
 
 	default:
@@ -213,21 +214,21 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 		PatchsetNumber: req.Patchset,
 		RunnerName:     req.Agent.Name,
 		Provider:       "agent",
-		Status:         "running",
+		Status:         string(types.CheckRunStatusRunning),
 	})
 
 	var output []byte
 	var runErr error
 	var passed bool
 
-	if req.Agent.Type == "ai" {
+	if req.Agent.Type == agents.AgentTypeAI {
 		if e.aiConfig == nil || !e.aiConfig.IsConfigured() {
 			_, _ = e.db.UpsertCheckRun(execCtx, db.CheckRun{
 				CLID:           req.CLID,
 				PatchsetNumber: req.Patchset,
 				RunnerName:     req.Agent.Name,
 				Provider:       "agent",
-				Status:         "skipped",
+				Status:         string(types.CheckRunStatusSkipped),
 			})
 			return &ExecutionResult{Passed: true, Skipped: true}, nil
 		}
@@ -244,10 +245,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 
 	report, diags := agents.ParseReviewOutput(string(output))
 	if report != nil {
-		switch strings.ToLower(strings.TrimSpace(report.Verdict)) {
-		case "changes_requested":
+		if report.Verdict.IsBlocking() {
 			passed = false
-		case "lgtm", "approved":
+		} else if report.Verdict.IsApproval() {
 			if runErr == nil {
 				passed = true
 			}
@@ -255,9 +255,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 	}
 
 	logSHA := e.saveExecutionLogs(execCtx, req, output)
-	runStatus := "passed"
+	runStatus := types.CheckRunStatusPassed
 	if !passed {
-		runStatus = "failed"
+		runStatus = types.CheckRunStatusFailed
 	}
 	var logURL string
 	if len(logSHA) > 0 {
@@ -269,7 +269,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 		PatchsetNumber: req.Patchset,
 		RunnerName:     req.Agent.Name,
 		Provider:       "agent",
-		Status:         runStatus,
+		Status:         string(runStatus),
 		ExternalURL:    logURL,
 		LogBlobSHA256:  logSHA,
 	})
@@ -277,9 +277,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (*Executio
 	e.postInlineDiagnostics(execCtx, req, report, diags, logURL, passed)
 
 	if passed && req.Agent.AutoApprove {
-		_ = e.db.SetApproval(execCtx, req.CLID, req.Agent.Name, "lgtm")
+		_ = e.db.SetApproval(execCtx, req.CLID, req.Agent.Name, string(types.VerdictLGTM))
 	} else if !passed {
-		_ = e.db.SetApproval(execCtx, req.CLID, req.Agent.Name, "changes_requested")
+		_ = e.db.SetApproval(execCtx, req.CLID, req.Agent.Name, string(types.VerdictChangesRequested))
 	}
 
 	return &ExecutionResult{

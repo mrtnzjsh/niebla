@@ -47,7 +47,7 @@ type ClientHook struct {
 // ServerHook represents a gate executed on niebla-server during SubmitCL.
 type ServerHook struct {
 	Name           string        `toml:"name"`
-	Type           string        `toml:"type"` // "metadata", "tree_scan", "cas_binary", "in_tree", "exec"
+	Type           HookType      `toml:"type"` // "metadata", "tree_scan", "cas_binary", "in_tree", "exec"
 	Blocking       *bool         `toml:"blocking"`
 	OptIn          bool          `toml:"opt_in"`
 	TriggerPaths   []string      `toml:"trigger_paths"`
@@ -101,11 +101,11 @@ type TouchedFile struct {
 
 // HookFailure describes a single policy violation detected by a hook.
 type HookFailure struct {
-	HookName string `json:"hook_name"`
-	Type     string `json:"type"`
-	Path     string `json:"path,omitempty"`
-	Message  string `json:"message"`
-	Blocking bool   `json:"blocking"`
+	HookName string   `json:"hook_name"`
+	Type     HookType `json:"type"`
+	Path     string   `json:"path,omitempty"`
+	Message  string   `json:"message"`
+	Blocking bool     `json:"blocking"`
 }
 
 // EvaluationResult summarizes the outcome of evaluating all presubmit hooks.
@@ -262,13 +262,13 @@ func EvaluateServerPresubmitWithOptions(hooks []ServerHook, meta CLMetadata, tou
 		}
 
 		switch hook.Type {
-		case "metadata":
+		case HookTypeMetadata:
 			fails := EvaluateMetadata(hook, meta)
 			result.Failures = append(result.Failures, fails...)
-		case "tree_scan":
+		case HookTypeTreeScan:
 			fails := EvaluateTreeScan(hook, touched)
 			result.Failures = append(result.Failures, fails...)
-		case "cas_binary", "in_tree", "exec":
+		case HookTypeCASBinary, HookTypeInTree, HookTypeExec:
 			fails := evaluateProcessHook(hook, meta, touched, opts)
 			result.Failures = append(result.Failures, fails...)
 		}
@@ -305,7 +305,7 @@ func evaluateProcessHook(hook ServerHook, meta CLMetadata, touched []TouchedFile
 
 	var cmd *exec.Cmd
 	switch hook.Type {
-	case "cas_binary":
+	case HookTypeCASBinary:
 		if opts.CASBinaryResolver == nil {
 			return nil
 		}
@@ -319,7 +319,7 @@ func evaluateProcessHook(hook ServerHook, meta CLMetadata, touched []TouchedFile
 			}}
 		}
 		cmd = exec.CommandContext(ctx, binPath, hook.Args...)
-	case "in_tree":
+	case HookTypeInTree:
 		if opts.WorkspaceDir == "" {
 			return nil
 		}
@@ -337,7 +337,7 @@ func evaluateProcessHook(hook ServerHook, meta CLMetadata, touched []TouchedFile
 			_ = os.Chmod(entryPath, 0755)
 		}
 		cmd = exec.CommandContext(ctx, entryPath, hook.Args...)
-	case "exec":
+	case HookTypeExec:
 		if strings.TrimSpace(hook.Command) == "" {
 			return nil
 		}

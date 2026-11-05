@@ -71,7 +71,7 @@ func TestWebhookSinkSuccessAndSignature(t *testing.T) {
 	}
 
 	// Verify headers
-	if got := receivedHeaders.Get("X-Critique-Event"); got != events.TypeCLSubmitted {
+	if got := receivedHeaders.Get("X-Critique-Event"); got != events.TypeCLSubmitted.String() {
 		t.Fatalf("expected X-Critique-Event %s, got %s", events.TypeCLSubmitted, got)
 	}
 	if got := receivedHeaders.Get("X-Critique-Delivery"); got != evt.ID {

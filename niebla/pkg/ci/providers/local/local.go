@@ -16,6 +16,7 @@ import (
 	"niebla/pkg/ci"
 	"niebla/pkg/materialize"
 	"niebla/pkg/tree"
+	"niebla/pkg/types"
 )
 
 // Config defines execution parameters for the local sandbox runner.
@@ -77,7 +78,7 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 			PatchsetNumber: req.Patchset,
 			RunnerName:     p.cfg.Name,
 			Provider:       "local",
-			Status:         "running",
+			Status:         string(types.CheckRunStatusRunning),
 			StartedAt:      &startTime,
 		})
 	}
@@ -98,7 +99,7 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 						PatchsetNumber: req.Patchset,
 						RunnerName:     p.cfg.Name,
 						Provider:       "local",
-						Status:         "failed",
+						Status:         string(types.CheckRunStatusFailed),
 						StartedAt:      &startTime,
 						CompletedAt:    &endTime,
 					})
@@ -131,12 +132,12 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 	execErr := cmd.Run()
 	endTime := time.Now().UTC()
 
-	status := "passed"
+	status := types.CheckRunStatusPassed
 	if execErr != nil {
 		if runCtx.Err() == context.DeadlineExceeded {
-			status = "canceled"
+			status = types.CheckRunStatusCanceled
 		} else {
-			status = "failed"
+			status = types.CheckRunStatusFailed
 		}
 	}
 
@@ -154,7 +155,7 @@ func (p *Provider) Trigger(ctx context.Context, req ci.DispatchRequest) (string,
 			PatchsetNumber: req.Patchset,
 			RunnerName:     p.cfg.Name,
 			Provider:       "local",
-			Status:         status,
+			Status:         string(status),
 			LogBlobSHA256:  logHashHex,
 			StartedAt:      &startTime,
 			CompletedAt:    &endTime,

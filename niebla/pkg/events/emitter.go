@@ -164,7 +164,7 @@ func (e *AsyncEmitter) Emit(ctx context.Context, evt Event) {
 		return
 	}
 
-	if !MatchFilter(e.filters, evt.Type) {
+	if !MatchFilter(e.filters, string(evt.Type)) {
 		return
 	}
 

@@ -21,8 +21,8 @@ func NewEmitterFromConfig(cfg *config.EventsConfig) (pkgevents.Emitter, error) {
 	var sink pkgevents.Sink
 	var err error
 
-	switch cfg.Sink {
-	case "webhook":
+	switch config.EventSinkType(cfg.Sink) {
+	case config.EventSinkWebhook:
 		timeout := time.Duration(cfg.Webhook.TimeoutMS) * time.Millisecond
 		if timeout <= 0 {
 			timeout = 3 * time.Second
@@ -37,7 +37,7 @@ func NewEmitterFromConfig(cfg *config.EventsConfig) (pkgevents.Emitter, error) {
 			Timeout:    timeout,
 			MaxRetries: cfg.Webhook.MaxRetries,
 		})
-	case "exec":
+	case config.EventSinkExec:
 		timeout := time.Duration(cfg.Exec.TimeoutMS) * time.Millisecond
 		if timeout <= 0 {
 			timeout = 5 * time.Second
@@ -46,7 +46,7 @@ func NewEmitterFromConfig(cfg *config.EventsConfig) (pkgevents.Emitter, error) {
 			Command: cfg.Exec.Command,
 			Timeout: timeout,
 		})
-	case "noop", "":
+	case config.EventSinkNoop, "":
 		return pkgevents.NewNoopEmitter(), nil
 	default:
 		return nil, fmt.Errorf("unsupported events sink: %q (expected 'webhook', 'exec', or 'noop')", cfg.Sink)

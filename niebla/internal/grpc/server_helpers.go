@@ -18,6 +18,7 @@ import (
 	"niebla/pkg/owners"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 	"niebla/pkg/tree"
+	"niebla/pkg/types"
 )
 
 // validateSubmitPreconditions verifies that a CL is ready to be committed to trunk.
@@ -196,11 +197,11 @@ func buildTouchedFiles(clInfo *db.Changelist, touchedFiles []string, fetchTree t
 	var touched []hooks.TouchedFile
 	for _, path := range touchedFiles {
 		entry, _ := tree.ResolvePath(clInfo.RootTreeHash, path, fetchTree)
-		status := "modified"
+		changeType := types.ChangeTypeModified
 		var size uint64
 		var blobSHA []byte
 		if entry == nil {
-			status = "deleted"
+			changeType = types.ChangeTypeDeleted
 		} else {
 			size = entry.Size
 			blobSHA = entry.BlobSHA256
@@ -209,7 +210,7 @@ func buildTouchedFiles(clInfo *db.Changelist, touchedFiles []string, fetchTree t
 			Path:      path,
 			SizeBytes: size,
 			BlobSHA:   blobSHA,
-			Status:    status,
+			Status:    string(changeType),
 		})
 	}
 	return touched
@@ -285,7 +286,7 @@ func (s *Server) executePresubmitHooks(ctx context.Context, clInfo *db.Changelis
 	var wsDir string
 	var cleanupWS func()
 	for _, hk := range hooksCfg.Server.Presubmit {
-		if hk.Type == "in_tree" || hk.Type == "cas_binary" || hk.Type == "exec" {
+		if hk.Type == hooks.HookTypeInTree || hk.Type == hooks.HookTypeCASBinary || hk.Type == hooks.HookTypeExec {
 			wsDir, cleanupWS, _ = s.materializeWorkspaceForExecution(ctx, clInfo.RootTreeHash, touchedFiles)
 			break
 		}

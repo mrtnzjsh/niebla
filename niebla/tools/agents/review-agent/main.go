@@ -14,6 +14,7 @@ import (
 	"niebla/internal/config"
 	"niebla/pkg/agents"
 	"niebla/pkg/ai"
+	"niebla/pkg/types"
 	"niebla/pkg/httpclient"
 )
 
@@ -90,7 +91,7 @@ func main() {
 
 	if !cfg.Critique.AI.IsConfigured() {
 		report := agents.AgentReviewReport{
-			Verdict: "lgtm",
+			Verdict: types.VerdictLGTM,
 			Summary: "Skipped AI review: [critique.ai] endpoint is not configured.",
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(report)
@@ -102,7 +103,7 @@ func main() {
 
 	if len(targetFiles) == 0 {
 		report := agents.AgentReviewReport{
-			Verdict: "lgtm",
+			Verdict: types.VerdictLGTM,
 			Summary: "No touched files to review.",
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(report)
@@ -152,7 +153,7 @@ func main() {
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(report)
 
-	if *failOnChangesFlag && strings.EqualFold(report.Verdict, "changes_requested") {
+	if *failOnChangesFlag && report.Verdict.IsBlocking() {
 		os.Exit(1)
 	}
 }

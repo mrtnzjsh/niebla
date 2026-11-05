@@ -592,7 +592,7 @@ func (s *Server) dispatchReviewAgents(clID int64, patchset int, rootTreeHash []b
 
 	executor := internalagents.NewExecutor(s.db, s.casStorage, "").WithAIConfig(aiCfg)
 	for _, agentDef := range matchedAgents {
-		if strings.TrimSpace(agentDef.Type) == "" && strings.TrimSpace(agentDef.Command) == "" {
+		if strings.TrimSpace(string(agentDef.Type)) == "" && strings.TrimSpace(agentDef.Command) == "" {
 			continue
 		}
 		_, err := executor.Execute(ctx, internalagents.ExecutionRequest{

@@ -24,6 +24,7 @@ import (
 	"niebla/pkg/events"
 	"niebla/pkg/owners"
 	"niebla/pkg/tree"
+	"niebla/pkg/types"
 )
 
 var (
@@ -222,10 +223,12 @@ func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
 	if verdict == "" {
 		verdict = r.FormValue("verdict")
 	}
-	if verdict != "approved" && verdict != "lgtm" && verdict != "changes_requested" {
+	parsedVerdict, ok := types.ParseVerdict(verdict)
+	if !ok || (!parsedVerdict.IsApproval() && parsedVerdict != types.VerdictChangesRequested) {
 		http.Error(w, "invalid verdict value (must be approved, lgtm, or changes_requested)", http.StatusBadRequest)
 		return
 	}
+	verdict = string(parsedVerdict)
 
 	reviewer := h.resolveReviewer(r)
 
@@ -439,7 +442,7 @@ func (h *CLHandler) HandleSubmitCL(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		demoCLStatusMu.Lock()
-		demoCLStatusStore[clID] = "submitted"
+		demoCLStatusStore[clID] = string(types.CLStatusSubmitted)
 		demoCLStatusMu.Unlock()
 	}
 
@@ -591,7 +594,7 @@ func (h *CLHandler) HandlePublishReview(w http.ResponseWriter, r *http.Request) 
 		},
 	))
 
-	if verdict == "lgtm" || verdict == "approved" || verdict == "changes_requested" {
+	if parsedVerdict, ok := types.ParseVerdict(verdict); ok && (parsedVerdict.IsApproval() || parsedVerdict == types.VerdictChangesRequested) {
 		h.emitter.Emit(r.Context(), events.New(
 			events.TypeApprovalUpdated,
 			"critique",
@@ -1238,7 +1241,7 @@ func (h *CLHandler) buildCIRunnerItems(ctx context.Context, clID int64, patchset
 			runnerItems = append(runnerItems, views.CIRunnerItem{
 				RunnerName: reqName,
 				Provider:   h.resolveRunnerProvider(reqName, ""),
-				Status:     "queued",
+				Status:     string(types.CheckRunStatusQueued),
 				IsRequired: true,
 			})
 		}

@@ -95,7 +95,7 @@ func (s *WebhookSink) Send(ctx context.Context, evt events.Event) error {
 
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 		req.Header.Set("User-Agent", "Critique-Notifier/1.0")
-		req.Header.Set("X-Critique-Event", evt.Type)
+		req.Header.Set("X-Critique-Event", string(evt.Type))
 		req.Header.Set("X-Critique-Delivery", evt.ID)
 
 		if s.secret != "" {

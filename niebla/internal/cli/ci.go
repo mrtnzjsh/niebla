@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"niebla/pkg/ci"
+	"niebla/pkg/types"
 
 	"github.com/spf13/cobra"
 )
@@ -170,7 +171,7 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 				PatchsetNumber: patchset,
 				RunnerName:     runnerName,
 				Provider:       provider,
-				Status:         "running",
+				Status:         string(types.CheckRunStatusRunning),
 				ExternalURL:    externalURL,
 				StartedAt:      &startTime,
 			})
@@ -190,9 +191,9 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 			endTime := time.Now().UTC()
 
 			exitCode := 0
-			runStatus := "passed"
+			runStatus := types.CheckRunStatusPassed
 			if execErr != nil {
-				runStatus = "failed"
+				runStatus = types.CheckRunStatusFailed
 				if exitErr, ok := execErr.(*exec.ExitError); ok {
 					exitCode = exitErr.ExitCode()
 				} else {
@@ -225,7 +226,7 @@ and 'passed'/'failed' upon exit to Cotejo. Output logs are captured and uploaded
 				PatchsetNumber: patchset,
 				RunnerName:     runnerName,
 				Provider:       provider,
-				Status:         runStatus,
+				Status:         string(runStatus),
 				ExternalURL:    externalURL,
 				LogBlobSHA256:  logHashHex,
 				StartedAt:      &startTime,

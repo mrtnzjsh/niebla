@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"niebla/pkg/ignore"
+	"niebla/pkg/types"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -21,9 +22,9 @@ type Config struct {
 
 // AgentDef defines a specialized automated review persona.
 type AgentDef struct {
-	Name                  string   `toml:"name"`
-	DisplayName           string   `toml:"display_name"`
-	Type                  string   `toml:"type"` // "ai", "in_tree", "cas_binary", "exec"
+	Name                  string    `toml:"name"`
+	DisplayName           string    `toml:"display_name"`
+	Type                  AgentType `toml:"type"` // "ai", "in_tree", "cas_binary", "exec"
 	Entrypoint            string   `toml:"entrypoint"`
 	CasSHA256             string   `toml:"cas_sha256"`
 	PromptFile            string   `toml:"prompt_file"`
@@ -75,7 +76,7 @@ type AgentReviewComment struct {
 
 // AgentReviewReport represents the structured JSON output contract for review agents.
 type AgentReviewReport struct {
-	Verdict  string               `json:"verdict,omitempty"` // "lgtm", "approved", "changes_requested", "comment"
+	Verdict  types.Verdict        `json:"verdict,omitempty"` // "lgtm", "approved", "changes_requested", "comment"
 	Summary  string               `json:"summary,omitempty"`
 	Comments []AgentReviewComment `json:"comments,omitempty"`
 }
