@@ -55,6 +55,7 @@
       goEnv = pkgs.mkShell {
         buildInputs = with pkgs; [
           go
+          sqlc
           protobuf
           protoc-gen-go
           protoc-gen-go-grpc

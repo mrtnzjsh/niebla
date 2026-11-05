@@ -170,18 +170,7 @@ func (s *Server) checkRequiredRunners(ctx context.Context, clID int64, latestPS 
 	if rErr != nil {
 		return nil
 	}
-	greenRunners := make(map[string]bool, len(runs))
-	for _, run := range runs {
-		if run.Status == "passed" || run.Status == "skipped" {
-			greenRunners[strings.ToLower(strings.TrimSpace(run.RunnerName))] = true
-		}
-	}
-	var missingRunners []string
-	for _, reqRunner := range requiredRunners {
-		if !greenRunners[strings.ToLower(strings.TrimSpace(reqRunner))] {
-			missingRunners = append(missingRunners, reqRunner)
-		}
-	}
+	missingRunners := db.FindMissingRequiredRunners(runs, requiredRunners)
 	if len(missingRunners) > 0 {
 		return status.Errorf(codes.FailedPrecondition,
 			"cannot submit CL %d: required OWNERS.toml CI runner(s) not passing for patchset %d: %s",

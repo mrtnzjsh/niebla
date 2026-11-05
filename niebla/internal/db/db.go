@@ -3,11 +3,19 @@ package db
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"niebla/internal/db/store"
 )
+
+// ErrNotFound is returned when a requested record does not exist.
+var ErrNotFound = errors.New("record not found")
+
+//go:generate sqlc generate -f ../../sqlc.yaml
 
 //go:embed migrations/0001_init.sql
 var initSQL string
@@ -32,7 +40,8 @@ var commentSuggestionsSQL string
 
 // DB wraps the pgxpool connection pool and provides access to database queries.
 type DB struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *store.Queries
 }
 
 // Config holds configuration options for the database connection pool.
@@ -90,7 +99,10 @@ func Connect(ctx context.Context, cfg Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	database := &DB{pool: pool}
+	database := &DB{
+		pool:    pool,
+		queries: store.New(pool),
+	}
 	if err := database.RunMigrations(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("failed to run database migrations: %w", err)
@@ -128,6 +140,11 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 // Pool returns the underlying pgxpool.Pool.
 func (d *DB) Pool() *pgxpool.Pool {
 	return d.pool
+}
+
+// Store returns the underlying sqlc *store.Queries.
+func (d *DB) Store() *store.Queries {
+	return d.queries
 }
 
 // Close gracefully closes the connection pool.

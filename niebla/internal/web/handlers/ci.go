@@ -195,20 +195,7 @@ func evaluateDemoCheckRuns(clID int64, patchsetNum int) (runs []db.CheckRun, gre
 	runs = demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, patchsetNum)]
 	demoCheckRunsMu.RUnlock()
 
-	total = len(runs)
-	for _, run := range runs {
-		switch run.Status {
-		case "queued", "running":
-			pending++
-		case "failed", "canceled", "cancelled":
-			failed++
-		case "passed", "skipped":
-			// ok
-		default:
-			failed++
-		}
-	}
-	green = (total > 0 && pending == 0 && failed == 0)
+	green, total, pending, failed = db.EvaluateCheckRuns(runs)
 	return
 }
 

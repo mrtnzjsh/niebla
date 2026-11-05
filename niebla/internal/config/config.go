@@ -60,9 +60,11 @@ type FSConfig struct {
 
 // CritiqueAuthConfig governs user identity resolution in Critique.
 type CritiqueAuthConfig struct {
-	Mode        string `toml:"mode"`         // "local", "headers", "tailscale"
-	DefaultUser string `toml:"default_user"` // defaults to "$USER"
-	HeaderName  string `toml:"header_name"`  // defaults to "X-Forwarded-User"
+	Mode               string   `toml:"mode"`                 // "local", "headers", "tailscale"
+	DefaultUser        string   `toml:"default_user"`         // defaults to "$USER"
+	HeaderName         string   `toml:"header_name"`          // defaults to "X-Forwarded-User"
+	TrustedProxies     []string `toml:"trusted_proxies"`      // list of trusted proxy CIDRs/IPs for header auth (defaults to loopback)
+	AllowQueryOverride bool     `toml:"allow_query_override"` // allow ?reviewer= query param (dev/test only)
 }
 
 // CritiqueGroupConfig governs enterprise user group resolution.

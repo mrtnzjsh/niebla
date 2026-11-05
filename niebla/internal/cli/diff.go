@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"niebla/internal/cli/config"
-	"niebla/pkg/cas"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"github.com/pmezard/go-difflib/difflib"
@@ -70,10 +68,7 @@ func NewDiffCmd(rootFlags *RootFlags) *cobra.Command {
 				targetFilter = normalizeTargetFilter(args[0], cwd, ws.MountDir)
 			}
 
-			cacheDirs := []string{"/niebla/cache"}
-			if home, err := os.UserHomeDir(); err == nil {
-				cacheDirs = append(cacheDirs, filepath.Join(home, ".cache", "niebla", "blobs"))
-			}
+			cacheDirs := append([]string{"/niebla/cache"}, defaultBlobCacheDirs()...)
 
 			for _, change := range changes {
 				if targetFilter != "" && !matchesFilter(change.Path, targetFilter) {
@@ -175,44 +170,11 @@ func computeFileDiff(ctx context.Context, client nieblav1.NieblaServiceClient, c
 }
 
 func fetchBlobContent(ctx context.Context, client nieblav1.NieblaServiceClient, cacheDirs []string, sha256Bytes []byte) ([]byte, error) {
-	shaHex := hex.EncodeToString(sha256Bytes)
-
-	for _, cacheDir := range cacheDirs {
-		casStorage, err := cas.NewStorage(cacheDir)
-		if err == nil {
-			if blobPath, err := casStorage.BlobPath(shaHex); err == nil {
-				if data, err := os.ReadFile(blobPath); err == nil {
-					return data, nil
-				}
-			}
-		}
-		flatPath := filepath.Join(cacheDir, shaHex)
-		if data, err := os.ReadFile(flatPath); err == nil {
-			return data, nil
-		}
-	}
-
-	stream, err := client.ReadBlob(ctx, &nieblav1.ReadBlobRequest{
-		Sha256: sha256Bytes,
-		Offset: 0,
-		Length: 0,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ReadBlob gRPC call failed: %w", err)
-	}
-
 	var buf bytes.Buffer
-	for {
-		chunk, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("error reading blob stream: %w", err)
-		}
-		buf.Write(chunk.Data)
+	fetcher := makeBlobFetcher(client, cacheDirs)
+	if err := fetcher(ctx, sha256Bytes, &buf); err != nil {
+		return nil, err
 	}
-
 	return buf.Bytes(), nil
 }
 

@@ -368,18 +368,7 @@ func (h *CLHandler) checkRequiredRunners(ctx context.Context, clID int64, psNum 
 	if rErr != nil {
 		return nil
 	}
-	greenRunners := make(map[string]bool, len(runs))
-	for _, run := range runs {
-		if run.Status == "passed" || run.Status == "skipped" {
-			greenRunners[strings.ToLower(strings.TrimSpace(run.RunnerName))] = true
-		}
-	}
-	var missing []string
-	for _, reqRunner := range requiredCIRunners {
-		if !greenRunners[strings.ToLower(strings.TrimSpace(reqRunner))] {
-			missing = append(missing, reqRunner)
-		}
-	}
+	missing := db.FindMissingRequiredRunners(runs, requiredCIRunners)
 	if len(missing) > 0 {
 		return fmt.Errorf("CL %d requires OWNERS.toml CI runner(s) to pass before submission: %s", clID, strings.Join(missing, ", "))
 	}
@@ -405,16 +394,7 @@ func (h *CLHandler) validateSubmitCI(ctx context.Context, clID int64, requireGre
 		demoCheckRunsMu.RLock()
 		runs := demoCheckRunsStore[fmt.Sprintf("%d:%d", clID, 1)]
 		demoCheckRunsMu.RUnlock()
-		total = len(runs)
-		for _, run := range runs {
-			switch run.Status {
-			case "queued", "running":
-				pending++
-			case "failed", "canceled", "cancelled":
-				failed++
-			}
-		}
-		green = (total > 0 && pending == 0 && failed == 0)
+		green, total, pending, failed = db.EvaluateCheckRuns(runs)
 	}
 
 	if !green {

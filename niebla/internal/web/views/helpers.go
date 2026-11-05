@@ -1,11 +1,10 @@
 package views
 
 import (
-	"os"
-	"os/user"
 	"strings"
 
 	"niebla/internal/db"
+	"niebla/internal/web/auth"
 )
 
 // InboxCounts holds counts for each inbox partition.
@@ -34,13 +33,7 @@ type InboxViewData struct {
 
 // ActiveUser returns the dynamic active OS username ($USER), or "reviewer" as fallback.
 func ActiveUser() string {
-	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
-		return u
-	}
-	if cur, err := user.Current(); err == nil && cur.Username != "" {
-		return cur.Username
-	}
-	return "reviewer"
+	return auth.CurrentOSUser()
 }
 
 // ActiveUserInitial returns the single-character uppercase initial of ActiveUser().

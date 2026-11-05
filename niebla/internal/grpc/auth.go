@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"crypto/subtle"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -18,25 +19,39 @@ const HeaderNieblaToken = "x-niebla-token"
 
 // Authenticator validates incoming RPC credentials against a configured set of authorized bearer tokens.
 type Authenticator struct {
-	tokens map[string]bool
+	tokens []string
 }
 
 // NewAuthenticator initializes an Authenticator with a slice of authorized bearer tokens.
 // If tokens is empty, authentication is disabled (permissive local development mode).
 func NewAuthenticator(tokens []string) *Authenticator {
-	tokenMap := make(map[string]bool)
+	var clean []string
 	for _, token := range tokens {
 		trimmed := strings.TrimSpace(token)
 		if trimmed != "" {
-			tokenMap[trimmed] = true
+			clean = append(clean, trimmed)
 		}
 	}
-	return &Authenticator{tokens: tokenMap}
+	return &Authenticator{tokens: clean}
 }
 
 // IsEnabled returns true if token authentication is enabled (i.e. at least one valid token is configured).
 func (a *Authenticator) IsEnabled() bool {
 	return a != nil && len(a.tokens) > 0
+}
+
+// matchToken checks if providedToken matches any valid token using subtle.ConstantTimeCompare
+// to prevent timing attacks.
+func (a *Authenticator) matchToken(provided string) bool {
+	providedBytes := []byte(strings.TrimSpace(provided))
+	matched := false
+	for _, valid := range a.tokens {
+		validBytes := []byte(valid)
+		if subtle.ConstantTimeCompare(providedBytes, validBytes) == 1 {
+			matched = true
+		}
+	}
+	return matched
 }
 
 // ValidateContext extracts credentials from gRPC incoming metadata and asserts validity against configured tokens.
@@ -54,8 +69,7 @@ func (a *Authenticator) ValidateContext(ctx context.Context) error {
 		for _, header := range authHeaders {
 			parts := strings.SplitN(strings.TrimSpace(header), " ", 2)
 			if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
-				token := strings.TrimSpace(parts[1])
-				if a.tokens[token] {
+				if a.matchToken(parts[1]) {
 					return nil
 				}
 			}
@@ -64,7 +78,7 @@ func (a *Authenticator) ValidateContext(ctx context.Context) error {
 
 	if tokenHeaders := md.Get(HeaderNieblaToken); len(tokenHeaders) > 0 {
 		for _, token := range tokenHeaders {
-			if a.tokens[strings.TrimSpace(token)] {
+			if a.matchToken(token) {
 				return nil
 			}
 		}

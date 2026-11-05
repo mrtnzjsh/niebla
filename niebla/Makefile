@@ -4,6 +4,7 @@ SHELL := /bin/sh
 all: build
 
 generate:
+	@which sqlc >/dev/null 2>&1 && sqlc generate || nix shell nixpkgs#sqlc --command sqlc generate
 	templ generate
 
 css:

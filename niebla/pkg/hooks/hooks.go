@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"niebla/pkg/ignore"
+
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -197,7 +199,7 @@ func EvaluateTreeScan(hook ServerHook, touched []TouchedFile) []HookFailure {
 		cleanPath := path.Clean(file.Path)
 
 		for _, pattern := range rule.ForbiddenPatterns {
-			if matchPathPattern(pattern, cleanPath) {
+			if ignore.MatchPathPattern(pattern, cleanPath) {
 				failures = append(failures, HookFailure{
 					HookName: hook.Name,
 					Type:     hook.Type,
@@ -285,7 +287,7 @@ func EvaluateServerPresubmitWithOptions(hooks []ServerHook, meta CLMetadata, tou
 func hookMatchesTouched(patterns []string, touched []TouchedFile) bool {
 	for _, file := range touched {
 		for _, pattern := range patterns {
-			if matchPathPattern(pattern, file.Path) {
+			if ignore.MatchPathPattern(pattern, file.Path) {
 				return true
 			}
 		}
@@ -374,38 +376,4 @@ func evaluateProcessHook(hook ServerHook, meta CLMetadata, touched []TouchedFile
 		}}
 	}
 	return nil
-}
-
-// matchPathPattern matches a pattern against a slash-separated file path.
-// If pattern contains no slash, it matches against the basename or any component.
-// If pattern contains a slash, it matches against the relative path.
-func matchPathPattern(pattern, filePath string) bool {
-	pattern = path.Clean(pattern)
-	filePath = path.Clean(filePath)
-
-	// Direct match
-	if matched, _ := path.Match(pattern, filePath); matched {
-		return true
-	}
-
-	// Basename match if pattern has no slashes (e.g. "*.pem" or "id_rsa*")
-	if !strings.Contains(pattern, "/") {
-		base := path.Base(filePath)
-		if matched, _ := path.Match(pattern, base); matched {
-			return true
-		}
-		if matched, _ := filepath.Match(pattern, base); matched {
-			return true
-		}
-	}
-
-	// Directory prefix match (e.g. "secrets/*")
-	if strings.HasSuffix(pattern, "/*") {
-		prefix := strings.TrimSuffix(pattern, "/*")
-		if strings.HasPrefix(filePath, prefix+"/") {
-			return true
-		}
-	}
-
-	return false
 }

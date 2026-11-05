@@ -175,11 +175,11 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			for _, c := range comments {
+			for _, comment := range comments {
 				var templ_7745c5c3_Var6 = []any{"p-3 rounded-lg border text-xs transition",
-					templ.KV("bg-amber-950/20 border-amber-800/50", c.IsDraft),
-					templ.KV("bg-slate-900/90 border-slate-800", !c.IsDraft && !c.Resolved),
-					templ.KV("bg-emerald-950/20 border-emerald-900/30 opacity-80", !c.IsDraft && c.Resolved)}
+					templ.KV("bg-amber-950/20 border-amber-800/50", comment.IsDraft),
+					templ.KV("bg-slate-900/90 border-slate-800", !comment.IsDraft && !comment.Resolved),
+					templ.KV("bg-emerald-950/20 border-emerald-900/30 opacity-80", !comment.IsDraft && comment.Resolved)}
 				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var6...)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -202,9 +202,9 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var8 string
-				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(string([]rune(c.Author)[0]))
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(string([]rune(comment.Author)[0]))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 108, Col: 39}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 108, Col: 45}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -215,9 +215,9 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var9 string
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(c.Author)
+				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(comment.Author)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 110, Col: 62}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 110, Col: 68}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -228,9 +228,9 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var10 string
-				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(c.CreatedAt.Format("Jan 02, 15:04"))
+				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(comment.CreatedAt.Format("Jan 02, 15:04"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 111, Col: 87}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 111, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
@@ -240,13 +240,13 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if c.IsDraft {
+				if comment.IsDraft {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<span class=\"inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40\"><span>Draft</span></span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				if c.HasSuggestion {
+				if comment.HasSuggestion {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<span class=\"inline-flex items-center space-x-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40\"><span>💡 AI / Code Suggestion</span></span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
@@ -256,15 +256,15 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if c.IsDraft {
+				if comment.IsDraft {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<button type=\"button\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var11 string
-					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/cl/%d/comments/%d/discard?author=%s", clID, c.ID, url.QueryEscape(c.Author)))
+					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/cl/%d/comments/%d/discard?author=%s", clID, comment.ID, url.QueryEscape(comment.Author)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 127, Col: 111}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 127, Col: 123}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 					if templ_7745c5c3_Err != nil {
@@ -288,7 +288,7 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 						return templ_7745c5c3_Err
 					}
 				} else {
-					var templ_7745c5c3_Var13 = []any{"text-[11px] px-2 py-0.5 rounded font-medium transition flex items-center space-x-1", templ.KV("bg-emerald-900/40 text-emerald-300 hover:bg-emerald-800/50", !c.Resolved), templ.KV("bg-slate-800 text-slate-400 hover:bg-slate-700", c.Resolved)}
+					var templ_7745c5c3_Var13 = []any{"text-[11px] px-2 py-0.5 rounded font-medium transition flex items-center space-x-1", templ.KV("bg-emerald-900/40 text-emerald-300 hover:bg-emerald-800/50", !comment.Resolved), templ.KV("bg-slate-800 text-slate-400 hover:bg-slate-700", comment.Resolved)}
 					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var13...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
@@ -298,9 +298,9 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var14 string
-					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/cl/%d/comments/%d/resolve?resolved=%t", clID, c.ID, !c.Resolved))
+					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/cl/%d/comments/%d/resolve?resolved=%t", clID, comment.ID, !comment.Resolved))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 139, Col: 99}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 139, Col: 111}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 					if templ_7745c5c3_Err != nil {
@@ -336,7 +336,7 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					if c.Resolved {
+					if comment.Resolved {
 						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<span>Reopen</span>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
@@ -356,15 +356,15 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if c.BodyWithoutSuggestionFence() != "" {
+				if comment.BodyWithoutSuggestionFence() != "" {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"text-slate-300 whitespace-pre-wrap font-sans text-xs pl-7 leading-relaxed\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(c.BodyWithoutSuggestionFence())
+					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(comment.BodyWithoutSuggestionFence())
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 155, Col: 41}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/views/comment_box.templ`, Line: 155, Col: 47}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 					if templ_7745c5c3_Err != nil {
@@ -375,8 +375,8 @@ func CommentBox(clID int64, patchsetNumber int, filePath string, line int, endLi
 						return templ_7745c5c3_Err
 					}
 				}
-				if c.HasSuggestion && c.SuggestionCode != "" {
-					templ_7745c5c3_Err = CommentSuggestionCard(clID, filePath, endLine, c).Render(ctx, templ_7745c5c3_Buffer)
+				if comment.HasSuggestion && comment.SuggestionCode != "" {
+					templ_7745c5c3_Err = CommentSuggestionCard(clID, filePath, endLine, comment).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

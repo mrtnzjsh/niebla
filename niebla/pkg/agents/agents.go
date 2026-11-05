@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"niebla/pkg/ignore"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -128,56 +129,11 @@ func MatchAgentsWithExplicit(agents []AgentDef, touchedFiles []string, explicitN
 func (a *AgentDef) MatchesAnyFile(touchedFiles []string) bool {
 	for _, file := range touchedFiles {
 		for _, pattern := range a.TriggerPaths {
-			if matchPathPattern(pattern, file) {
+			if ignore.MatchPathPattern(pattern, file) {
 				return true
 			}
 		}
 	}
-	return false
-}
-
-// matchPathPattern evaluates glob patterns against paths.
-func matchPathPattern(pattern, filePath string) bool {
-	cleanPath := path.Clean(filePath)
-	cleanPattern := path.Clean(pattern)
-
-	// Direct match
-	if matched, _ := path.Match(cleanPattern, cleanPath); matched {
-		return true
-	}
-
-	// Handle "**/" prefix/infix
-	if strings.HasPrefix(cleanPattern, "**/") {
-		subPattern := strings.TrimPrefix(cleanPattern, "**/")
-		base := path.Base(cleanPath)
-		if matched, _ := path.Match(subPattern, base); matched {
-			return true
-		}
-		if matched, _ := path.Match(subPattern, cleanPath); matched {
-			return true
-		}
-	}
-
-	// Basename match if pattern contains no slashes (e.g. "*.go")
-	if !strings.Contains(cleanPattern, "/") {
-		base := path.Base(cleanPath)
-		if matched, _ := path.Match(cleanPattern, base); matched {
-			return true
-		}
-		if matched, _ := filepath.Match(cleanPattern, base); matched {
-			return true
-		}
-	}
-
-	// Directory prefix match (e.g. "pkg/security/**" or "pkg/security/*")
-	prefix := cleanPattern
-	if idx := strings.Index(cleanPattern, "/*"); idx != -1 {
-		prefix = cleanPattern[:idx]
-	}
-	if strings.HasPrefix(cleanPath, prefix+"/") || cleanPath == prefix {
-		return true
-	}
-
 	return false
 }
 

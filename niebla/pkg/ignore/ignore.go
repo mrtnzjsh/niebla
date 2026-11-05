@@ -242,3 +242,39 @@ func matchSegments(patParts, pathParts []string) bool {
 
 	return matchSegments(patParts[1:], pathParts[1:])
 }
+
+// MatchPathPattern tests whether filePath matches pattern, supporting wildcards, basename fallback, and directory prefixes.
+func MatchPathPattern(pattern, filePath string) bool {
+	cleanPath := path.Clean(filePath)
+	cleanPattern := path.Clean(pattern)
+
+	if matched, _ := path.Match(cleanPattern, cleanPath); matched {
+		return true
+	}
+
+	if !strings.Contains(cleanPattern, "/") {
+		base := path.Base(cleanPath)
+		if matched, _ := path.Match(cleanPattern, base); matched {
+			return true
+		}
+		if matched, _ := filepath.Match(cleanPattern, base); matched {
+			return true
+		}
+	}
+
+	patParts := strings.Split(cleanPattern, "/")
+	pathParts := strings.Split(cleanPath, "/")
+	if matchSegments(patParts, pathParts) {
+		return true
+	}
+
+	prefix := cleanPattern
+	if idx := strings.Index(cleanPattern, "/*"); idx != -1 {
+		prefix = cleanPattern[:idx]
+	}
+	if strings.HasPrefix(cleanPath, prefix+"/") || cleanPath == prefix {
+		return true
+	}
+
+	return false
+}
