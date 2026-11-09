@@ -4,17 +4,16 @@ Thank you for your interest in contributing to Niebla!
 
 ---
 
-## Repository Architecture & Upstream Mirroring
+## Repository Architecture & Mirroring
 
-Niebla's primary development, automated code reviews, and containerized test runners are hosted on a self-hosted **Forgejo** instance. This GitHub repository serves as an official public mirror.
+This GitHub repository serves as a mirror.
 
 ### How Contributions Work
-You do **not** need a separate Forgejo account to contribute:
 1. **Fork and Branch:** Fork this repository on GitHub and create a topic branch (`git checkout -b feature/my-feature`).
 2. **Submit a Pull Request:** Open a standard Pull Request on GitHub.
-3. **Automated Verification:** A maintainer will fetch your PR branch and run it through our comprehensive test suite (including containerized PostgreSQL and multi-agent concurrency tests) on Forgejo Actions.
-4. **Upstream Merge:** Once approved, the maintainer merges your PR into `main` on Forgejo.
-5. **Automatic GitHub Closure:** As soon as Forgejo mirrors back to GitHub, **GitHub automatically recognizes your commits and marks your PR as Merged** with full commit author attribution.
+3. **Review & Verification:** Maintainers will review your PR and run it through our integration test suite.
+4. **Upstream Merge:** Once approved, changes are merged upstream.
+5. **Automatic GitHub Closure:** As soon as the upstream commit mirrors to GitHub, **GitHub automatically recognizes your commits and marks your PR as Merged** with full commit author attribution.
 
 ---
 

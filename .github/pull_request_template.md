@@ -13,8 +13,8 @@
 ---
 > [!NOTE]
 > **Upstream Mirror & Merge Process:**
-> This repository is mirrored from our primary Forgejo instance. When you submit this Pull Request:
-> 1. Maintainers fetch your PR branch and run it through our containerized integration suite on Forgejo Actions.
+> This repository is a mirror. When you submit this Pull Request:
+> 1. Maintainers fetch your PR branch and run it through our integration test suite.
 > 2. Once reviewed and green, the commit is merged upstream.
-> 3. Forgejo mirrors the commit back to GitHub, and **GitHub will automatically mark this PR as Merged** with your git author attribution preserved.
+> 3. As soon as the upstream commit mirrors to GitHub, **GitHub will automatically mark this PR as Merged** with your git author attribution preserved.
 
