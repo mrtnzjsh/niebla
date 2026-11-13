@@ -27,16 +27,20 @@ export default defineConfig({
           autogenerate: { directory: 'getting-started' },
         },
         {
+          label: 'Architecture & Internals',
+          autogenerate: { directory: 'architecture' },
+        },
+        {
+          label: 'Component Manuals',
+          autogenerate: { directory: 'components' },
+        },
+        {
           label: 'Workflows',
           autogenerate: { directory: 'workflows' },
         },
         {
           label: 'Cotejo Review',
           autogenerate: { directory: 'cotejo' },
-        },
-        {
-          label: 'Component Deep Dives',
-          autogenerate: { directory: 'components' },
         },
         {
           label: 'Reference & Schemas',
