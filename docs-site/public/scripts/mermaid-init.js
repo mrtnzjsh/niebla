@@ -83,6 +83,17 @@
       return;
     }
 
+    // CRITICAL: Astro / Starlight injects Expressive Code's stylesheet (<link rel="stylesheet">)
+    // and client module script (<script>) inside the VERY FIRST .expressive-code container on the page.
+    // If that container is a Mermaid diagram and we remove/replace it, the entire page loses Expressive Code
+    // styles, terminal headers, and copy buttons!
+    // We immediately relocate all Expressive Code links and scripts into document.head so they are permanently preserved.
+    document.querySelectorAll('link[href*="ec."], script[src*="ec."]').forEach(asset => {
+      if (asset.parentElement !== document.head) {
+        document.head.appendChild(asset);
+      }
+    });
+
     initMermaidTheme();
 
     const pres = document.querySelectorAll('pre[data-language="mermaid"], .language-mermaid');
@@ -112,6 +123,13 @@
         const wrapper = document.createElement('div');
         wrapper.className = 'mermaid-wrapper not-content';
         wrapper.innerHTML = svg;
+
+        // Preserve any remaining links or scripts in container
+        const embeddedAssets = container.querySelectorAll('link, script');
+        embeddedAssets.forEach(asset => {
+          document.head.appendChild(asset);
+        });
+
         container.replaceWith(wrapper);
       } catch (err) {
         console.error('Failed to render Mermaid diagram:', err);

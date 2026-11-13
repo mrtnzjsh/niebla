@@ -40,6 +40,7 @@ html[data-theme='dark'] {
 	   Deep Caribbean Midnight Base Surfaces
 	   ------------------------------------------------------------------------ */
 	--sl-color-black: #080D14;
+	--sl-color-gray-7: #080D14;
 	--sl-color-gray-6: #0E1622;
 	--sl-color-gray-5: #1A2433;
 	--sl-color-gray-4: #4A5B73;
@@ -51,6 +52,7 @@ html[data-theme='dark'] {
 	--sl-color-bg: #080D14;
 	--sl-color-bg-nav: #0B1118;
 	--sl-color-bg-sidebar: #080D14;
+	--sl-color-text: #F1F5F9;
 
 	--sl-color-accent: #0284C7;
 	--sl-color-accent-high: #38BDF8;
@@ -94,9 +96,10 @@ html[data-theme='light'] {
 	   Light Base Surfaces & Text Tokens
 	   ------------------------------------------------------------------------ */
 	--sl-color-black: #FFFFFF;
-	--sl-color-gray-6: #F8FAFC;
-	--sl-color-gray-5: #F1F5F9;
-	--sl-color-gray-4: #E2E8F0;
+	--sl-color-gray-7: #F8FAFC;
+	--sl-color-gray-6: #F1F5F9;
+	--sl-color-gray-5: #E2E8F0;
+	--sl-color-gray-4: #CBD5E1;
 	--sl-color-gray-3: #94A3B8;
 	--sl-color-gray-2: #475569;
 	--sl-color-gray-1: #1E293B;
@@ -368,22 +371,23 @@ html[data-theme='light'] .card {
 /* ----------------------------------------------------------------------------
    Code Frames: Paleta Quisqueyana Accents & Fluid Sizing
    ---------------------------------------------------------------------------- */
-html[data-theme='dark'] .expressive-code pre,
-html[data-theme='dark'] pre.astro-code {
-	border: 1px solid rgba(241, 245, 249, 0.18) !important;
-	border-radius: 0.625rem !important;
-	background-color: #0B1118 !important;
+html[data-theme='dark'] .expressive-code {
+	--ec-brdCol: rgba(241, 245, 249, 0.18);
+	--ec-codeBg: #0B1118;
+	--ec-frm-trmTtbBg: #080D14;
+	--ec-frm-trmBg: #0B1118;
 }
 
-html[data-theme='light'] .expressive-code pre,
-html[data-theme='light'] pre.astro-code {
-	border: 1px solid rgba(15, 23, 42, 0.12) !important;
-	border-radius: 0.625rem !important;
-	background-color: #F8FAFC !important;
+html[data-theme='light'] .expressive-code {
+	--ec-brdCol: rgba(15, 23, 42, 0.14);
+	--ec-codeBg: #F8FAFC;
+	--ec-frm-trmTtbBg: #F1F5F9;
+	--ec-frm-trmBg: #F8FAFC;
 }
 
 .expressive-code {
 	max-width: 100%;
+	margin-block: 1.5rem;
 }
 
 .expressive-code figure.frame {
