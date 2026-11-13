@@ -369,47 +369,47 @@ pre.astro-code {
    Main Pane Prioritization & Responsive Content Sizing
    ========================================================================== */
 :root {
-	--sl-content-width: 58rem;
-	--sl-content-width-expanded: 78rem;
+	--sl-content-width: 45rem;
+	--sl-content-width-expanded: 75rem;
 }
 
-@media (min-width: 80rem) {
+@media (min-width: 85rem) {
 	:root {
-		--sl-content-width: 65rem;
+		--sl-content-width: 48rem;
 	}
 }
 
-@media (min-width: 96rem) {
+@media (min-width: 95rem) {
 	:root {
-		--sl-content-width: 72rem;
+		--sl-content-width: 52rem;
 	}
 }
 
-@media (min-width: 72rem) {
-	/* Fix Right Sidebar container width and allocate all fluid space to the Main Pane */
-	html:not([data-toc-collapsed="true"]) .right-sidebar-container {
-		width: var(--sl-sidebar-width) !important;
-		min-width: var(--sl-sidebar-width) !important;
-		max-width: var(--sl-sidebar-width) !important;
-		flex-shrink: 0 !important;
+@media (min-width: 105rem) {
+	:root {
+		--sl-content-width: 58rem;
 	}
+}
 
-	html:not([data-toc-collapsed="true"]) .right-sidebar {
-		width: var(--sl-sidebar-width) !important;
-		inset-inline-end: 0 !important;
+@media (min-width: 120rem) {
+	:root {
+		--sl-content-width: 64rem;
 	}
+}
 
-	:global([data-has-sidebar][data-has-toc]) .main-pane,
-	[data-has-sidebar][data-has-toc] .main-pane {
-		width: calc(100% - var(--sl-sidebar-width)) !important;
-		flex-grow: 1 !important;
-		--sl-content-margin-inline: 0 auto !important;
-	}
+/* Ensure Main Pane never overflows flex boundaries or overlaps sidebars */
+.main-pane {
+	min-width: 0 !important;
+	overflow-wrap: break-word;
+}
 
-	.sl-container {
-		max-width: min(100%, var(--sl-content-width, 68rem)) !important;
-		margin-inline: auto !important;
-	}
+.content-panel {
+	min-width: 0 !important;
+	max-width: 100% !important;
+}
+
+.sl-container {
+	min-width: 0 !important;
 }
 
 /* ==========================================================================
@@ -445,16 +445,14 @@ html[data-toc-collapsed="true"] .right-sidebar {
 	pointer-events: none !important;
 }
 
-html[data-toc-collapsed="true"] .main-pane,
-html[data-toc-collapsed="true"] :global([data-has-sidebar][data-has-toc]) .main-pane,
-html[data-toc-collapsed="true"][data-has-sidebar][data-has-toc] .main-pane {
+html[data-toc-collapsed="true"] .main-pane {
 	width: 100% !important;
 	max-width: 100% !important;
 	--sl-content-margin-inline: auto !important;
 }
 
 html[data-toc-collapsed="true"] .sl-container {
-	max-width: var(--sl-content-width-expanded, 78rem) !important;
+	max-width: var(--sl-content-width-expanded, 75rem) !important;
 	margin-inline: auto !important;
 }
 
@@ -468,14 +466,16 @@ html[data-nav-collapsed="true"][data-toc-collapsed="true"] .sl-container {
    ========================================================================== */
 .sl-markdown-content table {
 	width: 100% !important;
-	display: table !important;
+	max-width: 100% !important;
+	display: block !important;
+	overflow-x: auto !important;
+	-webkit-overflow-scrolling: touch;
 	border-collapse: separate !important;
 	border-spacing: 0 !important;
 	margin: 1.5rem 0 2rem 0 !important;
 	background: rgba(14, 22, 34, 0.65) !important;
 	border: 1px solid var(--sl-color-hairline) !important;
 	border-radius: 0.625rem !important;
-	overflow: hidden !important;
 }
 
 .sl-markdown-content thead tr {
@@ -491,6 +491,7 @@ html[data-nav-collapsed="true"][data-toc-collapsed="true"] .sl-container {
 	letter-spacing: 0.05em !important;
 	padding: 0.75rem 1rem !important;
 	border-bottom: 1px solid var(--sl-color-hairline) !important;
+	white-space: nowrap !important;
 }
 
 .sl-markdown-content td {
@@ -508,31 +509,14 @@ html[data-nav-collapsed="true"][data-toc-collapsed="true"] .sl-container {
 	background: rgba(45, 212, 191, 0.04) !important;
 }
 
-/* Flag & parameter tables: strictly prevent flags, types, and defaults from wrapping */
-.sl-markdown-content table td:first-child,
-.sl-markdown-content table th:first-child {
+/* Flag & parameter tables: prevent short identifier tokens from awkward wraps */
+.sl-markdown-content table td:first-child {
 	white-space: nowrap !important;
 	font-weight: 600 !important;
-	width: 1% !important;
 }
 
 .sl-markdown-content table td code {
 	white-space: nowrap !important;
-}
-
-/* Tables with 4 columns (Flag | Type | Default | Description) */
-.sl-markdown-content table:has(th:nth-child(4)) td:nth-child(2),
-.sl-markdown-content table:has(th:nth-child(4)) th:nth-child(2),
-.sl-markdown-content table:has(th:nth-child(4)) td:nth-child(3),
-.sl-markdown-content table:has(th:nth-child(4)) th:nth-child(3) {
-	white-space: nowrap !important;
-	width: 1% !important;
-}
-
-.sl-markdown-content table:has(th:nth-child(4)) td:nth-child(4),
-.sl-markdown-content table:has(th:nth-child(4)) th:nth-child(4) {
-	width: auto !important;
-	min-width: 260px !important;
 }
 
 /* ==========================================================================
