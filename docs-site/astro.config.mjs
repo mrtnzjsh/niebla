@@ -15,9 +15,6 @@ export default defineConfig({
       logo: {
         src: './src/assets/logo.svg',
       },
-      components: {
-        MarkdownContent: './src/components/MarkdownContent.astro',
-      },
       head: [
         {
           tag: 'script',
@@ -31,6 +28,20 @@ export default defineConfig({
               }
             } catch (e) {}
           `,
+        },
+        {
+          tag: 'script',
+          attrs: {
+            src: '/niebla/scripts/mermaid.min.js',
+            defer: true,
+          },
+        },
+        {
+          tag: 'script',
+          attrs: {
+            src: '/niebla/scripts/mermaid-init.js',
+            defer: true,
+          },
         },
         {
           tag: 'script',

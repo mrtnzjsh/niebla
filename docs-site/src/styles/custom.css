@@ -629,3 +629,118 @@ html[data-toc-collapsed="true"] .niebla-arrow-toc {
 	box-shadow: 0 0 16px rgba(45, 212, 191, 0.4) !important;
 }
 
+/* ==========================================================================
+   Mermaid Diagrams (Paleta Quisqueyana Theme)
+   ========================================================================== */
+.mermaid-wrapper {
+	margin: 2rem 0 !important;
+	display: flex !important;
+	justify-content: center !important;
+	align-items: center !important;
+	background: rgba(14, 22, 34, 0.85) !important;
+	border: 1px solid var(--sl-color-hairline) !important;
+	border-radius: 0.875rem !important;
+	padding: 2rem 1.5rem !important;
+	overflow-x: auto !important;
+	box-shadow: 0 4px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(241, 245, 249, 0.08) !important;
+}
+
+.mermaid-wrapper svg {
+	max-width: 100% !important;
+	height: auto !important;
+}
+
+/* Paleta Quisqueyana Accents on Mermaid SVGs */
+.mermaid-wrapper svg .node rect,
+.mermaid-wrapper svg .node circle,
+.mermaid-wrapper svg .node ellipse,
+.mermaid-wrapper svg .node polygon {
+	fill: #0E1622 !important;
+	stroke: #0284C7 !important;
+	stroke-width: 1.5px !important;
+	transition: all 0.2s ease;
+}
+
+.mermaid-wrapper svg .node:hover rect,
+.mermaid-wrapper svg .node:hover circle,
+.mermaid-wrapper svg .node:hover ellipse,
+.mermaid-wrapper svg .node:hover polygon {
+	stroke: #2DD4BF !important;
+	filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.5));
+}
+
+.mermaid-wrapper svg .node .label {
+	color: #F1F5F9 !important;
+	fill: #F1F5F9 !important;
+	font-weight: 500;
+}
+
+.mermaid-wrapper svg .cluster rect {
+	fill: rgba(11, 17, 24, 0.85) !important;
+	stroke: rgba(2, 132, 199, 0.4) !important;
+	stroke-width: 1.5px !important;
+	rx: 8px !important;
+	ry: 8px !important;
+}
+
+.mermaid-wrapper svg .cluster .nodeLabel {
+	color: #2DD4BF !important;
+	fill: #2DD4BF !important;
+	font-weight: 700 !important;
+	letter-spacing: 0.03em;
+}
+
+.mermaid-wrapper svg .edgePath .path,
+.mermaid-wrapper svg .flowchart-link {
+	stroke: #2DD4BF !important;
+	stroke-width: 1.75px !important;
+}
+
+.mermaid-wrapper svg .marker,
+.mermaid-wrapper svg #statediagram-barbEnd,
+.mermaid-wrapper svg marker path {
+	fill: #2DD4BF !important;
+	stroke: #2DD4BF !important;
+}
+
+.mermaid-wrapper svg .edgeLabel {
+	background-color: #080D14 !important;
+	color: #BAE6FD !important;
+	fill: #BAE6FD !important;
+	font-size: 0.78rem !important;
+}
+
+/* ER Diagram Specific Styles */
+.mermaid-wrapper svg .er.entityBox {
+	fill: #0E1622 !important;
+	stroke: #0284C7 !important;
+	stroke-width: 1.5px !important;
+}
+
+.mermaid-wrapper svg .er.entityLabel {
+	fill: #F1F5F9 !important;
+	font-weight: 700 !important;
+	letter-spacing: 0.05em;
+}
+
+.mermaid-wrapper svg .er.attributeBoxOdd {
+	fill: #080D14 !important;
+	stroke: rgba(241, 245, 249, 0.12) !important;
+}
+
+.mermaid-wrapper svg .er.attributeBoxEven {
+	fill: #0E1622 !important;
+	stroke: rgba(241, 245, 249, 0.12) !important;
+}
+
+.mermaid-wrapper svg .er.relationshipLine {
+	stroke: #2DD4BF !important;
+	stroke-width: 1.75px !important;
+}
+
+.mermaid-wrapper svg .er.relationshipLabel {
+	fill: #99F6E4 !important;
+	font-size: 0.75rem !important;
+}
+
+
