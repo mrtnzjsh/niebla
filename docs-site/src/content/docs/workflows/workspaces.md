@@ -93,13 +93,20 @@ As you work, local disk space is consumed **only in proportion to your modificat
 
 ```mermaid
 xychart-beta
-    title "Local Disk Storage by Workspace Count (500GB Monorepo)"
+    title "Niebla Local Storage Footprint (500GB Monorepo)"
     x-axis ["1 Workspace", "5 Workspaces", "10 Workspaces", "20 Workspaces"]
-    y-axis "Disk Space Used (GB)" 0 --> 1000
+    y-axis "Local NVMe Space (GB)" 0 --> 4
     bar [0.15, 0.75, 1.5, 3.0]
-    line [500, 2500, 5000, 10000]
 ```
-*(Blue bars represent Niebla's shared CAS + scratch model; the red line shows conventional Git full clones).*
+
+### Storage Comparison: Niebla vs. Conventional Git
+
+| Workspace Count | Niebla Virtual Workspaces | Traditional Git Full Clones | Git Worktrees |
+| :--- | :--- | :--- | :--- |
+| **1 Workspace** | **~0.15 GB** *(0.03% of repo)* | 500 GB *(1.0x)* | 500 GB *(shared `.git`)* |
+| **5 Workspaces** | **~0.75 GB** *(shared CAS cache)* | 2,500 GB (2.5 TB) | 1,500 GB (1.5 TB) |
+| **10 Workspaces** | **~1.50 GB** *(shared CAS cache)* | 5,000 GB (5.0 TB) | 2,750 GB (2.75 TB) |
+| **20 Workspaces** | **~3.00 GB** *(shared CAS cache)* | 10,000 GB (10.0 TB) | 5,250 GB (5.25 TB) |
 
 ### Global Deduplication Across All Workspaces
 
