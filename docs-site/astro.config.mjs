@@ -15,6 +15,9 @@ export default defineConfig({
       logo: {
         src: './src/assets/logo.svg',
       },
+      customCss: [
+        './src/styles/custom.css',
+      ],
       social: {
         github: 'https://github.com/mrtnzjsh/niebla',
       },

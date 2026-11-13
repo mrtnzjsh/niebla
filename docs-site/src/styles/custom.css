@@ -1,0 +1,247 @@
+/* ==========================================================================
+   🌴 Paleta Quisqueyana (Dominican Natural Accents) Theme for Niebla Docs
+   ========================================================================== */
+
+:root {
+	/* ------------------------------------------------------------------------
+	   Dominican Natural Accents (Dark Mode Palette)
+	   ------------------------------------------------------------------------ */
+	/* 💎 Larimar Blue - Rare pectolite gemstone unique to Barahona, DR */
+	--sl-color-larimar: #2DD4BF;
+	--sl-color-larimar-low: rgba(45, 212, 191, 0.15);
+	--sl-color-larimar-high: #99F6E4;
+
+	/* ☀️ Ámbar Dorado - Dominican fossil amber & Caribbean sun */
+	--sl-color-ambar: #F59E0B;
+	--sl-color-ambar-low: rgba(245, 158, 11, 0.15);
+	--sl-color-ambar-high: #FDE68A;
+
+	/* 🌊 Azul Ultramar - Dominican flag blue & deep Caribbean waters */
+	--sl-color-ultramar: #0284C7;
+	--sl-color-ultramar-low: rgba(2, 132, 199, 0.18);
+	--sl-color-ultramar-high: #BAE6FD;
+
+	/* 🌺 Flor de Cayena - Dominican hibiscus flower & flag red */
+	--sl-color-cayena: #F43F5E;
+	--sl-color-cayena-low: rgba(244, 63, 94, 0.15);
+	--sl-color-cayena-high: #FECDD3;
+
+	/* 🌴 Verde Palma - Palma Real (Roystonea hispaniolana, DR national tree) */
+	--sl-color-palma: #10B981;
+	--sl-color-palma-low: rgba(16, 185, 129, 0.15);
+	--sl-color-palma-high: #A7F3D0;
+
+	/* 🏖️ Arena Blanca - Coastal white coral sand */
+	--sl-color-arena: #F1F5F9;
+	--sl-color-arena-muted: rgba(241, 245, 249, 0.12);
+
+	/* ------------------------------------------------------------------------
+	   Starlight Core Accent Overrides (Dark Mode)
+	   ------------------------------------------------------------------------ */
+	--sl-color-accent-low: var(--sl-color-ultramar-low);
+	--sl-color-accent: var(--sl-color-ultramar);
+	--sl-color-accent-high: #38BDF8;
+
+	/* Map Starlight standard hues to Quisqueyana semantic colors */
+	--sl-color-blue-low: var(--sl-color-ultramar-low);
+	--sl-color-blue: var(--sl-color-ultramar);
+	--sl-color-blue-high: var(--sl-color-ultramar-high);
+
+	--sl-color-purple-low: var(--sl-color-larimar-low);
+	--sl-color-purple: var(--sl-color-larimar);
+	--sl-color-purple-high: var(--sl-color-larimar-high);
+
+	--sl-color-orange-low: var(--sl-color-ambar-low);
+	--sl-color-orange: var(--sl-color-ambar);
+	--sl-color-orange-high: var(--sl-color-ambar-high);
+
+	--sl-color-green-low: var(--sl-color-palma-low);
+	--sl-color-green: var(--sl-color-palma);
+	--sl-color-green-high: var(--sl-color-palma-high);
+
+	--sl-color-red-low: var(--sl-color-cayena-low);
+	--sl-color-red: var(--sl-color-cayena);
+	--sl-color-red-high: var(--sl-color-cayena-high);
+
+	/* Warm Arena Blanca borders replace clinical gray */
+	--sl-color-hairline: var(--sl-color-arena-muted);
+	--sl-color-hairline-light: rgba(241, 245, 249, 0.22);
+}
+
+:root[data-theme='light'] {
+	/* ------------------------------------------------------------------------
+	   Dominican Natural Accents (Light Mode Palette)
+	   ------------------------------------------------------------------------ */
+	/* 💎 Larimar Blue */
+	--sl-color-larimar: #38BDF8;
+	--sl-color-larimar-low: #E0F2FE;
+	--sl-color-larimar-high: #0284C7;
+
+	/* ☀️ Ámbar Dorado */
+	--sl-color-ambar: #D97706;
+	--sl-color-ambar-low: #FEF3C7;
+	--sl-color-ambar-high: #78350F;
+
+	/* 🌊 Azul Ultramar */
+	--sl-color-ultramar: #002F6C;
+	--sl-color-ultramar-low: #DBEAFE;
+	--sl-color-ultramar-high: #1E3A8A;
+
+	/* 🌺 Flor de Cayena */
+	--sl-color-cayena: #CE1126;
+	--sl-color-cayena-low: #FFE4E6;
+	--sl-color-cayena-high: #881337;
+
+	/* 🌴 Verde Palma */
+	--sl-color-palma: #059669;
+	--sl-color-palma-low: #D1FAE5;
+	--sl-color-palma-high: #064E3B;
+
+	/* 🏖️ Arena Blanca */
+	--sl-color-arena: #CBD5E1;
+	--sl-color-arena-muted: rgba(203, 213, 225, 0.45);
+
+	/* ------------------------------------------------------------------------
+	   Starlight Core Accent Overrides (Light Mode)
+	   ------------------------------------------------------------------------ */
+	--sl-color-accent-low: #E0F2FE;
+	--sl-color-accent: #0284C7;
+	--sl-color-accent-high: #002F6C;
+
+	--sl-color-blue-low: var(--sl-color-ultramar-low);
+	--sl-color-blue: #0284C7;
+	--sl-color-blue-high: var(--sl-color-ultramar-high);
+
+	--sl-color-purple-low: var(--sl-color-larimar-low);
+	--sl-color-purple: var(--sl-color-larimar);
+	--sl-color-purple-high: var(--sl-color-larimar-high);
+
+	--sl-color-orange-low: var(--sl-color-ambar-low);
+	--sl-color-orange: var(--sl-color-ambar);
+	--sl-color-orange-high: var(--sl-color-ambar-high);
+
+	--sl-color-green-low: var(--sl-color-palma-low);
+	--sl-color-green: var(--sl-color-palma);
+	--sl-color-green-high: var(--sl-color-palma-high);
+
+	--sl-color-red-low: var(--sl-color-cayena-low);
+	--sl-color-red: var(--sl-color-cayena);
+	--sl-color-red-high: var(--sl-color-cayena-high);
+
+	--sl-color-hairline: var(--sl-color-arena-muted);
+	--sl-color-hairline-light: rgba(203, 213, 225, 0.65);
+}
+
+/* ----------------------------------------------------------------------------
+   Component-Level Visual Hierarchy & Accents
+   ---------------------------------------------------------------------------- */
+
+/* Top header border in Azul Ultramar -> Larimar Blue gradient */
+header.header {
+	border-top: 3px solid transparent;
+	border-image: linear-gradient(to right, var(--sl-color-ultramar), var(--sl-color-larimar)) 1;
+}
+
+/* Feature Cards with Arena Blanca borders and Quisqueyana semantic accents */
+.card {
+	border: 1px solid var(--sl-color-arena-muted) !important;
+	border-radius: 0.75rem;
+	transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+	            border-color 0.2s ease,
+	            box-shadow 0.2s ease;
+}
+
+.card:hover {
+	border-color: var(--sl-card-border) !important;
+	box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.15);
+	transform: translateY(-2px);
+}
+
+/* Card semantic rotation matching the 6 Paleta Quisqueyana colors */
+.card:nth-child(6n + 1) {
+	--sl-card-border: var(--sl-color-larimar);
+	--sl-card-bg: var(--sl-color-larimar-low);
+}
+.card:nth-child(6n + 2) {
+	--sl-card-border: var(--sl-color-ambar);
+	--sl-card-bg: var(--sl-color-ambar-low);
+}
+.card:nth-child(6n + 3) {
+	--sl-card-border: var(--sl-color-ultramar);
+	--sl-card-bg: var(--sl-color-ultramar-low);
+}
+.card:nth-child(6n + 4) {
+	--sl-card-border: var(--sl-color-palma);
+	--sl-card-bg: var(--sl-color-palma-low);
+}
+.card:nth-child(6n + 5) {
+	--sl-card-border: var(--sl-color-cayena);
+	--sl-card-bg: var(--sl-color-cayena-low);
+}
+.card:nth-child(6n + 6) {
+	--sl-card-border: var(--sl-color-larimar);
+	--sl-card-bg: var(--sl-color-larimar-low);
+}
+
+.card .icon {
+	color: var(--sl-card-border);
+}
+
+/* Hero Section Enhancements */
+.hero .actions .primary {
+	background: linear-gradient(135deg, var(--sl-color-ultramar), #0369a1);
+	border: 1px solid var(--sl-color-ultramar-high);
+	color: #ffffff !important;
+	box-shadow: 0 4px 14px 0 rgba(2, 132, 199, 0.35);
+	transition: all 0.2s ease;
+}
+
+.hero .actions .primary:hover {
+	background: linear-gradient(135deg, #0369a1, var(--sl-color-larimar));
+	box-shadow: 0 6px 20px rgba(45, 212, 191, 0.4);
+	transform: translateY(-1px);
+}
+
+.hero .actions .secondary {
+	border: 1px solid var(--sl-color-arena-muted);
+	transition: all 0.2s ease;
+}
+
+.hero .actions .secondary:hover {
+	border-color: var(--sl-color-larimar);
+	color: var(--sl-color-larimar);
+}
+
+/* Warm Arena Blanca borders around code frames and syntax drawers */
+.expressive-code pre {
+	border: 1px solid var(--sl-color-arena-muted) !important;
+	border-radius: 0.5rem;
+}
+
+/* Asides (Callouts) with Paleta Quisqueyana Semantic Colors */
+.starlight-aside--note {
+	--sl-color-asides-border: var(--sl-color-ultramar);
+	background-color: var(--sl-color-ultramar-low);
+}
+
+.starlight-aside--tip {
+	--sl-color-asides-border: var(--sl-color-larimar);
+	background-color: var(--sl-color-larimar-low);
+}
+
+.starlight-aside--caution {
+	--sl-color-asides-border: var(--sl-color-ambar);
+	background-color: var(--sl-color-ambar-low);
+}
+
+.starlight-aside--danger {
+	--sl-color-asides-border: var(--sl-color-cayena);
+	background-color: var(--sl-color-cayena-low);
+}
+
+/* Sidebar active link styling */
+.sidebar a[aria-current='page'] {
+	color: var(--sl-color-larimar) !important;
+	border-inline-start-color: var(--sl-color-ultramar) !important;
+	font-weight: 600;
+}
