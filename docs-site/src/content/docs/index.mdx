@@ -1,0 +1,43 @@
+---
+title: Niebla Documentation
+description: Server-authoritative, virtualized monorepo toolchain inspired by Google Piper, CitC, and Critique.
+template: splash
+hero:
+  tagline: High-performance monorepo version control and code review toolchain built on content-addressable storage, FUSE virtual workspaces, and AI review agents.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Quickstart Guide
+      link: /niebla/getting-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: Core Architecture
+      link: /niebla/getting-started/philosophy/
+      icon: external
+      variant: secondary
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Key Features
+
+<CardGrid stagger>
+  <Card title="Instant Virtual Workspaces" icon="rocket">
+    Mount massive monorepo checkouts in milliseconds using **NieblaFS**. File bytes are streamed lazily on-demand over gRPC and cached locally.
+  </Card>
+  <Card title="Content-Addressable Storage" icon="document">
+    Unified SHA-256 CAS engine. Eliminates Git packfile bloat and makes Git-LFS obsolete by design.
+  </Card>
+  <Card title="Cotejo Code Review" icon="laptop">
+    A Google Critique-inspired web review interface with intra-line diffing, threaded comments, approval gating, and real-time SSE DOM updates.
+  </Card>
+  <Card title="Autonomous AI Review Agents" icon="puzzle">
+    Built-in agents (`review-agent`, `ai-hint-agent`) with Adaptive Context Aperture offering one-click patchset suggestions.
+  </Card>
+  <Card title="Monotonic Trunk History" icon="random">
+    Strict trunk revision monotonicity with automated cascading rebases for stacked changelists.
+  </Card>
+  <Card title="Nix & NixOS Native" icon="setting">
+    First-class NixOS service modules (`services.niebla`) and Home Manager developer modules (`programs.niebla`).
+  </Card>
+</CardGrid>

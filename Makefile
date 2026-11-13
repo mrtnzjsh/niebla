@@ -1,4 +1,4 @@
-.PHONY: all dev dev-cotejo build test clean
+.PHONY: all dev dev-cotejo build test clean docs-dev docs-build
 
 all: build
 
@@ -16,3 +16,9 @@ test:
 
 clean:
 	@$(MAKE) -C niebla clean
+
+docs-dev:
+	@npm run dev --prefix docs-site
+
+docs-build:
+	@npm run build --prefix docs-site
