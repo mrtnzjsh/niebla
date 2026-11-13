@@ -166,39 +166,6 @@ POSIX filesystems require that deleting a file immediately hides it from subsequ
 
 The implementation in [`cmd/nieblafs/internal/fs/`](file:///home/matatan/Developer/niebla/niebla/cmd/nieblafs/internal/fs) maps FUSE interfaces to Go types:
 
-```mermaid
-flowchart TD
-    subgraph LookupFlow["<b>Dir.Lookup(name) Resolution Pipeline</b>"]
-        L_IN["<b>FUSE_LOOKUP</b><br/><code>Dir.Lookup(ctx, name)</code>"]
-        L_WH{"Whiteout Marker?<br/><code>.wh.[name]</code>"}
-        L_ENOENT["Return <b>syscall.ENOENT</b><br/><i>(File suppressed / deleted)</i>"]
-        L_SCR{"Scratch Overlay?<br/><code>~/.niebla/workspaces/...</code>"}
-        L_RET_SCR["Return <b>ScratchNode</b><br/><i>(Modified local inode)</i>"]
-        L_BASE["Query Base Merkle Tree<br/><code>lookupBase(ctx, path, name)</code>"]
-        L_RET_BASE["Return <b>BaseNode</b><br/><i>(Synthetic read-only inode)</i>"]
-
-        L_IN --> L_WH
-        L_WH -->|"Yes (Hidden)"| L_ENOENT
-        L_WH -->|"No"| L_SCR
-        L_SCR -->|"Yes (Exists)"| L_RET_SCR
-        L_SCR -->|"No"| L_BASE
-        L_BASE --> L_RET_BASE
-    end
-
-    subgraph ReadFlow["<b>File.Read(offset, size) Execution Pipeline</b>"]
-        R_IN["<b>FUSE_READ</b><br/><code>File.Read(ctx, req, resp)</code>"]
-        R_CHECK{"Modified File?<br/><code>scratchPath != ''</code>"}
-        R_DISK["Read from Local Scratch Disk<br/><code>readFromFileAt(scratchPath, offset, size)</code>"]
-        R_CAS["Fetch from CAS / Remote gRPC<br/><code>FetchBlobChunk(blobHash, offset, size)</code>"]
-
-        R_IN --> R_CHECK
-        R_CHECK -->|"Yes (CoW Dirty)"| R_DISK
-        R_CHECK -->|"No (Base Tree)"| R_CAS
-    end
-```
-
-### Go Node Types & Dispatch Logic
-
 ```go
 // Directory node: handles path component resolution
 type Dir struct {
@@ -208,20 +175,15 @@ type Dir struct {
 }
 
 // Inode lookup: resolves name across whiteouts, scratch, and base tree
-func (d *Dir) Lookup(
-    ctx context.Context,
-    name string,
-) (fs.Node, error) {
+func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
     // 1. Check if name is hidden by a whiteout file (.wh.<name>)
     if d.fs.isWhiteout(d.path, name) {
         return nil, syscall.ENOENT
     }
-
     // 2. Check scratch overlay on local disk
     if scratchNode, ok := d.fs.lookupScratch(d.path, name); ok {
         return scratchNode, nil
     }
-
     // 3. Fallback to base Merkle tree metadata
     return d.fs.lookupBase(ctx, d.path, name)
 }
@@ -236,23 +198,13 @@ type File struct {
     mode        uint32
 }
 
-func (f *File) Read(
-    ctx context.Context,
-    req *fuse.ReadRequest,
-    resp *fuse.ReadResponse,
-) error {
+func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
     if f.scratchPath != "" {
         return readFromFileAt(f.scratchPath, req.Offset, req.Size, resp)
     }
-    return f.fs.Fetcher.FetchBlobChunk(
-        ctx, f.blobHash, req.Offset, req.Size, resp,
-    )
+    return f.fs.Fetcher.FetchBlobChunk(ctx, f.blobHash, req.Offset, req.Size, resp)
 }
 ```
-
-### Dispatch Architecture:
-* **`Dir.Lookup` Multi-Tier Precedence**: Direct lookups check in order: (1) whiteout suppression, (2) modified scratch layer, and (3) remote base Merkle tree.
-* **`File.Read` Zero-Copy Switching**: Unmodified files stream directly from local CAS NVMe storage (or via remote gRPC chunk streams), while modified files switch transparently to standard OS file reads in the workspace scratch overlay.
 
 ---
 
