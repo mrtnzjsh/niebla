@@ -1,77 +1,66 @@
 /* ==========================================================================
-   🌴 Paleta Quisqueyana (Dominican Natural Accents) Theme for Niebla Docs
+   🌴 Paleta Quisqueyana (Dominican Natural Accents) Theme for Niebla
    ========================================================================== */
 
-:root {
+:root,
+html[data-theme='dark'] {
 	/* ------------------------------------------------------------------------
 	   Dominican Natural Accents (Dark Mode Palette)
 	   ------------------------------------------------------------------------ */
 	/* 💎 Larimar Blue - Rare pectolite gemstone unique to Barahona, DR */
 	--sl-color-larimar: #2DD4BF;
-	--sl-color-larimar-low: rgba(45, 212, 191, 0.15);
+	--sl-color-larimar-low: rgba(45, 212, 191, 0.16);
 	--sl-color-larimar-high: #99F6E4;
 
 	/* ☀️ Ámbar Dorado - Dominican fossil amber & Caribbean sun */
 	--sl-color-ambar: #F59E0B;
-	--sl-color-ambar-low: rgba(245, 158, 11, 0.15);
+	--sl-color-ambar-low: rgba(245, 158, 11, 0.16);
 	--sl-color-ambar-high: #FDE68A;
 
 	/* 🌊 Azul Ultramar - Dominican flag blue & deep Caribbean waters */
 	--sl-color-ultramar: #0284C7;
-	--sl-color-ultramar-low: rgba(2, 132, 199, 0.18);
+	--sl-color-ultramar-low: rgba(2, 132, 199, 0.20);
 	--sl-color-ultramar-high: #BAE6FD;
 
 	/* 🌺 Flor de Cayena - Dominican hibiscus flower & flag red */
 	--sl-color-cayena: #F43F5E;
-	--sl-color-cayena-low: rgba(244, 63, 94, 0.15);
+	--sl-color-cayena-low: rgba(244, 63, 94, 0.16);
 	--sl-color-cayena-high: #FECDD3;
 
 	/* 🌴 Verde Palma - Palma Real (Roystonea hispaniolana, DR national tree) */
 	--sl-color-palma: #10B981;
-	--sl-color-palma-low: rgba(16, 185, 129, 0.15);
+	--sl-color-palma-low: rgba(16, 185, 129, 0.16);
 	--sl-color-palma-high: #A7F3D0;
 
 	/* 🏖️ Arena Blanca - Coastal white coral sand */
 	--sl-color-arena: #F1F5F9;
-	--sl-color-arena-muted: rgba(241, 245, 249, 0.12);
+	--sl-color-arena-muted: rgba(241, 245, 249, 0.14);
 
 	/* ------------------------------------------------------------------------
-	   Starlight Core Accent Overrides (Dark Mode)
+	   Deep Caribbean Midnight Base Surfaces
 	   ------------------------------------------------------------------------ */
-	--sl-color-accent-low: var(--sl-color-ultramar-low);
-	--sl-color-accent: var(--sl-color-ultramar);
+	--sl-color-black: #080D14;
+	--sl-color-gray-6: #0E1622;
+	--sl-color-gray-5: #1A2433;
+	--sl-color-gray-4: #4A5B73;
+	--sl-color-gray-3: #8B9BB0;
+	--sl-color-gray-2: #CBD5E1;
+	--sl-color-gray-1: #F1F5F9;
+	--sl-color-white: #FFFFFF;
+
+	--sl-color-bg: #080D14;
+	--sl-color-bg-nav: #0B1118;
+	--sl-color-bg-sidebar: #080D14;
+
+	--sl-color-accent: #0284C7;
 	--sl-color-accent-high: #38BDF8;
+	--sl-color-accent-low: rgba(2, 132, 199, 0.2);
 
-	/* Map Starlight standard hues to Quisqueyana semantic colors */
-	--sl-color-blue-low: var(--sl-color-ultramar-low);
-	--sl-color-blue: var(--sl-color-ultramar);
-	--sl-color-blue-high: var(--sl-color-ultramar-high);
-
-	--sl-color-purple-low: var(--sl-color-larimar-low);
-	--sl-color-purple: var(--sl-color-larimar);
-	--sl-color-purple-high: var(--sl-color-larimar-high);
-
-	--sl-color-orange-low: var(--sl-color-ambar-low);
-	--sl-color-orange: var(--sl-color-ambar);
-	--sl-color-orange-high: var(--sl-color-ambar-high);
-
-	--sl-color-green-low: var(--sl-color-palma-low);
-	--sl-color-green: var(--sl-color-palma);
-	--sl-color-green-high: var(--sl-color-palma-high);
-
-	--sl-color-red-low: var(--sl-color-cayena-low);
-	--sl-color-red: var(--sl-color-cayena);
-	--sl-color-red-high: var(--sl-color-cayena-high);
-
-	/* Warm Arena Blanca borders replace clinical gray */
-	--sl-color-hairline: var(--sl-color-arena-muted);
+	--sl-color-hairline: rgba(241, 245, 249, 0.12);
 	--sl-color-hairline-light: rgba(241, 245, 249, 0.22);
 }
 
-:root[data-theme='light'] {
-	/* ------------------------------------------------------------------------
-	   Dominican Natural Accents (Light Mode Palette)
-	   ------------------------------------------------------------------------ */
+html[data-theme='light'] {
 	/* 💎 Larimar Blue */
 	--sl-color-larimar: #38BDF8;
 	--sl-color-larimar-low: #E0F2FE;
@@ -99,149 +88,279 @@
 
 	/* 🏖️ Arena Blanca */
 	--sl-color-arena: #CBD5E1;
-	--sl-color-arena-muted: rgba(203, 213, 225, 0.45);
+	--sl-color-arena-muted: rgba(203, 213, 225, 0.55);
 
-	/* ------------------------------------------------------------------------
-	   Starlight Core Accent Overrides (Light Mode)
-	   ------------------------------------------------------------------------ */
-	--sl-color-accent-low: #E0F2FE;
 	--sl-color-accent: #0284C7;
 	--sl-color-accent-high: #002F6C;
+	--sl-color-accent-low: #E0F2FE;
 
-	--sl-color-blue-low: var(--sl-color-ultramar-low);
-	--sl-color-blue: #0284C7;
-	--sl-color-blue-high: var(--sl-color-ultramar-high);
-
-	--sl-color-purple-low: var(--sl-color-larimar-low);
-	--sl-color-purple: var(--sl-color-larimar);
-	--sl-color-purple-high: var(--sl-color-larimar-high);
-
-	--sl-color-orange-low: var(--sl-color-ambar-low);
-	--sl-color-orange: var(--sl-color-ambar);
-	--sl-color-orange-high: var(--sl-color-ambar-high);
-
-	--sl-color-green-low: var(--sl-color-palma-low);
-	--sl-color-green: var(--sl-color-palma);
-	--sl-color-green-high: var(--sl-color-palma-high);
-
-	--sl-color-red-low: var(--sl-color-cayena-low);
-	--sl-color-red: var(--sl-color-cayena);
-	--sl-color-red-high: var(--sl-color-cayena-high);
-
-	--sl-color-hairline: var(--sl-color-arena-muted);
-	--sl-color-hairline-light: rgba(203, 213, 225, 0.65);
+	--sl-color-hairline: var(--sl-color-arena);
+	--sl-color-hairline-light: #E2E8F0;
 }
 
 /* ----------------------------------------------------------------------------
-   Component-Level Visual Hierarchy & Accents
+   Global Atmospheric Background
    ---------------------------------------------------------------------------- */
-
-/* Top header border in Azul Ultramar -> Larimar Blue gradient */
-header.header {
-	border-top: 3px solid transparent;
-	border-image: linear-gradient(to right, var(--sl-color-ultramar), var(--sl-color-larimar)) 1;
+body {
+	background-color: var(--sl-color-bg) !important;
+	background-image:
+		radial-gradient(ellipse 90% 60% at 50% -20%, rgba(2, 132, 199, 0.18), transparent),
+		radial-gradient(ellipse 70% 50% at 100% 40%, rgba(45, 212, 191, 0.08), transparent) !important;
+	background-attachment: fixed !important;
 }
 
-/* Feature Cards with Arena Blanca borders and Quisqueyana semantic accents */
+/* ----------------------------------------------------------------------------
+   Top Header Accent Bar (Azul Ultramar -> Larimar Blue -> Ámbar Dorado)
+   ---------------------------------------------------------------------------- */
+header.header {
+	border-top: 3.5px solid transparent !important;
+	border-image: linear-gradient(90deg, #0284C7 0%, #2DD4BF 40%, #F59E0B 75%, #10B981 100%) 1 !important;
+	background: rgba(11, 17, 24, 0.88) !important;
+	backdrop-filter: blur(14px) !important;
+	border-bottom: 1px solid var(--sl-color-hairline) !important;
+}
+
+.site-title {
+	font-weight: 700 !important;
+	letter-spacing: -0.01em !important;
+}
+
+.site-title:hover {
+	color: var(--sl-color-larimar) !important;
+}
+
+/* ----------------------------------------------------------------------------
+   Hero Section: Dominican Tropical Gradient & Radiance
+   ---------------------------------------------------------------------------- */
+.hero h1,
+h1[data-page-title] {
+	background: linear-gradient(135deg, #38BDF8 0%, #2DD4BF 45%, #0284C7 100%) !important;
+	-webkit-background-clip: text !important;
+	-webkit-text-fill-color: transparent !important;
+	background-clip: text !important;
+	font-weight: 800 !important;
+	letter-spacing: -0.03em !important;
+}
+
+.hero .tagline {
+	color: #CBD5E1 !important; /* Warm Arena Blanca tone */
+	font-weight: 400 !important;
+	line-height: 1.6 !important;
+}
+
+.hero img {
+	filter: drop-shadow(0 0 45px rgba(45, 212, 191, 0.3)) drop-shadow(0 0 15px rgba(2, 132, 199, 0.4)) !important;
+	border-radius: 1rem !important;
+	transition: filter 0.3s ease;
+}
+
+.hero img:hover {
+	filter: drop-shadow(0 0 55px rgba(45, 212, 191, 0.45)) drop-shadow(0 0 25px rgba(2, 132, 199, 0.55)) !important;
+}
+
+/* Primary CTA: 🌊 Azul Ultramar with 💎 Larimar Glow */
+.sl-link-button.primary {
+	background: linear-gradient(135deg, #0284C7 0%, #002F6C 100%) !important;
+	border: 1.5px solid #2DD4BF !important;
+	color: #FFFFFF !important;
+	box-shadow: 0 4px 18px rgba(2, 132, 199, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+	font-weight: 600 !important;
+	transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.sl-link-button.primary:hover {
+	background: linear-gradient(135deg, #0369A1 0%, #2DD4BF 100%) !important;
+	box-shadow: 0 6px 28px rgba(45, 212, 191, 0.55) !important;
+	transform: translateY(-2px) !important;
+	color: #FFFFFF !important;
+}
+
+/* Secondary CTA: 🏖️ Arena Blanca Outline with Tropical Transition */
+.sl-link-button.secondary {
+	background: rgba(241, 245, 249, 0.05) !important;
+	border: 1.5px solid rgba(241, 245, 249, 0.35) !important;
+	color: #F1F5F9 !important;
+	backdrop-filter: blur(8px) !important;
+	font-weight: 500 !important;
+	transition: all 0.25s ease !important;
+}
+
+.sl-link-button.secondary:hover {
+	border-color: #2DD4BF !important;
+	color: #2DD4BF !important;
+	background: rgba(45, 212, 191, 0.12) !important;
+	transform: translateY(-2px) !important;
+}
+
+/* ----------------------------------------------------------------------------
+   Key Features: 6 Distinctive Paleta Quisqueyana Cards
+   ---------------------------------------------------------------------------- */
+.main-frame h2 {
+	color: #F1F5F9 !important;
+	border-bottom: 2px solid rgba(2, 132, 199, 0.4) !important;
+	padding-bottom: 0.4rem !important;
+	display: inline-block !important;
+	margin-top: 2rem !important;
+	margin-bottom: 1.5rem !important;
+}
+
 .card {
-	border: 1px solid var(--sl-color-arena-muted) !important;
-	border-radius: 0.75rem;
-	transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-	            border-color 0.2s ease,
-	            box-shadow 0.2s ease;
+	position: relative !important;
+	background: linear-gradient(180deg, rgba(14, 22, 34, 0.85) 0%, rgba(8, 13, 20, 0.95) 100%) !important;
+	border-radius: 0.875rem !important;
+	padding: 1.75rem !important;
+	transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+	            box-shadow 0.25s ease,
+	            border-color 0.25s ease !important;
 }
 
 .card:hover {
-	border-color: var(--sl-card-border) !important;
-	box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.15);
-	transform: translateY(-2px);
+	transform: translateY(-3px) !important;
 }
 
-/* Card semantic rotation matching the 6 Paleta Quisqueyana colors */
-.card:nth-child(6n + 1) {
-	--sl-card-border: var(--sl-color-larimar);
-	--sl-card-bg: var(--sl-color-larimar-low);
+.card .title {
+	font-size: 1.25rem !important;
+	font-weight: 700 !important;
+	color: #F1F5F9 !important;
 }
-.card:nth-child(6n + 2) {
-	--sl-card-border: var(--sl-color-ambar);
-	--sl-card-bg: var(--sl-color-ambar-low);
-}
-.card:nth-child(6n + 3) {
-	--sl-card-border: var(--sl-color-ultramar);
-	--sl-card-bg: var(--sl-color-ultramar-low);
-}
-.card:nth-child(6n + 4) {
-	--sl-card-border: var(--sl-color-palma);
-	--sl-card-bg: var(--sl-color-palma-low);
-}
-.card:nth-child(6n + 5) {
-	--sl-card-border: var(--sl-color-cayena);
-	--sl-card-bg: var(--sl-color-cayena-low);
-}
-.card:nth-child(6n + 6) {
-	--sl-card-border: var(--sl-color-larimar);
-	--sl-card-bg: var(--sl-color-larimar-low);
+
+.card .body {
+	color: #CBD5E1 !important;
+	line-height: 1.65 !important;
 }
 
 .card .icon {
-	color: var(--sl-card-border);
+	padding: 0.35em !important;
+	border-radius: 0.5rem !important;
 }
 
-/* Hero Section Enhancements */
-.hero .actions .primary {
-	background: linear-gradient(135deg, var(--sl-color-ultramar), #0369a1);
-	border: 1px solid var(--sl-color-ultramar-high);
-	color: #ffffff !important;
-	box-shadow: 0 4px 14px 0 rgba(2, 132, 199, 0.35);
-	transition: all 0.2s ease;
+/* Card 1: 💎 Larimar Blue (Instant Virtual Workspaces) */
+.card:nth-child(6n + 1) {
+	border: 1px solid rgba(45, 212, 191, 0.35) !important;
+	border-top: 3.5px solid #2DD4BF !important;
+}
+.card:nth-child(6n + 1):hover {
+	border-color: #2DD4BF !important;
+	box-shadow: 0 14px 35px -8px rgba(45, 212, 191, 0.35) !important;
+}
+.card:nth-child(6n + 1) .icon {
+	border: 1px solid #2DD4BF !important;
+	background: rgba(45, 212, 191, 0.18) !important;
+	color: #2DD4BF !important;
 }
 
-.hero .actions .primary:hover {
-	background: linear-gradient(135deg, #0369a1, var(--sl-color-larimar));
-	box-shadow: 0 6px 20px rgba(45, 212, 191, 0.4);
-	transform: translateY(-1px);
+/* Card 2: ☀️ Ámbar Dorado (Content-Addressable Storage) */
+.card:nth-child(6n + 2) {
+	border: 1px solid rgba(245, 158, 11, 0.35) !important;
+	border-top: 3.5px solid #F59E0B !important;
+}
+.card:nth-child(6n + 2):hover {
+	border-color: #F59E0B !important;
+	box-shadow: 0 14px 35px -8px rgba(245, 158, 11, 0.35) !important;
+}
+.card:nth-child(6n + 2) .icon {
+	border: 1px solid #F59E0B !important;
+	background: rgba(245, 158, 11, 0.18) !important;
+	color: #F59E0B !important;
 }
 
-.hero .actions .secondary {
-	border: 1px solid var(--sl-color-arena-muted);
-	transition: all 0.2s ease;
+/* Card 3: 🌊 Azul Ultramar (Cotejo Code Review) */
+.card:nth-child(6n + 3) {
+	border: 1px solid rgba(2, 132, 199, 0.35) !important;
+	border-top: 3.5px solid #0284C7 !important;
+}
+.card:nth-child(6n + 3):hover {
+	border-color: #0284C7 !important;
+	box-shadow: 0 14px 35px -8px rgba(2, 132, 199, 0.35) !important;
+}
+.card:nth-child(6n + 3) .icon {
+	border: 1px solid #0284C7 !important;
+	background: rgba(2, 132, 199, 0.18) !important;
+	color: #0284C7 !important;
 }
 
-.hero .actions .secondary:hover {
-	border-color: var(--sl-color-larimar);
-	color: var(--sl-color-larimar);
+/* Card 4: 🌴 Verde Palma (Autonomous AI Review Agents) */
+.card:nth-child(6n + 4) {
+	border: 1px solid rgba(16, 185, 129, 0.35) !important;
+	border-top: 3.5px solid #10B981 !important;
+}
+.card:nth-child(6n + 4):hover {
+	border-color: #10B981 !important;
+	box-shadow: 0 14px 35px -8px rgba(16, 185, 129, 0.35) !important;
+}
+.card:nth-child(6n + 4) .icon {
+	border: 1px solid #10B981 !important;
+	background: rgba(16, 185, 129, 0.18) !important;
+	color: #10B981 !important;
 }
 
-/* Warm Arena Blanca borders around code frames and syntax drawers */
-.expressive-code pre {
-	border: 1px solid var(--sl-color-arena-muted) !important;
-	border-radius: 0.5rem;
+/* Card 5: 🌺 Flor de Cayena (Monotonic Trunk History) */
+.card:nth-child(6n + 5) {
+	border: 1px solid rgba(244, 63, 94, 0.35) !important;
+	border-top: 3.5px solid #F43F5E !important;
+}
+.card:nth-child(6n + 5):hover {
+	border-color: #F43F5E !important;
+	box-shadow: 0 14px 35px -8px rgba(244, 63, 94, 0.35) !important;
+}
+.card:nth-child(6n + 5) .icon {
+	border: 1px solid #F43F5E !important;
+	background: rgba(244, 63, 94, 0.18) !important;
+	color: #F43F5E !important;
 }
 
-/* Asides (Callouts) with Paleta Quisqueyana Semantic Colors */
+/* Card 6: 🏖️ Arena Blanca (Nix & NixOS Native) */
+.card:nth-child(6n + 6) {
+	border: 1px solid rgba(241, 245, 249, 0.35) !important;
+	border-top: 3.5px solid #F1F5F9 !important;
+}
+.card:nth-child(6n + 6):hover {
+	border-color: #F1F5F9 !important;
+	box-shadow: 0 14px 35px -8px rgba(241, 245, 249, 0.28) !important;
+}
+.card:nth-child(6n + 6) .icon {
+	border: 1px solid #F1F5F9 !important;
+	background: rgba(241, 245, 249, 0.18) !important;
+	color: #F1F5F9 !important;
+}
+
+/* ----------------------------------------------------------------------------
+   Code Frames: Warm Arena Blanca Borders (Principle 1)
+   ---------------------------------------------------------------------------- */
+.expressive-code pre,
+pre.astro-code {
+	border: 1px solid rgba(241, 245, 249, 0.18) !important;
+	border-radius: 0.625rem !important;
+	background-color: #0B1118 !important;
+}
+
+/* ----------------------------------------------------------------------------
+   Asides (Callout Boxes) with Quisqueyana Accents
+   ---------------------------------------------------------------------------- */
 .starlight-aside--note {
-	--sl-color-asides-border: var(--sl-color-ultramar);
-	background-color: var(--sl-color-ultramar-low);
+	border-inline-start-color: #0284C7 !important;
+	background-color: rgba(2, 132, 199, 0.12) !important;
 }
 
 .starlight-aside--tip {
-	--sl-color-asides-border: var(--sl-color-larimar);
-	background-color: var(--sl-color-larimar-low);
+	border-inline-start-color: #2DD4BF !important;
+	background-color: rgba(45, 212, 191, 0.12) !important;
 }
 
 .starlight-aside--caution {
-	--sl-color-asides-border: var(--sl-color-ambar);
-	background-color: var(--sl-color-ambar-low);
+	border-inline-start-color: #F59E0B !important;
+	background-color: rgba(245, 158, 11, 0.12) !important;
 }
 
 .starlight-aside--danger {
-	--sl-color-asides-border: var(--sl-color-cayena);
-	background-color: var(--sl-color-cayena-low);
+	border-inline-start-color: #F43F5E !important;
+	background-color: rgba(244, 63, 94, 0.12) !important;
 }
 
-/* Sidebar active link styling */
+/* Sidebar Active Indicator */
 .sidebar a[aria-current='page'] {
-	color: var(--sl-color-larimar) !important;
-	border-inline-start-color: var(--sl-color-ultramar) !important;
-	font-weight: 600;
+	color: #2DD4BF !important;
+	border-inline-start: 2px solid #0284C7 !important;
+	background: rgba(2, 132, 199, 0.1) !important;
+	font-weight: 600 !important;
 }
