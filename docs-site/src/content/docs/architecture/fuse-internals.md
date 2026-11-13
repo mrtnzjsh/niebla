@@ -98,19 +98,34 @@ flowchart TD
 
 When an application calls `read(fd, buf, count)` on an unmodified file:
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor App as Kernel / App
+    participant FUSE as nieblafs (File.Read)
+    participant Cache as Local NVMe Cache
+    participant Server as niebla-server (:50051)
+
+    App->>FUSE: read(offset, count)
+    FUSE->>Cache: Lookup blob: ~/.cache/niebla/blobs/ab/cd/<sha256>
+    alt Cache HIT
+        Cache-->>FUSE: Read bytes directly from local NVMe
+    else Cache MISS
+        FUSE->>Server: ReadBlobRequest(sha256, offset, count)
+        Server-->>FUSE: stream BlobChunk (64KB chunks over HTTP/2)
+        FUSE->>Cache: Write and index in local CAS cache
+    end
+    FUSE-->>App: Return byte slice to kernel
 ```
-1. nieblafs File.Read() is called with byte Offset and Size.
-2. Check Local CAS Cache:
-   nieblafs checks if ~/.cache/niebla/blobs/ab/cd/<sha256> exists locally.
-   ├── If Cache HIT:
-   │   Reads bytes directly from local NVMe cache at the requested offset.
-   └── If Cache MISS:
-       Calls Remote gRPC BlobFetcher:
-       a. Issues ReadBlobRequest(sha256, offset, length) to niebla-server.
-       b. niebla-server streams 64KB chunks (stream BlobChunk) over HTTP/2.
-       c. nieblafs buffers chunks, saves them into the local CAS cache, and returns
-          the requested slice to the kernel.
-```
+
+### Execution Lifecycle:
+1. **`nieblafs File.Read()` Invocation**: The kernel invokes `File.Read()` with the requested byte `offset` and buffer `size`.
+2. **Local CAS Verification**: `nieblafs` checks if the blob exists in `~/.cache/niebla/blobs/ab/cd/<sha256>`.
+   * **Cache HIT**: Reads bytes directly from local NVMe storage at the requested offset with zero network latency.
+   * **Cache MISS**: Calls the remote gRPC `BlobFetcher`:
+     1. Issues `ReadBlobRequest(sha256, offset, length)` to `niebla-server`.
+     2. `niebla-server` streams 64KB chunks (`stream BlobChunk`) over HTTP/2.
+     3. `nieblafs` buffers incoming chunks, persists the object into local CAS storage, and returns the requested slice to the kernel.
 
 ### Singleflight Request Coalescing
 If a build tool (e.g. Bazel, Go compiler) spawns 16 parallel threads that all read `go.mod` at the exact same millisecond:
