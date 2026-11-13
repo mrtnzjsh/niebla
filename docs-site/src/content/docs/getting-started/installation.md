@@ -34,7 +34,7 @@ Choose your operating system and deployment profile below.
   </TabItem>
 
   <TabItem label="macOS (Darwin)">
-    For macOS workstations targeting a remote Niebla server (such as `nixdev:50051`):
+    For macOS workstations targeting a remote Niebla server (such as `<server-host>:50051`):
 
     ### Via Home Manager (`programs.niebla`)
     ```nix
@@ -50,7 +50,7 @@ Choose your operating system and deployment profile below.
     macOS developers can create workspaces without needing third-party kernel extensions:
 
     ```bash
-    niebla workspace create my-feature --no-fuse --server nixdev:50051
+    niebla workspace create my-feature --no-fuse --server <server-host>:50051
     ```
   </TabItem>
 

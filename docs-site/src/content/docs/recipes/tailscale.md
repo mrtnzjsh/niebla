@@ -5,7 +5,7 @@ description: Accessing niebla-server and Cotejo securely across your private tai
 
 By combining Niebla with Tailscale, you can access your remote repository server (`niebla-server` on port 50051) and web code review interface (`cotejo` on port 8080) from your laptop or MacBook without exposing ports to the public internet.
 
-## 1. Configure the Remote Server (e.g. `nixdev`)
+## 1. Configure the Remote Server
 
 Ensure Tailscale is enabled in your NixOS configuration:
 
@@ -23,15 +23,15 @@ services.niebla = {
 
 ## 2. Connect from your Laptop
 
-Once connected to your Tailnet, point your local CLI to `nixdev`:
+Once connected to your Tailnet, point your local CLI to your server's hostname or MagicDNS address (`<server-host>`):
 
 ```bash
-niebla --server nixdev:50051 workspace create my-feature --no-fuse
+niebla --server <server-host>:50051 workspace create my-feature --no-fuse
 ```
 
 Open Cotejo review in your laptop browser:
 
 ```
-http://nixdev:8080
+http://<server-host>:8080
 ```
 
