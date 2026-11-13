@@ -99,7 +99,7 @@ trailing_space\
 func TestLoadFile_MissingAndPresent(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Missing file returns default matcher without error
+	// Missing file returns default matcher containing DefaultPatterns without error
 	m, err := LoadFile(filepath.Join(tmpDir, ".nieblaignore"))
 	if err != nil {
 		t.Fatalf("LoadFile on missing file returned error: %v", err)
@@ -107,13 +107,30 @@ func TestLoadFile_MissingAndPresent(t *testing.T) {
 	if !m.Match(".niebla/state", false) {
 		t.Errorf("expected built-in .niebla ignore on missing file")
 	}
+	if !m.Match("node_modules/pkg/index.js", false) {
+		t.Errorf("expected node_modules to be ignored by default")
+	}
+	if !m.Match(".direnv/flake-profile", false) {
+		t.Errorf("expected .direnv to be ignored by default")
+	}
+	if !m.Match("bazel-bin/out", false) {
+		t.Errorf("expected bazel-* to be ignored by default")
+	}
+	if !m.Match(".DS_Store", false) {
+		t.Errorf("expected .DS_Store to be ignored by default")
+	}
 	if m.Match("main.go", false) {
 		t.Errorf("expected main.go not to be ignored")
 	}
 
-	// Present file
+	// Present file: can add new rules and negate DefaultPatterns
 	ignorePath := filepath.Join(tmpDir, ".nieblaignore")
-	if err := os.WriteFile(ignorePath, []byte("*.tmp\n!keep.tmp\n"), 0644); err != nil {
+	customContent := `
+*.tmp
+!keep.tmp
+!node_modules/special
+`
+	if err := os.WriteFile(ignorePath, []byte(customContent), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -126,5 +143,11 @@ func TestLoadFile_MissingAndPresent(t *testing.T) {
 	}
 	if m2.Match("keep.tmp", false) {
 		t.Errorf("expected keep.tmp to be negated (not ignored)")
+	}
+	if !m2.Match("node_modules/other/index.js", false) {
+		t.Errorf("expected node_modules/other to be ignored by default")
+	}
+	if m2.Match("node_modules/special", false) {
+		t.Errorf("expected negated node_modules/special not to be ignored")
 	}
 }

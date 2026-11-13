@@ -130,7 +130,7 @@ func loadWorkspaceMatcher(ws *config.WorkspaceConfig) ignore.Matcher {
 			}
 		}
 	}
-	return ignore.NewMatcher()
+	return ignore.NewDefaultMatcher()
 }
 
 // ScanWorkspaceChanges scans workspace changes, including missing base files for --no-fuse workspaces.
@@ -272,7 +272,7 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 		var err error
 		matcher, err = ignore.LoadFile(filepath.Join(scratchDir, ".nieblaignore"))
 		if err != nil {
-			matcher = ignore.NewMatcher()
+			matcher = ignore.NewDefaultMatcher()
 		}
 	}
 

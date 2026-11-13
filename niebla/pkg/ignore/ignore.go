@@ -60,18 +60,59 @@ func Parse(r io.Reader) (*PatternMatcher, error) {
 	return NewMatcher(lines...), nil
 }
 
+// DefaultPatterns defines the baseline ignore rules applied automatically
+// to all workspaces, even if no root .nieblaignore file exists on disk.
+var DefaultPatterns = []string{
+	// Build outputs & dependency directories
+	"bazel-*",
+	".direnv/",
+	"node_modules/",
+	"/dist/",
+	"/tmp/",
+
+	// OS metadata & editor backup files
+	".DS_Store",
+	"Thumbs.db",
+	"*.swp",
+	"*~",
+
+	// Local environment secrets
+	".env.local",
+	".env.*.local",
+}
+
+// NewDefaultMatcher constructs a PatternMatcher initialized with DefaultPatterns,
+// followed by any optional custom pattern lines.
+func NewDefaultMatcher(customPatterns ...string) *PatternMatcher {
+	combined := make([]string, 0, len(DefaultPatterns)+len(customPatterns))
+	combined = append(combined, DefaultPatterns...)
+	combined = append(combined, customPatterns...)
+	return NewMatcher(combined...)
+}
+
 // LoadFile loads a PatternMatcher from a .nieblaignore file on disk.
-// If the file does not exist, a PatternMatcher with only built-in rules is returned without error.
+// Baseline default rules (DefaultPatterns) are automatically prepended,
+// allowing patterns in the file to extend or negate them (via !prefix).
+// If the file does not exist, a PatternMatcher containing DefaultPatterns is returned without error.
 func LoadFile(filePath string) (*PatternMatcher, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return NewMatcher(), nil
+			return NewDefaultMatcher(), nil
 		}
 		return nil, err
 	}
 	defer f.Close()
-	return Parse(f)
+
+	scanner := bufio.NewScanner(f)
+	var lines []string
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return NewDefaultMatcher(lines...), nil
 }
 
 func parseLine(line string) (rule, bool) {
