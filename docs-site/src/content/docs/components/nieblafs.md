@@ -12,28 +12,28 @@ description: Technical manual for the nieblafs FUSE virtual workspace daemon, CL
 When a developer runs `niebla workspace create <name>`, the CLI spawns a `nieblafs` daemon in the background:
 
 ```
-                          ┌──────────────────────────┐
-                          │   Linux Kernel (/dev/fuse)│
-                          └────────────┬─────────────┘
+                         ┌────────────────────────────┐
+                         │  Linux Kernel (/dev/fuse)  │
+                         └─────────────┬──────────────┘
                                        │
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ nieblafs Process (PID: 12480)                                               │
+│ nieblafs Process (PID: supervised)                                          │
 │                                                                             │
-│  ┌───────────────────────┐   ┌───────────────────────┐   ┌────────────────┐ │
-│  │ internal/fs           │   │ internal/metadata     │   │ internal/remote│ │
-│  │   • Dir Node          │◄──┼─► LRU Cache           │◄──┼─► BlobFetcher  │ │
-│  │   • File Node         │   │   • Subtree Hashes    │   │   • Paged Trees│ │
-│  │   • Attr / Setattr    │   │   • Inode Allocator   │   │   • Chunk Read │ │
-│  └───────────┬───────────┘   └───────────────────────┘   └────────┬───────┘ │
-│              │                                                    │         │
-└──────────────┼────────────────────────────────────────────────────┼─────────┘
-               │                                                    │
-               ▼                                                    ▼
-    ┌──────────────────────┐                             ┌───────────────────┐
-    │ CoW Scratch Layer    │                             │ niebla-server     │
-    │ ~/.niebla/workspaces/│                             │ (gRPC: 50051)     │
-    └──────────────────────┘                             └───────────────────┘
+│  ┌───────────────────┐     ┌───────────────────┐     ┌───────────────────┐  │
+│  │ internal/fs       │     │ internal/metadata │     │ internal/remote   │  │
+│  │   • Dir Node      │ ◄─► │  • LRU Cache      │ ◄─► │   • BlobFetcher   │  │
+│  │   • File Node     │     │  • Subtree Hashes │     │   • Paged Trees   │  │
+│  │   • Attr/Setattr  │     │  • Inode Allocator│     │   • Chunk Read    │  │
+│  └─────────┬─────────┘     └───────────────────┘     └─────────┬─────────┘  │
+│            │                                                   │            │
+└────────────┼───────────────────────────────────────────────────┼────────────┘
+             │                                                   │
+             ▼                                                   ▼
+  ┌───────────────────────┐                             ┌─────────────────────┐
+  │   CoW Scratch Layer   │                             │    niebla-server    │
+  │ ~/.niebla/workspaces/ │                             │    (gRPC: 50051)    │
+  └───────────────────────┘                             └─────────────────────┘
 ```
 
 ---

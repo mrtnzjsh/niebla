@@ -364,3 +364,284 @@ pre.astro-code {
 	background: rgba(2, 132, 199, 0.1) !important;
 	font-weight: 600 !important;
 }
+
+/* ==========================================================================
+   Main Pane Prioritization & Responsive Content Sizing
+   ========================================================================== */
+:root {
+	--sl-content-width: 58rem;
+	--sl-content-width-expanded: 78rem;
+}
+
+@media (min-width: 80rem) {
+	:root {
+		--sl-content-width: 65rem;
+	}
+}
+
+@media (min-width: 96rem) {
+	:root {
+		--sl-content-width: 72rem;
+	}
+}
+
+@media (min-width: 72rem) {
+	/* Fix Right Sidebar container width and allocate all fluid space to the Main Pane */
+	html:not([data-toc-collapsed="true"]) .right-sidebar-container {
+		width: var(--sl-sidebar-width) !important;
+		min-width: var(--sl-sidebar-width) !important;
+		max-width: var(--sl-sidebar-width) !important;
+		flex-shrink: 0 !important;
+	}
+
+	html:not([data-toc-collapsed="true"]) .right-sidebar {
+		width: var(--sl-sidebar-width) !important;
+		inset-inline-end: 0 !important;
+	}
+
+	:global([data-has-sidebar][data-has-toc]) .main-pane,
+	[data-has-sidebar][data-has-toc] .main-pane {
+		width: calc(100% - var(--sl-sidebar-width)) !important;
+		flex-grow: 1 !important;
+		--sl-content-margin-inline: 0 auto !important;
+	}
+
+	.sl-container {
+		max-width: min(100%, var(--sl-content-width, 68rem)) !important;
+		margin-inline: auto !important;
+	}
+}
+
+/* ==========================================================================
+   Left Navigation Sidebar Collapsible Behavior
+   ========================================================================== */
+html[data-nav-collapsed="true"] {
+	--sl-sidebar-width: 0rem !important;
+	--sl-content-inline-start: 0rem !important;
+}
+
+html[data-nav-collapsed="true"] .sidebar,
+html[data-nav-collapsed="true"] .sidebar-pane,
+html[data-nav-collapsed="true"] #starlight__sidebar {
+	display: none !important;
+	width: 0 !important;
+	visibility: hidden !important;
+	pointer-events: none !important;
+	transform: translateX(-100%) !important;
+}
+
+html[data-nav-collapsed="true"] .main-frame {
+	padding-inline-start: 0 !important;
+}
+
+/* ==========================================================================
+   Right Table of Contents Collapsible Behavior
+   ========================================================================== */
+html[data-toc-collapsed="true"] .right-sidebar-container,
+html[data-toc-collapsed="true"] .right-sidebar {
+	display: none !important;
+	width: 0 !important;
+	visibility: hidden !important;
+	pointer-events: none !important;
+}
+
+html[data-toc-collapsed="true"] .main-pane,
+html[data-toc-collapsed="true"] :global([data-has-sidebar][data-has-toc]) .main-pane,
+html[data-toc-collapsed="true"][data-has-sidebar][data-has-toc] .main-pane {
+	width: 100% !important;
+	max-width: 100% !important;
+	--sl-content-margin-inline: auto !important;
+}
+
+html[data-toc-collapsed="true"] .sl-container {
+	max-width: var(--sl-content-width-expanded, 78rem) !important;
+	margin-inline: auto !important;
+}
+
+/* When both sidebars are collapsed: Pure distraction-free wide reading mode */
+html[data-nav-collapsed="true"][data-toc-collapsed="true"] .sl-container {
+	max-width: var(--sl-content-width-expanded, 82rem) !important;
+}
+
+/* ==========================================================================
+   Table & Parameter Flag Readability Enhancements
+   ========================================================================== */
+.sl-markdown-content table {
+	width: 100% !important;
+	display: table !important;
+	border-collapse: separate !important;
+	border-spacing: 0 !important;
+	margin: 1.5rem 0 2rem 0 !important;
+	background: rgba(14, 22, 34, 0.65) !important;
+	border: 1px solid var(--sl-color-hairline) !important;
+	border-radius: 0.625rem !important;
+	overflow: hidden !important;
+}
+
+.sl-markdown-content thead tr {
+	background: rgba(2, 132, 199, 0.14) !important;
+	border-bottom: 1.5px solid var(--sl-color-hairline-light) !important;
+}
+
+.sl-markdown-content th {
+	color: var(--sl-color-larimar-high) !important;
+	font-weight: 600 !important;
+	font-size: 0.85rem !important;
+	text-transform: uppercase !important;
+	letter-spacing: 0.05em !important;
+	padding: 0.75rem 1rem !important;
+	border-bottom: 1px solid var(--sl-color-hairline) !important;
+}
+
+.sl-markdown-content td {
+	padding: 0.75rem 1rem !important;
+	border-bottom: 1px solid rgba(241, 245, 249, 0.08) !important;
+	vertical-align: top !important;
+	line-height: 1.55 !important;
+}
+
+.sl-markdown-content tr:last-child td {
+	border-bottom: none !important;
+}
+
+.sl-markdown-content tr:hover td {
+	background: rgba(45, 212, 191, 0.04) !important;
+}
+
+/* Flag & parameter tables: strictly prevent flags, types, and defaults from wrapping */
+.sl-markdown-content table td:first-child,
+.sl-markdown-content table th:first-child {
+	white-space: nowrap !important;
+	font-weight: 600 !important;
+	width: 1% !important;
+}
+
+.sl-markdown-content table td code {
+	white-space: nowrap !important;
+}
+
+/* Tables with 4 columns (Flag | Type | Default | Description) */
+.sl-markdown-content table:has(th:nth-child(4)) td:nth-child(2),
+.sl-markdown-content table:has(th:nth-child(4)) th:nth-child(2),
+.sl-markdown-content table:has(th:nth-child(4)) td:nth-child(3),
+.sl-markdown-content table:has(th:nth-child(4)) th:nth-child(3) {
+	white-space: nowrap !important;
+	width: 1% !important;
+}
+
+.sl-markdown-content table:has(th:nth-child(4)) td:nth-child(4),
+.sl-markdown-content table:has(th:nth-child(4)) th:nth-child(4) {
+	width: auto !important;
+	min-width: 260px !important;
+}
+
+/* ==========================================================================
+   Sidebar Toggle Buttons (Paleta Quisqueyana Theme)
+   ========================================================================== */
+.niebla-toggle-btn {
+	display: inline-flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	gap: 0.35rem !important;
+	height: 2.1rem !important;
+	padding: 0 0.55rem !important;
+	border-radius: 0.45rem !important;
+	background: rgba(241, 245, 249, 0.05) !important;
+	border: 1px solid var(--sl-color-hairline) !important;
+	color: var(--sl-color-gray-2) !important;
+	font-size: 0.8rem !important;
+	cursor: pointer !important;
+	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+	user-select: none !important;
+}
+
+.niebla-toggle-btn:hover {
+	border-color: var(--sl-color-larimar) !important;
+	color: var(--sl-color-larimar-high) !important;
+	background: var(--sl-color-larimar-low) !important;
+	box-shadow: 0 0 10px rgba(45, 212, 191, 0.25) !important;
+}
+
+.niebla-toggle-btn[data-active="false"] {
+	opacity: 0.65;
+	border-style: dashed;
+}
+
+.niebla-toggle-btn .niebla-kbd-hint {
+	font-family: var(--sl-font-mono) !important;
+	font-size: 0.72rem !important;
+	padding: 0.05rem 0.3rem !important;
+	border-radius: 0.25rem !important;
+	background: rgba(0, 0, 0, 0.3) !important;
+	border: 1px solid var(--sl-color-hairline) !important;
+	color: var(--sl-color-gray-3) !important;
+}
+
+.niebla-toggle-btn .niebla-toggle-text {
+	font-weight: 600;
+	font-size: 0.75rem;
+	letter-spacing: 0.04em;
+}
+
+/* Arrow rotation when collapsed */
+html[data-nav-collapsed="true"] .niebla-arrow-nav {
+	transform: rotate(180deg);
+	transform-origin: 12px 12px;
+}
+
+html[data-toc-collapsed="true"] .niebla-arrow-toc {
+	transform: rotate(180deg);
+	transform-origin: 12px 12px;
+}
+
+/* Header layout adjustment */
+.title-wrapper {
+	display: flex !important;
+	align-items: center !important;
+	gap: 0.6rem !important;
+}
+
+/* Floating Edge Tabs (restore triggers on screen margins) */
+.niebla-edge-pill {
+	position: fixed !important;
+	top: 50% !important;
+	transform: translateY(-50%) !important;
+	z-index: 90 !important;
+	display: none;
+	align-items: center !important;
+	gap: 0.3rem !important;
+	padding: 0.6rem 0.5rem !important;
+	font-size: 0.75rem !important;
+	font-weight: 600 !important;
+	letter-spacing: 0.04em !important;
+	border-radius: 0.5rem !important;
+	background: rgba(14, 22, 34, 0.88) !important;
+	backdrop-filter: blur(8px) !important;
+	border: 1px solid var(--sl-color-hairline) !important;
+	color: var(--sl-color-gray-2) !important;
+	cursor: pointer !important;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
+	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.niebla-edge-left {
+	left: 0 !important;
+	border-top-left-radius: 0 !important;
+	border-bottom-left-radius: 0 !important;
+	border-left: none !important;
+}
+
+.niebla-edge-right {
+	right: 0 !important;
+	border-top-right-radius: 0 !important;
+	border-bottom-right-radius: 0 !important;
+	border-right: none !important;
+}
+
+.niebla-edge-pill:hover {
+	color: var(--sl-color-larimar-high) !important;
+	border-color: var(--sl-color-larimar) !important;
+	background: rgba(14, 22, 34, 0.98) !important;
+	box-shadow: 0 0 16px rgba(45, 212, 191, 0.4) !important;
+}
+

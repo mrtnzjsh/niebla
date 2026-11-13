@@ -15,6 +15,28 @@ export default defineConfig({
       logo: {
         src: './src/assets/logo.svg',
       },
+      head: [
+        {
+          tag: 'script',
+          content: `
+            try {
+              if (localStorage.getItem('niebla-nav-collapsed') === 'true') {
+                document.documentElement.dataset.navCollapsed = 'true';
+              }
+              if (localStorage.getItem('niebla-toc-collapsed') === 'true') {
+                document.documentElement.dataset.tocCollapsed = 'true';
+              }
+            } catch (e) {}
+          `,
+        },
+        {
+          tag: 'script',
+          attrs: {
+            src: '/niebla/scripts/sidebar-toggles.js',
+            defer: true,
+          },
+        },
+      ],
       customCss: [
         './src/styles/custom.css',
       ],
