@@ -243,36 +243,65 @@
     const viewport = modal.querySelector('.mermaid-modal-viewport');
     stage.innerHTML = '';
 
+    // Clone source SVG
     const cloned = sourceSvg.cloneNode(true);
-    cloned.style.maxWidth = 'none';
-    cloned.style.maxHeight = 'none';
-    cloned.style.width = 'auto';
-    cloned.style.height = 'auto';
-    stage.appendChild(cloned);
 
+    // Determine intrinsic dimensions from viewBox or attributes
+    let naturalWidth = 800;
+    let naturalHeight = 600;
+
+    const viewBoxAttr = sourceSvg.getAttribute('viewBox');
+    if (viewBoxAttr) {
+      const parts = viewBoxAttr.trim().split(/[\s,]+/);
+      if (parts.length === 4) {
+        naturalWidth = parseFloat(parts[2]) || 800;
+        naturalHeight = parseFloat(parts[3]) || 600;
+      }
+    } else {
+      const wAttr = parseFloat(sourceSvg.getAttribute('width'));
+      const hAttr = parseFloat(sourceSvg.getAttribute('height'));
+      if (wAttr && hAttr) {
+        naturalWidth = wAttr;
+        naturalHeight = hAttr;
+      } else {
+        const rect = sourceSvg.getBoundingClientRect();
+        naturalWidth = rect.width || 800;
+        naturalHeight = rect.height || 600;
+      }
+    }
+
+    // Explicitly set concrete pixel dimensions to prevent 0px flex collapse
+    cloned.setAttribute('width', naturalWidth);
+    cloned.setAttribute('height', naturalHeight);
+    cloned.style.setProperty('width', naturalWidth + 'px', 'important');
+    cloned.style.setProperty('height', naturalHeight + 'px', 'important');
+    cloned.style.setProperty('min-width', naturalWidth + 'px', 'important');
+    cloned.style.setProperty('min-height', naturalHeight + 'px', 'important');
+    cloned.style.setProperty('max-width', 'none', 'important');
+    cloned.style.setProperty('max-height', 'none', 'important');
+    cloned.style.setProperty('display', 'block', 'important');
+    cloned.style.setProperty('visibility', 'visible', 'important');
+    cloned.style.setProperty('opacity', '1', 'important');
+
+    stage.appendChild(cloned);
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
-    // Compute fit scale
-    setTimeout(() => {
-      const vWidth = viewport.clientWidth || window.innerWidth * 0.9;
-      const vHeight = viewport.clientHeight || window.innerHeight * 0.8;
-      const bBox = cloned.getBBox ? cloned.getBBox() : { width: cloned.clientWidth || 800, height: cloned.clientHeight || 500 };
-      const svgW = bBox.width || parseFloat(cloned.getAttribute('width')) || 800;
-      const svgH = bBox.height || parseFloat(cloned.getAttribute('height')) || 500;
+    // Calculate initial fit scale immediately
+    const vWidth = viewport.clientWidth || (window.innerWidth * 0.95);
+    const vHeight = viewport.clientHeight || (window.innerHeight * 0.88);
 
-      const scaleX = (vWidth - 80) / svgW;
-      const scaleY = (vHeight - 80) / svgH;
-      baseFitScale = Math.min(scaleX, scaleY, 1.25);
-      if (baseFitScale < 0.2) baseFitScale = 0.2;
+    const scaleX = (vWidth - 80) / naturalWidth;
+    const scaleY = (vHeight - 80) / naturalHeight;
+    baseFitScale = Math.min(scaleX, scaleY, 1.25);
+    if (!isFinite(baseFitScale) || baseFitScale <= 0.1) baseFitScale = 1.0;
 
-      currentScale = baseFitScale;
-      currentTranslateX = 0;
-      currentTranslateY = 0;
+    currentScale = baseFitScale;
+    currentTranslateX = 0;
+    currentTranslateY = 0;
 
-      stage.style.transform = `translate(${currentTranslateX}px, ${currentTranslateY}px) scale(${currentScale})`;
-      modal.querySelector('.mermaid-modal-zoom-val').textContent = '100%';
-    }, 20);
+    stage.style.transform = `translate(${currentTranslateX}px, ${currentTranslateY}px) scale(${currentScale})`;
+    modal.querySelector('.mermaid-modal-zoom-val').textContent = `${Math.round((currentScale / baseFitScale) * 100)}%`;
   }
 
   function closeMermaidModal() {

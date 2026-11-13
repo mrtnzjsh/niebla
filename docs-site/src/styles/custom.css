@@ -975,9 +975,69 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 .mermaid-modal-stage svg {
 	max-width: none !important;
 	max-height: none !important;
-	width: auto !important;
-	height: auto !important;
+	display: block !important;
+	visibility: visible !important;
+	opacity: 1 !important;
 	filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.5)) !important;
+}
+
+/* Ensure modal stage inherits all Mermaid Paleta Quisqueyana theme styles */
+.mermaid-modal-stage svg .node rect,
+.mermaid-modal-stage svg .node circle,
+.mermaid-modal-stage svg .node ellipse,
+.mermaid-modal-stage svg .node polygon {
+	fill: #0E1622 !important;
+	stroke: #0284C7 !important;
+	stroke-width: 1.5px !important;
+}
+
+.mermaid-modal-stage svg .node:hover rect,
+.mermaid-modal-stage svg .node:hover circle,
+.mermaid-modal-stage svg .node:hover ellipse,
+.mermaid-modal-stage svg .node:hover polygon {
+	stroke: #2DD4BF !important;
+	filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.5));
+}
+
+.mermaid-modal-stage svg .node .label {
+	color: #F1F5F9 !important;
+	fill: #F1F5F9 !important;
+	font-weight: 500;
+}
+
+.mermaid-modal-stage svg .cluster rect {
+	fill: rgba(11, 17, 24, 0.85) !important;
+	stroke: rgba(2, 132, 199, 0.4) !important;
+	stroke-width: 1.5px !important;
+	rx: 8px !important;
+	ry: 8px !important;
+}
+
+.mermaid-modal-stage svg .cluster .nodeLabel {
+	color: #2DD4BF !important;
+	fill: #2DD4BF !important;
+	font-weight: 700 !important;
+	letter-spacing: 0.03em;
+}
+
+.mermaid-modal-stage svg .edgePath .path,
+.mermaid-modal-stage svg .flowchart-link {
+	stroke: #2DD4BF !important;
+	stroke-width: 1.75px !important;
+}
+
+.mermaid-modal-stage svg .marker,
+.mermaid-modal-stage svg #statediagram-barbEnd,
+.mermaid-modal-stage svg marker path {
+	fill: #2DD4BF !important;
+	stroke: #2DD4BF !important;
+}
+
+.mermaid-modal-stage svg .edgeLabel {
+	background-color: #080D14 !important;
+	color: #BAE6FD !important;
+	fill: #BAE6FD !important;
+	font-size: 0.78rem !important;
 }
 
 .mermaid-wrapper svg {
