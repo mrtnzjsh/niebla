@@ -366,7 +366,7 @@ html[data-theme='light'] .card {
 }
 
 /* ----------------------------------------------------------------------------
-   Code Frames: Paleta Quisqueyana Accents & Fluid Sizing
+   Code Frames & Universal Copy Buttons: Paleta Quisqueyana Accents & Sizing
    ---------------------------------------------------------------------------- */
 html[data-theme='dark'] .expressive-code pre,
 html[data-theme='dark'] pre.astro-code {
@@ -393,6 +393,87 @@ html[data-theme='light'] pre.astro-code {
 .expressive-code pre {
 	max-width: 100%;
 	overflow-x: auto !important;
+}
+
+/* Ensure code text never collides with the top-right copy button */
+.expressive-code pre > code {
+	padding-inline-end: calc(var(--ec-codePadInl, 1rem) + 2.5rem) !important;
+}
+
+/* Ensure Copy Button is consistently visible across all textblocks, code blocks & terminals */
+.expressive-code .copy {
+	z-index: 5 !important;
+}
+
+.expressive-code .copy button {
+	opacity: 0.75 !important;
+	width: 2rem !important;
+	height: 2rem !important;
+	border-radius: 0.375rem !important;
+	cursor: pointer !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	transition: opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+html[data-theme='dark'] .expressive-code .copy button {
+	background: rgba(14, 22, 34, 0.9) !important;
+	border: 1px solid rgba(241, 245, 249, 0.22) !important;
+}
+
+html[data-theme='dark'] .expressive-code .copy button:hover,
+html[data-theme='dark'] .expressive-code .copy button:focus-visible {
+	opacity: 1 !important;
+	background: #1A2433 !important;
+	border-color: #2DD4BF !important;
+	box-shadow: 0 0 10px rgba(45, 212, 191, 0.35) !important;
+}
+
+html[data-theme='light'] .expressive-code .copy button {
+	background: rgba(241, 245, 249, 0.95) !important;
+	border: 1px solid rgba(15, 23, 42, 0.18) !important;
+}
+
+html[data-theme='light'] .expressive-code .copy button:hover,
+html[data-theme='light'] .expressive-code .copy button:focus-visible {
+	opacity: 1 !important;
+	background: #FFFFFF !important;
+	border-color: #0284C7 !important;
+	box-shadow: 0 0 10px rgba(2, 132, 199, 0.25) !important;
+}
+
+/* Bulletproof SVG Copy Icon (WebKit/Safari, Chromium, Firefox) */
+.expressive-code .copy button::after {
+	content: '' !important;
+	display: block !important;
+	position: absolute !important;
+	inset: 0.35rem !important;
+	pointer-events: none !important;
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'%3E%3C/rect%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'%3E%3C/path%3E%3C/svg%3E") !important;
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'%3E%3C/rect%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'%3E%3C/path%3E%3C/svg%3E") !important;
+	-webkit-mask-size: 1.1rem 1.1rem !important;
+	mask-size: 1.1rem 1.1rem !important;
+	-webkit-mask-repeat: no-repeat !important;
+	mask-repeat: no-repeat !important;
+	-webkit-mask-position: center !important;
+	mask-position: center !important;
+}
+
+html[data-theme='dark'] .expressive-code .copy button::after {
+	background-color: #F1F5F9 !important;
+}
+
+html[data-theme='dark'] .expressive-code .copy button:hover::after {
+	background-color: #2DD4BF !important;
+}
+
+html[data-theme='light'] .expressive-code .copy button::after {
+	background-color: #1E293B !important;
+}
+
+html[data-theme='light'] .expressive-code .copy button:hover::after {
+	background-color: #0284C7 !important;
 }
 
 /* ----------------------------------------------------------------------------
