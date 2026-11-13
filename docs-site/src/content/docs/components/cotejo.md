@@ -11,36 +11,36 @@ description: Architecture, Templ SSR components, intra-line diff engine, real-ti
 
 Cotejo is implemented as a high-performance Go web service ([`internal/web/`](file:///home/matatan/Developer/niebla/niebla/internal/web)):
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Browser Client                                              │
-│   • Server-Sent Events (/events) Listening for Updates      │
-│   • HTMX / Alpine Interactive DOM Fragments                 │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ HTTP GET / POST
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Cotejo HTTP Server (port 8080)                              │
-│                                                             │
-│  ┌───────────────────────┐   ┌───────────────────────────┐  │
-│  │ Handlers (internal/web)│  │ Views (internal/web/views)│  │
-│  │   • cl.go             │   │   • layout.templ          │  │
-│  │   • comments.go       │──►│   • cl_detail.templ       │  │
-│  │   • ai_hint.go        │   │   • diff_view.templ       │  │
-│  │   • ci.go             │   │   • comment_box.templ     │  │
-│  └───────────┬───────────┘   └───────────────────────────┘  │
-│              │                                              │
-│              ├─► Intra-Line Word Diff (alecthomas/chroma/v2)│
-│              └─► Real-Time SSE Dispatcher (/events)         │
-└──────────────┬──────────────────────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ niebla-server & PostgreSQL Database                         │
-│   • Streams base and patchset blobs from CAS                │
-│   • Stores threaded comments (cl_comments)                  │
-│   • Tracks reviewer votes (cl_approvals) & file checkboxes  │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Browser["Browser Client<br/><i>(Server-Sent Events + HTMX / Alpine)</i>"]
+
+    subgraph Cotejo["Cotejo HTTP Server (:8080)"]
+        direction TB
+        subgraph Web["internal/web (Handlers)"]
+            H1["cl.go"]
+            H2["comments.go"]
+            H3["ai_hint.go"]
+            H4["ci.go"]
+        end
+
+        subgraph Views["internal/web/views (templ)"]
+            V1["layout.templ"]
+            V2["cl_detail.templ"]
+            V3["diff_view.templ"]
+            V4["comment_box.templ"]
+        end
+
+        Engine["Intra-Line Word Diff (Chroma) + SSE Dispatcher"]
+
+        Web --> Views
+        Web --> Engine
+    end
+
+    Backend[("niebla-server & PostgreSQL<br/><i>(CAS Blobs, cl_comments, cl_approvals)</i>")]
+
+    Browser -->|"HTTP GET / POST & SSE Stream"| Cotejo
+    Cotejo -->|"gRPC / SQL Queries"| Backend
 ```
 
 ---

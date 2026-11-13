@@ -11,29 +11,40 @@ description: Technical manual for the nieblafs FUSE virtual workspace daemon, CL
 
 When a developer runs `niebla workspace create <name>`, the CLI spawns a `nieblafs` daemon in the background:
 
-```
-                         ┌────────────────────────────┐
-                         │  Linux Kernel (/dev/fuse)  │
-                         └─────────────┬──────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ nieblafs Process (PID: supervised)                                          │
-│                                                                             │
-│  ┌───────────────────┐     ┌───────────────────┐     ┌───────────────────┐  │
-│  │ internal/fs       │     │ internal/metadata │     │ internal/remote   │  │
-│  │   • Dir Node      │ ◄─► │  • LRU Cache      │ ◄─► │   • BlobFetcher   │  │
-│  │   • File Node     │     │  • Subtree Hashes │     │   • Paged Trees   │  │
-│  │   • Attr/Setattr  │     │  • Inode Allocator│     │   • Chunk Read    │  │
-│  └─────────┬─────────┘     └───────────────────┘     └─────────┬─────────┘  │
-│            │                                                   │            │
-└────────────┼───────────────────────────────────────────────────┼────────────┘
-             │                                                   │
-             ▼                                                   ▼
-  ┌───────────────────────┐                             ┌─────────────────────┐
-  │   CoW Scratch Layer   │                             │    niebla-server    │
-  │ ~/.niebla/workspaces/ │                             │    (gRPC: 50051)    │
-  └───────────────────────┘                             └─────────────────────┘
+```mermaid
+flowchart TD
+    Kernel["Linux Kernel (/dev/fuse)"]
+
+    subgraph Daemon["nieblafs Process (PID: Supervised Daemon)"]
+        direction LR
+        subgraph FS["internal/fs"]
+            FS1["Dir Node"]
+            FS2["File Node"]
+            FS3["Attr / Setattr"]
+        end
+
+        subgraph META["internal/metadata"]
+            M1["LRU Cache"]
+            M2["Subtree Hashes"]
+            M3["Inode Allocator"]
+        end
+
+        subgraph REMOTE["internal/remote"]
+            R1["BlobFetcher"]
+            R2["Paged Trees"]
+            R3["Chunk Read"]
+        end
+
+        FS <--> META
+        META <--> REMOTE
+    end
+
+    Scratch[("CoW Scratch Layer<br/>~/.niebla/workspaces/")]
+    Server[("niebla-server<br/>(gRPC :50051)")]
+
+    Kernel -->|"VFS Intercept / Syscalls"| Daemon
+    FS -->|"Redirect Writes / Whiteout"| Scratch
+    REMOTE -->|"Lazy Blob Streaming"| Server
 ```
 
 ---

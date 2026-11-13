@@ -13,56 +13,40 @@ This document outlines the system topology, technology choices, IPC/RPC protocol
 
 Niebla separates filesystem mutation from canonical storage. Workstations never download entire repository packfiles or perform local graph traversals. Instead, workstations run lightweight virtual filesystem mounts, communicating with a central daemon over high-throughput gRPC.
 
-```
-                            DEVELOPER WORKSTATION
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │                                                                          │
-  │  niebla CLI (Cobra POSIX client)                                         │
-  │    │                                                                     │
-  │    ├─► Workspace Lifecycle (create, sync, destroy)                       │
-  │    ├─► Change Inspection (status, diff against base CL)                  │
-  │    └─► Shelving & Patchsets (niebla shelve, niebla submit)               │
-  │                                                                          │
-  │  nieblafs (Virtual FUSE Daemon via bazil.org/fuse)                       │
-  │    │                                                                     │
-  │    ├─► Kernel VFS (/dev/fuse) ◄─── POSIX Syscalls (IDE / Compilers)      │
-  │    ├─► In-Memory Metadata LRU (hashicorp/golang-lru/v2)                  │
-  │    └─► Copy-on-Write Scratch Layer (~/.niebla/workspaces/<ws>/)          │
-  │                                                                          │
-  └─────────────────────────────────────┬────────────────────────────────────┘
-                                        │
-                                        │ gRPC over HTTP/2 (niebla.v1)
-                                        │ Unary Metadata + Streaming Blobs
-                                        ▼
-                            NIEBLA BACKEND SERVER
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │                                                                          │
-  │  niebla-server (Central Repository Daemon)                               │
-  │    │                                                                     │
-  │    ├──► NieblaService gRPC Server (Protobuf v3)                          │
-  │    │      • GetTree / GetNode (Merkle tree directory lookups)            │
-  │    │      • GetBlob / ReadBlob / UploadBlob (64KB streaming)             │
-  │    │      • ShelveCL / SubmitCL / SyncCL (Rebase engine)                 │
-  │    │                                                                     │
-  │    ├──► Relational Metadata Store (PostgreSQL 16+)                       │
-  │    │      • pgx/v5 connection pool (puddle/v2)                           │
-  │    │      • Type-safe compiled queries via sqlc                          │
-  │    │      • Tables: changelists, cl_patchsets, trees, blobs              │
-  │    │      • Advisory xact locks for monotonic trunk submissions          │
-  │    │                                                                     │
-  │    └──► Content-Addressable Storage (pkg/cas)                            │
-  │           • Portable relative fanout: ab/cd/<sha256>                     │
-  │           • High-throughput chunk streaming (64KB buffers)               │
-  │           • Optional zstd compression (klauspost/compress)               │
-  │                                                                          │
-  │  cotejo (Web Code Review Server - port 8080)                             │
-  │    │                                                                     │
-  │    ├──► Type-Safe HTML Components (github.com/a-h/templ)                 │
-  │    ├──► Real-Time SSE Pipeline (cl_events Server-Sent Events)            │
-  │    ├──► Intra-Line Word Diff Engine (alecthomas/chroma/v2)               │
-  │    └──► AI Review Hints & Suggestion Patchsets                           │
-  │                                                                          │
-  └──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Client["DEVELOPER WORKSTATION"]
+        direction TB
+        subgraph CLI["niebla CLI (Cobra POSIX Client)"]
+            C1["Workspace Lifecycle (create, sync, destroy)"]
+            C2["Change Inspection (status, diff against base CL)"]
+            C3["Shelving & Submissions (shelve, submit)"]
+        end
+
+        subgraph FUSE["nieblafs (Virtual FUSE Daemon)"]
+            F1["Kernel VFS (/dev/fuse) ◄── POSIX Syscalls"]
+            F2["In-Memory Metadata LRU Cache"]
+            F3["Copy-on-Write Scratch Layer (~/.niebla/workspaces/)"]
+        end
+    end
+
+    subgraph Server["NIEBLA BACKEND SERVER"]
+        direction TB
+        subgraph NS["niebla-server (Central Repository Daemon)"]
+            S1["gRPC Service Interface (niebla.v1 Protobuf)"]
+            S2["PostgreSQL 16+ via pgx/v5 & sqlc"]
+            S3["Content-Addressable Storage (pkg/cas)"]
+        end
+
+        subgraph Cotejo["cotejo (Web Code Review Server :8080)"]
+            W1["Type-Safe HTML Components (templ)"]
+            W2["Real-Time SSE Event Pipeline"]
+            W3["Intra-Line Chroma Syntax Diff Engine"]
+            W4["AI Review Hints & Patchsets"]
+        end
+    end
+
+    Client -->|"gRPC over HTTP/2 (niebla.v1)<br/>Unary Metadata + Streaming Blobs"| Server
 ```
 
 ---

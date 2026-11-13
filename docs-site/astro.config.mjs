@@ -15,6 +15,9 @@ export default defineConfig({
       logo: {
         src: './src/assets/logo.svg',
       },
+      components: {
+        MarkdownContent: './src/components/MarkdownContent.astro',
+      },
       head: [
         {
           tag: 'script',

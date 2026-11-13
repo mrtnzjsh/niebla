@@ -11,27 +11,21 @@ The `niebla` executable is the primary command-line interface for engineers and 
 
 The CLI is structured into modular Cobra commands ([`internal/cli/`](file:///home/matatan/Developer/niebla/niebla/internal/cli)):
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  niebla CLI Entrypoint (cmd/niebla/main.go)                 │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        ▼                   ▼                   ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│ Root Discovery│   │ Config Engine │   │ gRPC Client   │
-│ Finds closest │   │ Reads TOML    │   │ Connects to   │
-│ .niebla dir   │   │ cascade       │   │ niebla-server │
-└───────┬───────┘   └───────┬───────┘   └───────┬───────┘
-        │                   │                   │
-        └───────────────────┼───────────────────┘
-                            │
-                            ▼
-           ┌─────────────────────────────────┐
-           │ Command Execution & Formatting  │
-           │  • ANSI Color TTY Output        │
-           │  • Structured --json (Agents)   │
-           └─────────────────────────────────┘
+```mermaid
+flowchart TD
+    CLI["niebla CLI Entrypoint<br/><code>cmd/niebla/main.go</code>"]
+
+    subgraph Core["Core CLI Modules"]
+        direction LR
+        RD["<b>Root Discovery</b><br/>Finds closest <code>.niebla</code> dir"]
+        CFG["<b>Config Engine</b><br/>Hierarchical TOML cascade"]
+        RPC["<b>gRPC Client</b><br/>Connects to <code>niebla-server</code>"]
+    end
+
+    Exec["<b>Command Execution & Output</b><br/>ANSI Color TTY / Structured JSON"]
+
+    CLI --> Core
+    Core --> Exec
 ```
 
 ### Workspace Root Discovery

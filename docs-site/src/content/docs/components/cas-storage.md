@@ -100,25 +100,17 @@ When a parent changelist lands on trunk or a developer runs `niebla sync`, Niebl
 
 $$\text{Result Tree} = \text{Merge3}(\text{Base Tree}, \text{Ours (Child CL)}, \text{Theirs (Parent Committed)})$$
 
-```
-        Base Merkle Root
-          ┌──────────┐
-          │   H_base │
-          └────┬─────┘
-               │
-       ┌───────┴───────┐
-       ▼               ▼
-Ours (Child CL)   Theirs (Parent Trunk)
- ┌──────────┐       ┌──────────┐
- │  H_ours  │       │ H_theirs │
- └─────┬────┘       └────┬─────┘
-       │                 │
-       └────────┬────────┘
-                ▼
-         Result Merkle Tree
-           ┌──────────┐
-           │ H_result │
-           └──────────┘
+```mermaid
+flowchart TD
+    Base["Base Merkle Root<br/><code>H_base</code>"]
+    Ours["Ours (Child CL)<br/><code>H_ours</code>"]
+    Theirs["Theirs (Parent Trunk)<br/><code>H_theirs</code>"]
+    Result["Result Merkle Tree<br/><code>H_result</code>"]
+
+    Base -->|"Diverged Edits"| Ours
+    Base -->|"Committed Trunk"| Theirs
+    Ours -->|"Three-Way Merge Engine"| Result
+    Theirs -->|"Auto-Rebase Resolution"| Result
 ```
 
 ### Fast-Path Optimization

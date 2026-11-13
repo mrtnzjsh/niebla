@@ -29,30 +29,24 @@ Inspired by Google's **Clients in the Cloud (CitC)**, Niebla inverts this model:
 
 FUSE (**Filesystem in Userspace**) is a Linux kernel subsystem that delegates filesystem system calls to an unprivileged userspace daemon.
 
-```
-┌────────────────────────────────────────────────────────┐
-│  Userspace Application (e.g. NeoVim, VS Code, Go, GCC) │
-└───────────────────────────┬────────────────────────────┘
-                            │
-                            │ POSIX System Calls (open, read, write, stat)
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│  Linux Kernel Virtual File System (VFS)                │
-│    │                                                   │
-│    ├──► Inode / Page Cache                             │
-│    └──► FUSE Kernel Driver (/dev/fuse)                 │
-└───────────────────────────┬────────────────────────────┘
-                            │
-                            │ FUSE Protocol Request/Response Messages
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│  nieblafs Daemon (bazil.org/fuse)                      │
-│    │                                                   │
-│    ├──► FS Struct (fs.FS)                              │
-│    ├──► Dir Node (fs.NodeStringLookuper, ReadDirAller) │
-│    ├──► File Node (fs.HandleReader, fs.HandleWriter)   │
-│    └──► BlobFetcher (gRPC On-Demand Streaming Client)  │
-└────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    App["Userspace Application<br/><i>(NeoVim, VS Code, Go, GCC)</i>"]
+    
+    subgraph VFS["Linux Kernel Virtual File System (VFS)"]
+        VFS_CACHE["Inode & Page Cache"]
+        VFS_FUSE["FUSE Kernel Driver (/dev/fuse)"]
+    end
+
+    subgraph Daemon["nieblafs Daemon (bazil.org/fuse)"]
+        D_FS["FS Struct (fs.FS)"]
+        D_DIR["Dir Node (Lookuper, ReadDirAller)"]
+        D_FILE["File Node (HandleReader, HandleWriter)"]
+        D_FETCH["BlobFetcher (gRPC Streaming Client)"]
+    end
+
+    App -->|"POSIX System Calls (open, read, write, stat)"| VFS
+    VFS -->|"FUSE Protocol Messages (/dev/fuse)"| Daemon
 ```
 
 When an application invokes `open("/path/to/workspace/main.go")`:
@@ -67,18 +61,17 @@ When an application invokes `open("/path/to/workspace/main.go")`:
 
 NieblaFS organizes workspace data into three distinct tiers:
 
-```
-                  ┌────────────────────────────────────────┐
-                  │          nieblafs Virtual Root         │
-                  └───────────────────┬────────────────────┘
-                                      │
-        ┌─────────────────────────────┼────────────────────────────┐
-        ▼                             ▼                            ▼
-┌───────────────┐             ┌───────────────┐            ┌───────────────┐
-│ Tier 1: Base  │             │ Tier 2: LRU   │            │ Tier 3: CoW   │
-│ Merkle Tree   │             │ Metadata &    │            │ Scratch Layer │
-│ (Immutable)   │             │ Blob Cache    │            │ (Read / Write)│
-└───────────────┘             └───────────────┘            └───────────────┘
+```mermaid
+flowchart TD
+    Root["nieblafs Virtual Root"]
+
+    T1["<b>Tier 1: Base Merkle Tree</b><br/>Immutable Remote Snapshot"]
+    T2["<b>Tier 2: In-Memory LRU Cache</b><br/>Metadata & Blob Cache"]
+    T3["<b>Tier 3: CoW Scratch Layer</b><br/>Isolated Read / Write (~/.niebla/workspaces/)"]
+
+    Root --> T1
+    Root --> T2
+    Root --> T3
 ```
 
 ### Tier 1: Immutable Base Merkle Tree

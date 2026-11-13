@@ -1,0 +1,226 @@
+---
+import Default from '@astrojs/starlight/components/MarkdownContent.astro';
+---
+
+<Default><slot /></Default>
+
+<script>
+  import mermaid from 'mermaid';
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: {
+      darkMode: true,
+      fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontSize: '13px',
+
+      // Core Backgrounds & Surfaces (Paleta Quisqueyana Caribbean Midnight)
+      background: '#080D14',
+      mainBkg: '#0E1622',
+      nodeBorder: '#0284C7',
+      nodeTextColor: '#F1F5F9',
+
+      // Flowchart & Connectors (Larimar Blue & Azul Ultramar)
+      lineColor: '#2DD4BF',
+      arrowheadColor: '#2DD4BF',
+      clusterBkg: '#0B1118',
+      clusterBorder: '#0284C7',
+
+      // Node Palettes
+      primaryColor: '#0E1622',
+      primaryTextColor: '#F1F5F9',
+      primaryBorderColor: '#0284C7',
+
+      secondaryColor: '#1A2433',
+      secondaryTextColor: '#CBD5E1',
+      secondaryBorderColor: '#2DD4BF',
+
+      tertiaryColor: '#0E1622',
+      tertiaryTextColor: '#CBD5E1',
+      tertiaryBorderColor: '#F59E0B',
+
+      // Sequence Diagram Specifics
+      actorBkg: '#0E1622',
+      actorBorder: '#0284C7',
+      actorTextColor: '#F1F5F9',
+      actorLineColor: '#4A5B73',
+      signalColor: '#2DD4BF',
+      signalTextColor: '#F1F5F9',
+      labelBoxBkgColor: '#0E1622',
+      labelBoxBorderColor: '#2DD4BF',
+      labelTextColor: '#F1F5F9',
+      loopTextColor: '#F1F5F9',
+      noteBkgColor: '#1A2433',
+      noteBorderColor: '#F59E0B',
+      noteTextColor: '#FDE68A',
+
+      // ER Diagram Specifics
+      entityBorder: '#0284C7',
+      entityBkg: '#0E1622',
+      entityTextColor: '#F1F5F9',
+      attributeBackgroundColorOdd: '#080D14',
+      attributeBackgroundColorEven: '#0E1622',
+      relationshipColor: '#2DD4BF',
+      relationshipLineColor: '#2DD4BF',
+      relationshipTextColor: '#99F6E4',
+    },
+  });
+
+  async function renderMermaidDiagrams() {
+    // Find any code block marked as mermaid
+    const pres = document.querySelectorAll('pre[data-language="mermaid"], .language-mermaid');
+    if (!pres.length) return;
+
+    let idx = 0;
+    for (const pre of pres) {
+      // Find the expressive-code container or parent figure
+      const container = pre.closest('.expressive-code') || pre.closest('figure') || pre;
+      
+      // Extract raw code preserving indentation and newlines
+      let code = '';
+      const ecLines = pre.querySelectorAll('.ec-line');
+      if (ecLines.length > 0) {
+        code = Array.from(ecLines).map(line => line.textContent || '').join('\n');
+      } else {
+        code = pre.textContent || '';
+      }
+
+      code = code.trim();
+      if (!code) continue;
+
+      const id = `mermaid-svg-${Date.now()}-${idx++}`;
+      try {
+        const { svg } = await mermaid.render(id, code);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-wrapper not-content';
+        wrapper.innerHTML = svg;
+        container.replaceWith(wrapper);
+      } catch (err) {
+        console.error('Failed to render Mermaid diagram:', err);
+      }
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderMermaidDiagrams);
+  } else {
+    renderMermaidDiagrams();
+  }
+
+  document.addEventListener('astro:page-load', renderMermaidDiagrams);
+</script>
+
+<style is:global>
+  .mermaid-wrapper {
+    margin: 2rem 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(14, 22, 34, 0.85);
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.875rem;
+    padding: 2rem 1.5rem;
+    overflow-x: auto;
+    box-shadow: 0 4px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(241, 245, 249, 0.08);
+  }
+
+  .mermaid-wrapper svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Paleta Quisqueyana Accents on Mermaid SVGs */
+  .mermaid-wrapper svg .node rect,
+  .mermaid-wrapper svg .node circle,
+  .mermaid-wrapper svg .node ellipse,
+  .mermaid-wrapper svg .node polygon {
+    fill: #0E1622 !important;
+    stroke: #0284C7 !important;
+    stroke-width: 1.5px !important;
+    transition: all 0.2s ease;
+  }
+
+  .mermaid-wrapper svg .node:hover rect,
+  .mermaid-wrapper svg .node:hover circle,
+  .mermaid-wrapper svg .node:hover ellipse,
+  .mermaid-wrapper svg .node:hover polygon {
+    stroke: #2DD4BF !important;
+    filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.5));
+  }
+
+  .mermaid-wrapper svg .node .label {
+    color: #F1F5F9 !important;
+    fill: #F1F5F9 !important;
+    font-weight: 500;
+  }
+
+  .mermaid-wrapper svg .cluster rect {
+    fill: rgba(11, 17, 24, 0.85) !important;
+    stroke: rgba(2, 132, 199, 0.4) !important;
+    stroke-width: 1.5px !important;
+    rx: 8px !important;
+    ry: 8px !important;
+  }
+
+  .mermaid-wrapper svg .cluster .nodeLabel {
+    color: #2DD4BF !important;
+    fill: #2DD4BF !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.03em;
+  }
+
+  .mermaid-wrapper svg .edgePath .path,
+  .mermaid-wrapper svg .flowchart-link {
+    stroke: #2DD4BF !important;
+    stroke-width: 1.75px !important;
+  }
+
+  .mermaid-wrapper svg .marker,
+  .mermaid-wrapper svg #statediagram-barbEnd,
+  .mermaid-wrapper svg marker path {
+    fill: #2DD4BF !important;
+    stroke: #2DD4BF !important;
+  }
+
+  .mermaid-wrapper svg .edgeLabel {
+    background-color: #080D14 !important;
+    color: #BAE6FD !important;
+    fill: #BAE6FD !important;
+    font-size: 0.78rem !important;
+  }
+
+  /* ER Diagram Specific Styles */
+  .mermaid-wrapper svg .er.entityBox {
+    fill: #0E1622 !important;
+    stroke: #0284C7 !important;
+    stroke-width: 1.5px !important;
+  }
+
+  .mermaid-wrapper svg .er.entityLabel {
+    fill: #F1F5F9 !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.05em;
+  }
+
+  .mermaid-wrapper svg .er.attributeBoxOdd {
+    fill: #080D14 !important;
+    stroke: rgba(241, 245, 249, 0.12) !important;
+  }
+
+  .mermaid-wrapper svg .er.attributeBoxEven {
+    fill: #0E1622 !important;
+    stroke: rgba(241, 245, 249, 0.12) !important;
+  }
+
+  .mermaid-wrapper svg .er.relationshipLine {
+    stroke: #2DD4BF !important;
+    stroke-width: 1.75px !important;
+  }
+
+  .mermaid-wrapper svg .er.relationshipLabel {
+    fill: #99F6E4 !important;
+    font-size: 0.75rem !important;
+  }
+</style>
