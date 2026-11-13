@@ -1,31 +1,110 @@
 ---
 title: Installation & Setup Matrix
-description: Multi-platform installation guides for pre-built GitHub releases, source builds across Linux distros, NixOS, and macOS.
+description: Multi-platform installation guides for pre-built GitHub releases, source builds across Linux distros, macOS, and NixOS.
+tableOfContents: false
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-Niebla provides multiple installation options depending on your operating system, package manager, and infrastructure requirements:
+Niebla provides multiple installation options depending on your operating system, package manager, and development role:
 
 - **Pre-built Binaries**: Download statically compiled binaries directly from the GitHub Releases tab.
-- **Build from Source**: Compile natively using Go and Make across Debian/Ubuntu, Fedora/RHEL, Arch, and Alpine.
+- **Build from Source**: Compile natively using Go and Make across Debian/Ubuntu, Fedora/RHEL, Arch, Alpine, and macOS.
+- **macOS Workstations**: Comprehensive client setup via Homebrew, source builds, direct binaries, or Nix-Darwin with direct file materialization (`--no-fuse`).
 - **NixOS & Flakes**: Declarative system modules with automated service supervision and isolated PostgreSQL.
-- **macOS Workstations**: Remote client connectivity with direct file materialization (`--no-fuse`).
 
 ---
 
 <Tabs>
-  <TabItem label="GitHub Releases">
-    Pre-compiled release archives are published for Linux (`x86_64`, `aarch64`) and macOS (`arm64`, `x86_64`).
+  <TabItem label="macOS (Darwin)">
+    macOS developers typically run the `niebla` client to connect to a remote `niebla-server` daemon (such as `<server-host>:50051`). Because macOS does not include an in-kernel FUSE driver by default, the client operates in high-performance **direct materialization mode (`--no-fuse`)**.
 
-    ### 1. Download the Release Archive
-    Replace `<owner>`, `<repo>`, and `<version>` with your target repository coordinates and release tag:
+    #### Option A: Pre-built Binary (GitHub Releases)
+    Download and install the pre-compiled binary for Apple Silicon (`arm64`) or Intel (`amd64`):
+
+    ```bash
+    # Set target release version and CPU architecture
+    VERSION="<version>" # e.g. v0.1.0
+    ARCH="arm64"        # "arm64" (M1-M4) or "amd64" (Intel)
+
+    # Download release archive
+    curl -sSL -O "https://github.com/<owner>/<repo>/releases/download/${VERSION}/niebla_${VERSION}_darwin_${ARCH}.tar.gz"
+    tar -xzf "niebla_${VERSION}_darwin_${ARCH}.tar.gz"
+
+    # Install to PATH
+    sudo install -m 755 niebla /usr/local/bin/
+    # Or for Apple Silicon Homebrew PATH:
+    # install -m 755 niebla /opt/homebrew/bin/
+    ```
+
+    #### Option B: Compile from Source (Standard Go)
+    Build the client directly using Go and standard Apple command line tools:
+
+    ```bash
+    # 1. Install prerequisites via Homebrew (if not already installed)
+    brew install go make git
+
+    # 2. Clone the repository
+    git clone https://github.com/<owner>/<repo>.git
+    cd niebla/niebla
+
+    # 3. Compile the niebla client binary
+    mkdir -p bin
+    go build -o bin/niebla ./cmd/niebla
+
+    # 4. Install into your PATH
+    sudo install -m 755 bin/niebla /usr/local/bin/
+    ```
+
+    #### Option C: Homebrew Tap
+    If using the official Homebrew tap:
+
+    ```bash
+    brew tap <owner>/tap
+    brew install niebla
+    ```
+
+    #### Option D: Declarative Nix (nix-darwin / Home Manager)
+    For workstations managed declaratively with Nix:
+
+    ```nix
+    # home.nix or configuration.nix
+    imports = [ inputs.niebla.homeManagerModules.default ];
+
+    programs.niebla = {
+      enable = true;
+      enableSkills = true;
+    };
+    ```
+
+    #### Client Configuration (`default_mode = "no-fuse"`)
+    To configure your macOS client to always connect to your central server and default to `--no-fuse` without typing the flag on every workspace invocation, add the following to `~/.config/niebla/config.toml`:
+
+    ```toml
+    # ~/.config/niebla/config.toml
+    server = "<server-host>:50051"
+    default_mode = "no-fuse"
+    ```
+
+    With this setting, creating workspaces is as simple as:
+
+    ```bash
+    niebla workspace create my-feature
+    cd ~/.niebla/workspaces/my-feature
+    ```
+  </TabItem>
+
+  <TabItem label="GitHub Releases (Linux)">
+    Pre-compiled release archives are published for Linux (`x86_64`, `aarch64`).
+
+    #### 1. Download Release Tarball & Checksums
+    Replace `<owner>`, `<repo>`, and `<version>` with your repository coordinates:
 
     ```bash
     # Set target release version and system architecture
     VERSION="<version>" # e.g. v0.1.0
     ARCH="amd64"        # amd64 or arm64
-    OS="linux"          # linux or darwin
+    OS="linux"          # linux
 
     # Download release tarball and SHA-256 checksums
     curl -sSL -O "https://github.com/<owner>/<repo>/releases/download/${VERSION}/niebla_${VERSION}_${OS}_${ARCH}.tar.gz"
@@ -35,13 +114,13 @@ Niebla provides multiple installation options depending on your operating system
     sha256sum --check --ignore-missing checksums.txt
     ```
 
-    ### 2. Extract and Install Binaries
-    Extract the archive and move the binaries to a system-wide PATH directory (such as `/usr/local/bin`):
+    #### 2. Extract and Install Binaries
+    Extract the archive and move the binaries to a system-wide PATH directory:
 
     ```bash
     tar -xzf "niebla_${VERSION}_${OS}_${ARCH}.tar.gz"
 
-    # Install binaries
+    # System-wide installation
     sudo install -m 755 niebla /usr/local/bin/
     sudo install -m 755 nieblafs /usr/local/bin/
     sudo install -m 755 niebla-server /usr/local/bin/
@@ -55,7 +134,7 @@ Niebla provides multiple installation options depending on your operating system
     install -m 755 niebla nieblafs niebla-server cotejo ~/.local/bin/
     ```
 
-    ### 3. Verify Installation
+    #### 3. Verify Installation
     ```bash
     niebla --version
     nieblafs --version
@@ -64,54 +143,54 @@ Niebla provides multiple installation options depending on your operating system
     ```
   </TabItem>
 
-  <TabItem label="Build from Source">
-    Building from source allows power users and contributors to run bleeding-edge Niebla binaries on any Linux distribution.
+  <TabItem label="Build from Source (Linux)">
+    Building from source allows power users and contributors to run bleeding-edge Niebla binaries across any Linux distribution.
 
-    ### 1. Install System Dependencies
+    #### 1. Install System Dependencies
     Compiling `nieblafs` requires the FUSE user-space development headers (`fuse3` or `libfuse`):
 
-    #### Ubuntu / Debian / Pop!_OS
+    **Ubuntu / Debian / Pop!_OS**:
     ```bash
     sudo apt update
     sudo apt install -y git make golang-go fuse3 libfuse3-dev pkg-config
     ```
 
-    #### Fedora / RHEL / Rocky Linux
+    **Fedora / RHEL / Rocky Linux**:
     ```bash
     sudo dnf install -y git make golang fuse3 fuse3-devel pkgconf-pkg-config
     ```
 
-    #### Arch Linux / Manjaro
+    **Arch Linux / Manjaro**:
     ```bash
     sudo pacman -S --needed git make go fuse3 pkgconf
     ```
 
-    #### Alpine Linux
+    **Alpine Linux**:
     ```bash
     apk add git make go fuse3-dev build-base
     ```
 
-    ### 2. Clone the Repository
+    #### 2. Clone the Repository
     ```bash
     git clone https://github.com/<owner>/<repo>.git
     cd niebla/niebla
     ```
 
-    ### 3. Compile Binaries
+    #### 3. Compile Binaries
     Run `make build` to generate all four core binaries into `bin/`:
 
     ```bash
     make build
     ```
 
-    If you only need the developer CLI without the web review server or server daemons:
+    If you only need the developer CLI without the web review server or backend daemons:
     ```bash
     mkdir -p bin
     go build -o bin/niebla ./cmd/niebla
     go build -o bin/nieblafs ./cmd/nieblafs
     ```
 
-    ### 4. Install Binaries to System PATH
+    #### 4. Install Binaries to System PATH
     ```bash
     sudo install -m 755 bin/niebla /usr/local/bin/
     sudo install -m 755 bin/nieblafs /usr/local/bin/
@@ -119,7 +198,7 @@ Niebla provides multiple installation options depending on your operating system
     sudo install -m 755 bin/cotejo /usr/local/bin/
     ```
 
-    ### 5. Configure User-Space FUSE Permissions
+    #### 5. Configure User-Space FUSE Permissions
     To allow `nieblafs` to expose virtual workspace mounts across non-root user sessions, ensure `/dev/fuse` is accessible and `user_allow_other` is enabled:
 
     ```bash
@@ -134,7 +213,7 @@ Niebla provides multiple installation options depending on your operating system
   <TabItem label="NixOS (Flake Module)">
     On NixOS systems, Niebla provides fully managed systemd service isolation, PostgreSQL management, and automated CAS path generation.
 
-    ### 1. Add Niebla Flake Input
+    #### 1. Add Niebla Flake Input
     Add the `niebla` input to your system `flake.nix`:
 
     ```nix
@@ -144,7 +223,7 @@ Niebla provides multiple installation options depending on your operating system
     };
     ```
 
-    ### 2. Configure System Services
+    #### 2. Configure System Services
     Import the NixOS module and enable the desired service profiles:
 
     ```nix
@@ -152,37 +231,16 @@ Niebla provides multiple installation options depending on your operating system
 
     services.niebla = {
       enable = true;
-      postgres.enable = true; # Dedicated DB on port 5433
-      server.enable = true;   # gRPC on port 50051
-      cotejo.enable = true;   # Review UI on port 8080
-      client.enable = true;   # Installs niebla & nieblafs
+      postgres.enable = true; # Dedicated PostgreSQL cluster on port 5433
+      server.enable = true;   # gRPC central daemon on port 50051
+      cotejo.enable = true;   # Cotejo code review web server on port 8080
+      client.enable = true;   # Installs niebla & nieblafs in system profile
     };
     ```
 
-    ### 3. Rebuild System
+    #### 3. Rebuild System
     ```bash
     sudo nixos-rebuild switch --flake .
-    ```
-  </TabItem>
-
-  <TabItem label="macOS (Darwin)">
-    For macOS workstations targeting a remote Niebla server (such as `<server-host>:50051`):
-
-    ### 1. Via Home Manager (`programs.niebla`)
-    ```nix
-    imports = [ inputs.niebla.homeManagerModules.default ];
-
-    programs.niebla = {
-      enable = true;
-      enableSkills = true;
-    };
-    ```
-
-    ### 2. Direct Materialization Mode (`--no-fuse`)
-    macOS developers can create workspaces without needing third-party kernel extensions:
-
-    ```bash
-    niebla workspace create my-feature --no-fuse --server <server-host>:50051
     ```
   </TabItem>
 </Tabs>
