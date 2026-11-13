@@ -11,3 +11,4 @@ description: Architecture, gRPC APIs, and storage tier of the central repository
 - **PostgreSQL Database:** Tracks changelists, patchsets, file trees, check runs, and review comments.
 - **Content-Addressable Storage (CAS):** Manages immutable, SHA-256 addressed blobs partitioned into sharded directory keys (`ab/cd/<sha256>`).
 - **Cascade Rebasing Engine:** Automatically walks stacked changelist dependencies and computes three-way tree merges in the background when parent CLs land on trunk.
+

@@ -12,3 +12,4 @@ description: Overview of the Google Critique-inspired web code review applicatio
 - **Threaded Inline Discussions:** Post draft comments, resolve discussions, or mark attention sets.
 - **AI Suggestion Engine:** One-click automated code suggestions with direct Merkle tree patchset generation.
 - **Strict Submit Gating:** Enforces OWNERS approval thresholds and green CI checks before allowing submissions to trunk.
+

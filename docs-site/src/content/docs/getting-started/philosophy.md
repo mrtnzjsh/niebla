@@ -28,3 +28,4 @@ Every file—whether a 10-line source file or a 4GB dataset—is represented as 
 
 ### 3. Server-Authoritative Monotonic Trunk
 Trunk revisions form a strict sequential sequence (`1, 2, 3...`). When parent changelists commit, Niebla's background cascade engine automatically rebases stacked child changelists in the cloud.
+
