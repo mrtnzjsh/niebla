@@ -19,12 +19,14 @@
           config.allowUnfree = true;
         };
 
+        vendorHash = "sha256-DdBpdSz9WHzmztQvMunVr1dmOkGh3FphKOeUHnLzrwQ=";
+
         fusePkg = pkgs.buildGoModule {
           pname = "nieblafs";
           version = "0.1.0";
           src = ./niebla;
           subPackages = [ "cmd/nieblafs" ];
-          vendorHash = null;
+          inherit vendorHash;
         };
 
         serverPkg = pkgs.buildGoModule {
@@ -32,7 +34,7 @@
           version = "0.1.0";
           src = ./niebla;
           subPackages = [ "cmd/niebla-server" ];
-          vendorHash = null;
+          inherit vendorHash;
           nativeBuildInputs = [ pkgs.makeWrapper ];
           postInstall = ''
             wrapProgram $out/bin/niebla-server \
@@ -45,7 +47,7 @@
           version = "0.1.0";
           src = ./niebla;
           subPackages = [ "cmd/cotejo" ];
-          vendorHash = null;
+          inherit vendorHash;
         };
 
         cliPkg = pkgs.buildGoModule {
@@ -53,7 +55,7 @@
           version = "0.1.0";
           src = ./niebla;
           subPackages = [ "cmd/niebla" ];
-          vendorHash = null;
+          inherit vendorHash;
           postInstall = ''
             mkdir -p $out/share/niebla/skills
             if [ -d skills ]; then
