@@ -325,13 +325,80 @@ h1[data-page-title] {
 }
 
 /* ----------------------------------------------------------------------------
-   Code Frames: Warm Arena Blanca Borders (Principle 1)
+   Code Frames & Copy Blocks: Paleta Quisqueyana Accents & Overflow Containment
    ---------------------------------------------------------------------------- */
-.expressive-code pre,
-pre.astro-code {
+.expressive-code {
+	max-width: 100% !important;
+	margin: 1.5rem 0 !important;
+}
+
+.expressive-code figure.frame {
+	position: relative !important;
+	max-width: 100% !important;
 	border: 1px solid rgba(241, 245, 249, 0.18) !important;
 	border-radius: 0.625rem !important;
 	background-color: #0B1118 !important;
+	overflow: hidden !important;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35) !important;
+}
+
+.expressive-code pre,
+pre.astro-code {
+	border: none !important;
+	border-radius: 0 !important;
+	background-color: transparent !important;
+	max-width: 100% !important;
+	overflow-x: auto !important;
+}
+
+/* Ensure Copy Button is clearly visible, accessible, and rendered */
+.expressive-code .copy {
+	position: absolute !important;
+	top: 0.6rem !important;
+	right: 0.6rem !important;
+	z-index: 10 !important;
+	display: flex !important;
+}
+
+.expressive-code .copy button {
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	width: 2.25rem !important;
+	height: 2.25rem !important;
+	border-radius: 0.375rem !important;
+	border: 1px solid rgba(241, 245, 249, 0.22) !important;
+	background: rgba(14, 22, 34, 0.9) !important;
+	opacity: 0.75 !important;
+	cursor: pointer !important;
+	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.expressive-code figure.frame:hover .copy button,
+.expressive-code .copy button:focus,
+.expressive-code .copy button:hover {
+	opacity: 1 !important;
+	border-color: #2DD4BF !important;
+	background: #1A2433 !important;
+	box-shadow: 0 0 10px rgba(45, 212, 191, 0.3) !important;
+}
+
+.expressive-code .copy button::after {
+	content: '' !important;
+	display: block !important;
+	width: 1.15rem !important;
+	height: 1.15rem !important;
+	background-color: #F1F5F9 !important;
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'%3E%3C/rect%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'%3E%3C/path%3E%3C/svg%3E") !important;
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'%3E%3C/rect%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'%3E%3C/path%3E%3C/svg%3E") !important;
+	-webkit-mask-repeat: no-repeat !important;
+	mask-repeat: no-repeat !important;
+	-webkit-mask-position: center !important;
+	mask-position: center !important;
+}
+
+.expressive-code .copy button:hover::after {
+	background-color: #2DD4BF !important;
 }
 
 /* ----------------------------------------------------------------------------
