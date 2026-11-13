@@ -85,12 +85,14 @@ flowchart TD
 * Ensures repeated `ls`, `stat`, or tree traversals do not make redundant gRPC round-trips to `niebla-server`.
 
 ### Tier 3: Copy-on-Write (CoW) Scratch Layer
-* A private directory on local disk:
-  ```text
-  ~/.niebla/workspaces/<workspace-name>/scratch/
-  ```
-  (or `/scratch/niebla/workspaces/<workspace-name>/` in multi-tenant environments).
-* Whenever a developer creates, writes, or modifies a file, the modified bytes are stored exclusively in this directory.
+
+A private directory on local disk (or `/scratch/niebla/workspaces/<workspace-name>/` in multi-tenant environments):
+
+```bash
+~/.niebla/workspaces/<workspace-name>/scratch/
+```
+
+Whenever a developer creates, writes, or modifies a file, the modified bytes are stored exclusively in this directory.
 
 ---
 
@@ -151,10 +153,12 @@ POSIX filesystems require that deleting a file immediately hides it from subsequ
 1. When a user runs `rm path/to/file.go`:
    * The kernel issues `FUSE_UNLINK`.
    * `nieblafs` removes any modified version in the scratch directory.
-   * `nieblafs` creates an empty marker file named:
-     ```text
-     ~/.niebla/workspaces/<name>/scratch/path/to/.wh.file.go
-     ```
+   * `nieblafs` creates an empty marker file:
+
+```bash
+~/.niebla/workspaces/<name>/scratch/path/to/.wh.file.go
+```
+
 2. During `ReadDirAll()` and `Lookup()`:
    * `nieblafs` inspects the scratch directory for `.wh.*` prefix files.
    * If `.wh.file.go` exists, `nieblafs` suppresses `file.go` from the virtual directory listing and returns `ENOENT` on direct lookups.
@@ -229,15 +233,20 @@ niebla workspace create my-feature --no-fuse --server <server-host>:50051
 
 ## 8. Daemon Lifecycle & Supervision
 
-When running under full FUSE mode, `nieblafs` runs as a supervised background daemon:
+When running under full FUSE mode, `nieblafs` runs as a supervised background daemon.
 
-* **Mount Command**:
-  ```bash
-  nieblafs --mount /path/to/mount --scratch /path/to/scratch --server <server-host>:50051 --socket /path/to/nieblafs.sock
-  ```
-* **IPC Control Socket**: Exposes a UNIX domain socket (`nieblafs.sock`) allowing the `niebla` CLI to poll mount health, query cache statistics, or trigger cache flushes.
-* **Graceful Unmounting**:
-  ```bash
-  fusermount -u /path/to/mount
-  ```
-  `nieblafs` intercepts `SIGINT` / `SIGTERM`, flushes dirty write buffers, closes open file handles, and cleanly detaches from `/dev/fuse`.
+### Mount Daemon
+
+```bash
+nieblafs --mount /path/to/mount --scratch /path/to/scratch --server <server-host>:50051 --socket /path/to/nieblafs.sock
+```
+
+The daemon exposes a UNIX domain socket (`nieblafs.sock`) allowing the `niebla` CLI to poll mount health, query cache statistics, or trigger cache flushes.
+
+### Graceful Unmounting
+
+```bash
+fusermount -u /path/to/mount
+```
+
+`nieblafs` intercepts `SIGINT` / `SIGTERM`, flushes dirty write buffers, closes open file handles, and cleanly detaches from `/dev/fuse`.
