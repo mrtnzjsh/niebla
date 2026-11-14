@@ -193,6 +193,7 @@ Comprehensive documentation, API specs, and runbooks are available at the **[Nie
 * **[Direct Materialization Mode (`--no-fuse`)](https://mrtnzjsh.github.io/niebla/workflows/direct-materialization/):** Running Niebla in containers, VMs, and environments without `/dev/fuse`.
 * **[Offline Mode & Deferred Sync](https://mrtnzjsh.github.io/niebla/workflows/offline-mode/):** Local caching strategies for working without internet access.
 * **[In-Tree Governance (`OWNERS.toml`)](https://mrtnzjsh.github.io/niebla/workflows/in-tree-governance/):** Subtree ownership rules, required sign-offs, and automated CI runner gates.
+* **[Observability & Log Aggregation](https://mrtnzjsh.github.io/niebla/recipes/logging-observability/):** Forwarding daemon logs and CloudEvents into Loki, Vector, Promtail, and SIEMs.
 * **[Troubleshooting Runbook](https://mrtnzjsh.github.io/niebla/workflows/troubleshooting/):** Unmounting zombie FUSE mounts, socket recovery, and database advisory lock debugging.
 
 ### Cotejo Code Review
