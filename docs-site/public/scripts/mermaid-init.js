@@ -422,57 +422,72 @@
 
   function adjustSvgViewBox(svgEl) {
     if (!svgEl) return;
+    // Only adjust flowcharts that contain clusters (subgraphs) where titles might be clipped
+    if (!svgEl.querySelector('.cluster')) return;
+    // Prevent repeated or compounding adjustments
+    if (svgEl.dataset.viewboxAdjusted === 'true') return;
+    svgEl.dataset.viewboxAdjusted = 'true';
 
-    const expandViewBox = () => {
-      // 1. Ensure foreignObject and text containers do not clip text internally
-      svgEl.querySelectorAll('foreignObject, foreignObject > div').forEach(el => {
-        el.style.overflow = 'visible';
-      });
+    // 1. Ensure foreignObject and text containers do not clip text internally
+    svgEl.querySelectorAll('foreignObject, foreignObject > div').forEach(el => {
+      el.style.overflow = 'visible';
+    });
 
-      // 2. Read existing viewBox values
-      const vbAttr = svgEl.getAttribute('viewBox');
-      let minX = 0, minY = 0, width = 600, height = 400;
-      if (vbAttr) {
-        const parts = vbAttr.trim().split(/[\s,]+/).map(Number);
-        if (parts.length === 4 && parts.every(n => !isNaN(n))) {
-          [minX, minY, width, height] = parts;
-        }
+    // 2. Read existing viewBox values
+    const vbAttr = svgEl.getAttribute('viewBox');
+    if (!vbAttr) return;
+
+    const parts = vbAttr.trim().split(/[\s,]+/).map(Number);
+    if (parts.length !== 4 || parts.some(n => isNaN(n))) return;
+
+    const [origMinX, origMinY, origWidth, origHeight] = parts;
+
+    // 3. Measure actual rendered geometric bounding box if available
+    let bBox = null;
+    try {
+      bBox = svgEl.getBBox();
+    } catch (_) {}
+
+    let leftOverhang = 0;
+    let topOverhang = 0;
+    let rightOverhang = 0;
+    let bottomOverhang = 0;
+
+    if (bBox && bBox.width > 0 && bBox.height > 0) {
+      if (bBox.x < origMinX) {
+        leftOverhang = origMinX - bBox.x;
       }
-
-      // 3. Measure actual rendered geometric bounding box
-      let bBox = null;
-      try {
-        bBox = svgEl.getBBox();
-      } catch (_) {}
-
-      if (bBox && bBox.width > 0 && bBox.height > 0) {
-        minX = Math.min(minX, bBox.x);
-        minY = Math.min(minY, bBox.y);
-        const maxX = Math.max(minX + width, bBox.x + bBox.width);
-        const maxY = Math.max(minY + height, bBox.y + bBox.height);
-        width = maxX - minX;
-        height = maxY - minY;
+      if (bBox.y < origMinY) {
+        topOverhang = origMinY - bBox.y;
       }
+      const bBoxMaxX = bBox.x + bBox.width;
+      const origMaxX = origMinX + origWidth;
+      if (bBoxMaxX > origMaxX) {
+        rightOverhang = bBoxMaxX - origMaxX;
+      }
+      const bBoxMaxY = bBox.y + bBox.height;
+      const origMaxY = origMinY + origHeight;
+      if (bBoxMaxY > origMaxY) {
+        bottomOverhang = bBoxMaxY - origMaxY;
+      }
+    }
 
-      // 4. Add generous margin around all 4 edges so titles and borders never clip
-      const padX = 30;
-      const padY = 24;
+    // Add modest safety padding (at least 16px horizontal, 14px vertical)
+    const padLeft = Math.ceil(Math.max(16, leftOverhang + 12));
+    const padTop = Math.ceil(Math.max(14, topOverhang + 10));
+    const padRight = Math.ceil(Math.max(16, rightOverhang + 12));
+    const padBottom = Math.ceil(Math.max(14, bottomOverhang + 10));
 
-      const finalMinX = Math.floor(minX - padX);
-      const finalMinY = Math.floor(minY - padY);
-      const finalWidth = Math.ceil(width + padX * 2);
-      const finalHeight = Math.ceil(height + padY * 2);
+    const finalMinX = Math.floor(origMinX - padLeft);
+    const finalMinY = Math.floor(origMinY - padTop);
+    const finalWidth = Math.ceil(origWidth + padLeft + padRight);
+    const finalHeight = Math.ceil(origHeight + padTop + padBottom);
 
-      svgEl.setAttribute('viewBox', `${finalMinX} ${finalMinY} ${finalWidth} ${finalHeight}`);
-      svgEl.style.maxWidth = `${finalWidth}px`;
-      svgEl.style.width = '100%';
-      svgEl.style.height = 'auto';
-      svgEl.style.overflow = 'visible';
-    };
-
-    expandViewBox();
-    requestAnimationFrame(expandViewBox);
-    setTimeout(expandViewBox, 60);
+    svgEl.setAttribute('viewBox', `${finalMinX} ${finalMinY} ${finalWidth} ${finalHeight}`);
+    svgEl.style.maxWidth = `${finalWidth}px`;
+    svgEl.style.width = '100%';
+    svgEl.style.height = 'auto';
+    svgEl.style.overflow = 'visible';
   }
 
   if (document.readyState === 'loading') {
