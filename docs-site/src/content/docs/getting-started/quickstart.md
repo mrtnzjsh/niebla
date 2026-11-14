@@ -1,6 +1,9 @@
 ---
 title: Quickstart (5-Minute Tour)
 description: Create your first Niebla workspace, edit files, shelve a changelist, and review in Cotejo.
+sidebar:
+  order: 3
+  label: Quickstart (5-Minute Tour)
 ---
 
 Welcome to Niebla! This guide will walk you through setting up your first virtual workspace, modifying files, and submitting changes to trunk.
@@ -81,4 +84,12 @@ Here you can:
 - Post inline review comments.
 - Request AI assistance via the **AI Hint Agent**.
 - Approve and submit the changelist to trunk!
+
+---
+
+## Next Steps
+
+Ready for an end-to-end, code-complete walkthrough? Continue to:
+
+* **[First Project: Hello World Walkthrough](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/getting-started/first-project.md):** Build a Go microservice from scratch, create an `OWNERS.toml` governance policy, shelve multiple patchsets, resolve Cotejo comments, and submit to trunk.
 

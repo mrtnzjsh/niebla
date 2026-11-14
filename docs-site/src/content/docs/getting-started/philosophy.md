@@ -1,6 +1,9 @@
 ---
 title: Architectural Philosophy
 description: Why Niebla uses the Google Piper and CitC model instead of distributed Git packfiles.
+sidebar:
+  order: 1
+  label: Architectural Philosophy
 ---
 
 Niebla was engineered around the reality that enterprise monorepos eventually outgrow distributed version control systems like Git.
