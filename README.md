@@ -29,13 +29,12 @@ Niebla solves this by treating the monorepo as a **central, high-throughput serv
 
 ```mermaid
 flowchart TD
-    subgraph Workstation["Developer & Agent Workstation"]
-        direction TB
-        CLI["niebla CLI (workspace, status, diff, shelve, submit)"]
-        FS["nieblafs (Virtual FUSE VFS)"]
-        Direct["Direct Mode (--no-fuse materialization)"]
-        Scratch["Scratch CoW Layer (Local modifications)"]
-        CASLocal["Shared CAS Cache (Deduplicated blobs)"]
+    subgraph Workstation["Developer Workstation"]
+        CLI["niebla CLI"]
+        FS["nieblafs FUSE Daemon"]
+        Direct["Direct Materialization"]
+        Scratch["Local Scratch Overlay"]
+        CASLocal["Local CAS Blob Cache"]
 
         CLI --> FS
         CLI --> Direct
@@ -43,36 +42,32 @@ flowchart TD
         FS --> CASLocal
     end
 
-    subgraph Cluster["Repository Server Infrastructure"]
-        direction TB
-        Server["niebla-server (:50051 gRPC API)"]
-        CASRemote["Central CAS Storage (Content-addressable blobs)"]
-        DB[("PostgreSQL 16+ (Revisions, reviews, approvals)")]
-        Cascade["Cascade Engine (Automated stacked rebases)"]
+    subgraph Server["Repository Server"]
+        Daemon["niebla-server Daemon"]
+        CASRemote["Central CAS Storage"]
+        DB[("PostgreSQL Database")]
+        Cascade["Cascade Rebase Engine"]
 
-        Server --> CASRemote
-        Server --> DB
-        Server --> Cascade
+        Daemon --> CASRemote
+        Daemon --> DB
+        Daemon --> Cascade
     end
 
-    subgraph Web["Cotejo Review & CI (:8080)"]
-        direction TB
-        Cotejo["Cotejo Web Review Server"]
-        SSE["Real-Time SSE Event Stream"]
-        Attention["Attention Sets (Turn-based review tracking)"]
-        Agents["AI Review Personas (Automated hints & patches)"]
-        CIHub["CI Status API (/api/v1/ci/status)"]
+    subgraph Review["Cotejo Review UI"]
+        Cotejo["Cotejo Web Service"]
+        SSE["Server-Sent Events Stream"]
+        Attention["Attention Set Tracker"]
+        Agents["AI Review Personas"]
 
         Cotejo --> SSE
         Cotejo --> Attention
         Cotejo --> Agents
-        Cotejo --> CIHub
     end
 
-    CLI -->|"gRPC (HTTP/2) / Bearer Auth"| Server
-    FS -->|"On-Demand Blob Stream (64KB)"| CASRemote
-    CLI -->|"Browser Review Link"| Cotejo
-    Cotejo -->|"Query Merkle Trees & Reviews"| Server
+    CLI -->|"gRPC Protocol"| Daemon
+    FS -.->|"Blob Streaming"| CASRemote
+    CLI -->|"Review URL"| Cotejo
+    Cotejo -->|"Query Revisions"| Daemon
 ```
 
 ---
