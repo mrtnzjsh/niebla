@@ -1154,6 +1154,16 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 	vertical-align: middle !important;
 }
 
+.mermaid-wrapper svg foreignObject,
+.mermaid-modal-stage svg foreignObject {
+	overflow: visible !important;
+}
+
+.mermaid-wrapper svg foreignObject > div,
+.mermaid-modal-stage svg foreignObject > div {
+	overflow: visible !important;
+}
+
 .mermaid-wrapper svg .cluster .nodeLabel,
 .mermaid-wrapper svg .cluster-label,
 .mermaid-wrapper svg .cluster-label text,

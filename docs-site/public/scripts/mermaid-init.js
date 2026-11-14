@@ -408,10 +408,71 @@
         });
 
         container.replaceWith(wrapper);
+
+        // Adjust SVG viewBox with generous padding to prevent title and cluster cutoff
+        const svgEl = wrapper.querySelector('svg');
+        if (svgEl) {
+          adjustSvgViewBox(svgEl);
+        }
       } catch (err) {
         console.error('Failed to render Mermaid diagram:', err);
       }
     }
+  }
+
+  function adjustSvgViewBox(svgEl) {
+    if (!svgEl) return;
+
+    const expandViewBox = () => {
+      // 1. Ensure foreignObject and text containers do not clip text internally
+      svgEl.querySelectorAll('foreignObject, foreignObject > div').forEach(el => {
+        el.style.overflow = 'visible';
+      });
+
+      // 2. Read existing viewBox values
+      const vbAttr = svgEl.getAttribute('viewBox');
+      let minX = 0, minY = 0, width = 600, height = 400;
+      if (vbAttr) {
+        const parts = vbAttr.trim().split(/[\s,]+/).map(Number);
+        if (parts.length === 4 && parts.every(n => !isNaN(n))) {
+          [minX, minY, width, height] = parts;
+        }
+      }
+
+      // 3. Measure actual rendered geometric bounding box
+      let bBox = null;
+      try {
+        bBox = svgEl.getBBox();
+      } catch (_) {}
+
+      if (bBox && bBox.width > 0 && bBox.height > 0) {
+        minX = Math.min(minX, bBox.x);
+        minY = Math.min(minY, bBox.y);
+        const maxX = Math.max(minX + width, bBox.x + bBox.width);
+        const maxY = Math.max(minY + height, bBox.y + bBox.height);
+        width = maxX - minX;
+        height = maxY - minY;
+      }
+
+      // 4. Add generous margin around all 4 edges so titles and borders never clip
+      const padX = 30;
+      const padY = 24;
+
+      const finalMinX = Math.floor(minX - padX);
+      const finalMinY = Math.floor(minY - padY);
+      const finalWidth = Math.ceil(width + padX * 2);
+      const finalHeight = Math.ceil(height + padY * 2);
+
+      svgEl.setAttribute('viewBox', `${finalMinX} ${finalMinY} ${finalWidth} ${finalHeight}`);
+      svgEl.style.maxWidth = `${finalWidth}px`;
+      svgEl.style.width = '100%';
+      svgEl.style.height = 'auto';
+      svgEl.style.overflow = 'visible';
+    };
+
+    expandViewBox();
+    requestAnimationFrame(expandViewBox);
+    setTimeout(expandViewBox, 60);
   }
 
   if (document.readyState === 'loading') {
