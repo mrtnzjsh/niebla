@@ -2,7 +2,7 @@
 title: "Deploying over Tailscale & WireGuard"
 description: Accessing niebla-server and Cotejo securely across your private tailnet with zero port forwarding, WireGuard encryption, and automatic Tailscale WhoIs identity resolution.
 sidebar:
-  order: 5
+  order: 6
   label: Tailscale & Private Mesh Networks
 ---
 

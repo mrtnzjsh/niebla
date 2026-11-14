@@ -2,7 +2,7 @@
 title: "Cloud Deployments: AWS, GCP & Azure"
 description: Production-grade cloud deployment recipes for Amazon Web Services, Google Cloud Platform, and Microsoft Azure using managed databases, object storage, and IAM authentication.
 sidebar:
-  order: 4
+  order: 5
   label: Cloud Deployments (AWS, GCP, Azure)
 ---
 
