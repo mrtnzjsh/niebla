@@ -587,7 +587,7 @@ html[data-nav-collapsed="true"][data-toc-collapsed="true"] .main-pane .sl-contai
 	margin: 1.5rem 0 2rem 0 !important;
 	border: 1px solid var(--sl-color-hairline) !important;
 	border-radius: 0.625rem !important;
-	font-size: 0.84rem !important;
+	font-size: 0.8125rem !important;
 }
 
 @media (max-width: 50rem) {
@@ -614,20 +614,21 @@ html[data-theme='light'] .sl-markdown-content table {
 .sl-markdown-content th {
 	color: var(--sl-color-larimar-high) !important;
 	font-weight: 600 !important;
-	font-size: 0.76rem !important;
+	font-size: 0.75rem !important;
 	text-transform: uppercase !important;
 	letter-spacing: 0.04em !important;
-	padding: 0.55rem 0.85rem !important;
+	padding: 0.45rem 0.75rem !important;
 	border-bottom: 1px solid var(--sl-color-hairline) !important;
-	white-space: nowrap !important;
+	overflow-wrap: break-word !important;
 }
 
 .sl-markdown-content td {
-	padding: 0.55rem 0.85rem !important;
+	padding: 0.45rem 0.75rem !important;
 	border-bottom: 1px solid rgba(241, 245, 249, 0.08) !important;
 	vertical-align: top !important;
-	line-height: 1.48 !important;
-	font-size: 0.84rem !important;
+	line-height: 1.42 !important;
+	font-size: 0.8125rem !important;
+	overflow-wrap: break-word !important;
 }
 
 .sl-markdown-content tr:last-child td {
@@ -643,8 +644,8 @@ html[data-theme='light'] .sl-markdown-content table {
 }
 
 .sl-markdown-content table td code {
-	font-size: 0.8rem !important;
-	padding: 0.12rem 0.32rem !important;
+	font-size: 0.78rem !important;
+	padding: 0.1rem 0.3rem !important;
 }
 
 /* ==========================================================================

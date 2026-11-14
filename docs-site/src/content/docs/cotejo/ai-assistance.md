@@ -18,24 +18,27 @@ AI capabilities in Cotejo follow a strict **3-Tier Governance Hierarchy** to ens
 
 ```mermaid
 flowchart TD
-    subgraph Tier1["Tier 1: Host & Admin Baseline<br/><code>~/.config/niebla/*.toml</code>"]
+    subgraph Tier1["Tier 1: Host Baseline"]
         direction TB
-        T1_A["LLM Provider Endpoint<br/><i>(OpenAI, Ollama, vLLM)</i>"]
-        T1_B["TLS & Bearer Credentials"]
-        T1_C["Global Aperture Limits<br/><i>(max_context_lines: 1200)</i>"]
+        T1_A["Configuration File: <code>~/.config/niebla/ai.toml</code>"]
+        T1_B["LLM Provider Endpoint (OpenAI, Ollama, vLLM, LiteLLM)"]
+        T1_C["TLS 1.3 Transport Encryption & Bearer Authentication"]
+        T1_D["Global Token & Context Limits (max_context_lines: 1200)"]
     end
 
-    subgraph Tier2["Tier 2: Shared Repo Catalog<br/><code>.niebla/agents.toml</code>"]
+    subgraph Tier2["Tier 2: Shared Catalog"]
         direction TB
-        T2_A["Accessibility Agent <i>(a11y-bot)</i>"]
-        T2_B["Security Auditor <i>(sec-bot)</i>"]
-        T2_C["Architecture Checker <i>(arch-bot)</i>"]
+        T2_A["Accessibility Audit Persona <i>(a11y-bot)</i>"]
+        T2_B["Hermetic Security Scanner <i>(sec-bot)</i>"]
+        T2_C["Architecture & Deprecation Checker <i>(arch-bot)</i>"]
+        T2_D["Catalog Definition: <code>.niebla/agents.toml</code>"]
     end
 
-    subgraph Tier3["Tier 3: Subtree & File Policy<br/><code>OWNERS.toml</code>"]
+    subgraph Tier3["Tier 3: Subtree Policy"]
         direction TB
-        T3_A["services/greeter:<br/><code>agents = ['a11y-bot']</code>"]
-        T3_B["per_file '*.sql':<br/><code>agents = ['sec-bot']</code>"]
+        T3_A["Subtree Binding: <code>services/greeter/OWNERS.toml</code>"]
+        T3_B["Pattern Rule: <code>per_file '*.sql' = { agents = ['sec-bot'] }</code>"]
+        T3_C["Enforced Submit Gate: Mandatory sign-off prior to merge"]
     end
 
     Tier1 --> Tier2 --> Tier3
@@ -92,20 +95,20 @@ When an author clicks the **`✓ Apply Suggestion`** button on any comment:
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Author as CL Author
-    participant Cotejo as Cotejo Web Service
-    participant CAS as Central CAS Storage
-    participant Server as niebla-server
-    participant DB as PostgreSQL
+    actor Author as "CL Author"
+    participant Cotejo as "Cotejo Web Service"
+    participant CAS as "Central CAS Storage"
+    participant Server as "niebla-server"
+    participant DB as "PostgreSQL"
 
     Author->>Cotejo: Click "Apply Suggestion" (POST /apply-suggestion)
     Cotejo->>CAS: Retrieve current file blob
     Cotejo->>Cotejo: Splice suggestion_code into [start_line, end_line]
     Cotejo->>CAS: Write modified blob to CAS (~/.cache/niebla/blobs)
     Cotejo->>Server: Compute new Merkle root tree
-    Server->>DB: Record Patchset N+1 in cl_patchsets
+    Server->>DB: Record Patchset (N+1) in cl_patchsets
     Server->>DB: Mark comment resolved (suggestion_applied_ps = N+1)
-    Cotejo-->>Author: Push SSE update; UI refreshes with Patchset N+1
+    Cotejo-->>Author: Push SSE update and UI refreshes with Patchset (N+1)
 ```
 
 1. **Splice:** Cotejo replaces lines `[suggestion_start_line, suggestion_end_line]` with `suggestion_code`.

@@ -77,7 +77,20 @@
       flowchart: {
         htmlLabels: true,
         useMaxWidth: true,
-        padding: 14,
+        padding: 20,
+        diagramPadding: 20,
+      },
+      sequence: {
+        diagramMarginX: 20,
+        diagramMarginY: 20,
+        actorMargin: 50,
+        width: 150,
+        height: 40,
+        boxMargin: 10,
+        boxTextMargin: 5,
+        noteMargin: 10,
+        messageMargin: 35,
+        mirrorActors: false,
       },
     });
   }
