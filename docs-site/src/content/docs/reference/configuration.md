@@ -22,7 +22,7 @@ Niebla enforces three fundamental architectural rules for toolchain configuratio
 
 ```mermaid
 flowchart TD
-    subgraph Precedence["Configuration Precedence Cascade<br/>(Highest to Lowest)"]
+    subgraph Precedence["Configuration Precedence Hierarchy"]
         direction TB
         P1["1. Explicit CLI Flags<br/><code>--server</code>, <code>--workspace</code>, <code>--config-dir</code>"]
         P2["2. Environment Variables<br/><code>NIEBLA_CONFIG</code>, <code>NIEBLA_SERVER</code>, <code>XDG_CONFIG_HOME</code>"]

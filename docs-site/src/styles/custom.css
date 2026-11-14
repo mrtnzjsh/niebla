@@ -1181,9 +1181,7 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 	letter-spacing: 0.02em;
 	line-height: 1.35 !important;
 	text-align: center !important;
-	white-space: normal !important;
-	word-break: normal !important;
-	overflow-wrap: break-word !important;
+	white-space: nowrap !important;
 }
 
 .mermaid-wrapper svg .cluster-label foreignObject,
@@ -1196,9 +1194,7 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 .mermaid-modal-stage svg .cluster-label foreignObject > div {
 	display: inline-block !important;
 	text-align: center !important;
-	white-space: normal !important;
-	overflow-wrap: break-word !important;
-	word-break: normal !important;
+	white-space: nowrap !important;
 }
 
 /* Paleta Quisqueyana Accents on Mermaid SVGs */

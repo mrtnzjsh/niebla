@@ -16,9 +16,9 @@ Niebla features a native **ZFS Resilience Engine** that leverages OpenZFS copy-o
 
 ```mermaid
 flowchart TD
-    subgraph Primary["Primary Monorepo Server<br/>(gRPC Port 50051)"]
+    subgraph Primary["Primary Monorepo Server"]
         direction TB
-        Server["niebla-server Daemon"]
+        Server["niebla-server (gRPC :50051)"]
         PG[("PostgreSQL Cluster<br/>(Metadata)")]
         CAS[("ZFS Dataset: <code>devpool/niebla</code><br/>(Native AES-256-GCM Encrypted)")]
         Coord["PostgreSQL Backup Coordinator<br/>(<code>pg_backup_start / stop</code>)"]
@@ -32,11 +32,11 @@ flowchart TD
         CAS --> Streamer
     end
 
-    subgraph Network["Dedicated 10GbE Network<br/>(Jumbo Frames MTU 9000)"]
-        SSH["SSH Pipe (Port 22)<br/><code>aes128-gcm@openssh.com</code><br/>MTU 9000 (Jumbo Frames)"]
+    subgraph Network["Dedicated 10GbE Storage Network"]
+        SSH["SSH Pipe (Port 22, MTU 9000)<br/><code>aes128-gcm@openssh.com</code>"]
     end
 
-    subgraph Standby["Standby Storage Node<br/>(Off-Site DR Replica)"]
+    subgraph Standby["Standby Storage Node (DR)"]
         direction TB
         ReplicaUser["Unprivileged User: <code>niebla-repl</code><br/>(Delegated <code>zfs allow</code>)"]
         Recv["ZFS Receive Process<br/>(<code>zfs recv -F</code>)"]
