@@ -42,17 +42,17 @@ Workspaces are isolated, lightweight views of the monorepo. Creating a workspace
 
 ```mermaid
 flowchart TD
-    subgraph Commands["Workspace Lifecycle Commands"]
+    subgraph Commands["Workspace Commands"]
         direction TB
-        C1["<code>niebla workspace create &lt;name&gt;</code><br/>Instant CoW provision (FUSE or direct)"]
-        C2["<code>niebla workspace list</code><br/>Inspect active mounts &amp; base CLs"]
-        C3["<code>niebla workspace delete &lt;name&gt;</code><br/>Safe unmount &amp; scratch cleanup"]
+        C1["niebla workspace create: Instant Copy-on-Write provisioning (FUSE or direct)"]
+        C2["niebla workspace list: Inspect active mounts, health metrics, and base CLs"]
+        C3["niebla workspace delete: Graceful unmount, daemon termination, and cleanup"]
     end
 
-    subgraph Modes["Runtime Execution Modes"]
+    subgraph Modes["Execution Modes"]
         direction TB
-        M1["<b>Virtual FUSE Mode</b> (Default)<br/>On-demand blob streaming via nieblafs"]
-        M2["<b>Direct Materialization Mode</b> (--no-fuse)<br/>Physical disk materialization for CI &amp; containers"]
+        M1["Virtual FUSE Mode (Default): On-demand streaming via nieblafs background daemon"]
+        M2["Direct Materialization Mode (--no-fuse): Zero-copy physical files for CI and containers"]
     end
 
     Commands --> Modes
