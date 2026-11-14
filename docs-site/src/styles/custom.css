@@ -507,37 +507,83 @@ html[data-nav-collapsed="true"] .main-pane .sl-container {
 }
 
 @media (min-width: 72rem) {
-	/* When Left Nav is collapsed and Right TOC remains open:
-	   Anchor Right TOC at fixed width and allow main-pane to occupy all remaining width */
-	html[data-nav-collapsed="true"]:not([data-toc-collapsed="true"]) .right-sidebar-container {
+	/* Fixed Width, Strictly Contained Right Sidebar on Desktop */
+	html:not([data-toc-collapsed="true"]) .right-sidebar-container {
 		width: 18.75rem !important;
 		min-width: 18.75rem !important;
 		max-width: 18.75rem !important;
+		flex-shrink: 0 !important;
 	}
 
-	html[data-nav-collapsed="true"]:not([data-toc-collapsed="true"]) .right-sidebar {
-		width: 18.75rem !important;
+	html:not([data-toc-collapsed="true"]) .right-sidebar {
+		position: fixed !important;
+		top: 0 !important;
 		right: 0 !important;
 		left: auto !important;
+		width: 18.75rem !important;
+		min-width: 18.75rem !important;
+		max-width: 18.75rem !important;
+		height: 100vh !important;
+		overflow-y: auto !important;
+		overflow-x: hidden !important;
+		box-sizing: border-box !important;
+		border-inline-start: 1px solid var(--sl-color-hairline) !important;
+		padding-top: var(--sl-nav-height) !important;
+		--sl-sidebar-width: 18.75rem !important;
 	}
 
-	html[data-nav-collapsed="true"]:not([data-toc-collapsed="true"]) .main-pane {
+	/* Main pane takes the exact remaining width */
+	html:not([data-toc-collapsed="true"]) .main-pane {
 		width: calc(100% - 18.75rem) !important;
 		max-width: calc(100% - 18.75rem) !important;
 		--sl-content-margin-inline: auto !important;
 	}
 }
 
-/* Isolate TOC container: Starlight reuses .sl-container inside .right-sidebar-panel.
-   Ensure TOC maintains its independent width and doesn't inherit 0rem or center-pane margins. */
-.right-sidebar {
-	--sl-sidebar-width: 18.75rem !important;
+/* Table of Contents Text Wrapping & Bounds Enforcement */
+.right-sidebar-panel {
+	width: 100% !important;
+	max-width: 100% !important;
+	padding: 1.25rem 1rem 2.5rem 0.75rem !important;
+	box-sizing: border-box !important;
+	overflow-x: hidden !important;
 }
 
 .right-sidebar-panel .sl-container {
 	width: 100% !important;
 	max-width: 100% !important;
 	margin: 0 !important;
+	box-sizing: border-box !important;
+}
+
+.right-sidebar-panel starlight-toc,
+.right-sidebar-panel nav,
+.right-sidebar-panel ul,
+.right-sidebar-panel li {
+	width: 100% !important;
+	max-width: 100% !important;
+	box-sizing: border-box !important;
+}
+
+.right-sidebar-panel a {
+	display: block !important;
+	width: 100% !important;
+	max-width: 100% !important;
+	box-sizing: border-box !important;
+	white-space: normal !important;
+	word-wrap: break-word !important;
+	overflow-wrap: break-word !important;
+	word-break: break-word !important;
+	hyphens: auto !important;
+	line-height: 1.35 !important;
+}
+
+.right-sidebar-panel a span {
+	display: inline !important;
+	white-space: normal !important;
+	word-wrap: break-word !important;
+	overflow-wrap: break-word !important;
+	word-break: break-word !important;
 }
 
 /* ==========================================================================
