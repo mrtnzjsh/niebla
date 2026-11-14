@@ -40,14 +40,16 @@ When `niebla` is executed from any subdirectory:
 
 ### 1. Workspace Lifecycle (`niebla workspace`)
 Manages virtual directories on local workstations:
-* `niebla workspace create <name> [--base-cl <id>] [--no-fuse] [--server <host:port>]`
+* `niebla workspace create <name> [--cl <id> | --base-cl <id>] [--no-fuse] [--mount-dir <path>]`
   * Calls `CreateWorkspace` on `niebla-server`.
   * Creates scratch directory (`~/.niebla/workspaces/<name>/scratch`).
   * In FUSE mode: Launches background `nieblafs` daemon and mounts virtual VFS.
   * In `--no-fuse` mode: Materializes tree inodes directly to disk.
-* `niebla workspace list`: Displays all active local workspaces, mount status, and associated base CL revisions.
-* `niebla workspace destroy <name>`: Gracefully unmounts `nieblafs` and cleans up scratch storage.
-* `niebla workspace sync`: Pulls the latest trunk revision or rebased parent patchsets, updating the virtual base tree.
+* `niebla workspace list`: Displays all active local workspaces, mount status, base CL revisions, and daemon PIDs.
+* `niebla workspace mount <name>`: Re-attaches and mounts the background `nieblafs` FUSE daemon for an existing workspace after reboot or daemon restart.
+* `niebla workspace unmount <name>`: Gracefully unmounts the FUSE mountpoint and terminates the background daemon process without deleting workspace data.
+* `niebla workspace delete <name>` (aliases: `destroy`, `rm`): Gracefully unmounts `nieblafs`, terminates the daemon, and cleans up scratch storage (requires `--force` if unshelved edits exist).
+* `niebla sync`: Pulls the latest trunk revision or rebased parent patchsets, updating the workspace base tree and handling in-place conflict resolution.
 
 ### 2. Change Detection Algorithm (`niebla status`)
 Unlike `git status`, which must stat millions of clean repository files across disk, Niebla's change detection is instantaneous:

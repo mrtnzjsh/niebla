@@ -202,3 +202,4 @@ If you delete cached blobs while `nieblafs` daemons are running, active file rea
 | **Stuck Commit Lock** | `SELECT * FROM pg_locks WHERE locktype = 'advisory';` | `SELECT pg_terminate_backend(<pid>);` on database |
 | **NVMe Disk Full** | `df -h ~/.cache/niebla/blobs` | `niebla cas gc --grace-period 24h` |
 | **Stale Deleted Files** | `niebla status` reports `[D]` after shelve | Handled automatically in Niebla v0.2.0; manual fix: `rm -f scratch/**/.wh.*` |
+

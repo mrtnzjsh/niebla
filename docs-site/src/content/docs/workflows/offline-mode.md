@@ -99,3 +99,4 @@ When you regain internet access:
    ```bash
    niebla shelve -m "feat(auth): add passkey authentication support"
    ```
+

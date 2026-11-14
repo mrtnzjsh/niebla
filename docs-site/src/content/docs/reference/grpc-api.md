@@ -195,3 +195,4 @@ message SyncWorkspaceResponse {
 | `FailedPrecondition` (9) | Submission blocked by required approvals, failing check runs, or merge conflict | Run `niebla sync` or collect required code reviews. |
 | `Unauthenticated` (16) | Missing or invalid bearer token | Set `NIEBLA_TOKEN` or authenticate with `niebla login`. |
 | `PermissionDenied` (7) | Attempting to shelve/submit without subtree ownership rights | Obtain sign-off in `OWNERS.toml`. |
+

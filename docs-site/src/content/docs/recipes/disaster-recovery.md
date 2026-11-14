@@ -137,3 +137,4 @@ niebla status
 ```
 
 Because blobs are identified strictly by their cryptographic SHA-256 digests, active developer workspaces automatically re-anchor to the promoted server **with zero re-cloning or data loss**.
+

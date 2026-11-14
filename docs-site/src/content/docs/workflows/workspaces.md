@@ -153,6 +153,18 @@ ci-integration   104       ACTIVE (NO-FUSE)  /home/matatan/niebla/workspaces/ci-
 bugfix-db        98        ACTIVE            /home/matatan/niebla/workspaces/bugfix-db    5112
 ```
 
+### Mounting & Unmounting Workspaces
+
+You can temporarily detach or re-attach the FUSE filesystem daemon without deleting your workspace configuration or scratch files:
+
+```bash
+# Safely unmount FUSE mountpoint and stop the background nieblafs daemon
+niebla workspace unmount feature-auth
+
+# Re-attach and mount the background daemon (e.g. after system reboot)
+niebla workspace mount feature-auth
+```
+
 ### Deleting a Workspace
 
 When work on a changelist is complete or an experiment is discarded:

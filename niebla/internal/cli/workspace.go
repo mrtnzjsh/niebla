@@ -31,12 +31,14 @@ func NewWorkspaceCmd(rootFlags *RootFlags) *cobra.Command {
 	wsCmd := &cobra.Command{
 		Use:   "workspace",
 		Short: "Manage Niebla virtual workspaces",
-		Long:  "Commands to create, list, and delete virtual workspaces backed by Niebla server and FUSE.",
+		Long:  "Commands to create, list, mount, unmount, and delete virtual workspaces backed by Niebla server and FUSE.",
 	}
 
 	wsCmd.AddCommand(newWorkspaceCreateCmd(rootFlags))
 	wsCmd.AddCommand(newWorkspaceListCmd(rootFlags))
 	wsCmd.AddCommand(newWorkspaceDeleteCmd(rootFlags))
+	wsCmd.AddCommand(newWorkspaceMountCmd(rootFlags))
+	wsCmd.AddCommand(newWorkspaceUnmountCmd(rootFlags))
 
 	return wsCmd
 }
@@ -251,6 +253,7 @@ func newWorkspaceCreateCmd(rootFlags *RootFlags) *cobra.Command {
 	}
 
 	cmd.Flags().Int64Var(&baseCL, "cl", 0, "Base Changelist ID to branch workspace from (0 = trunk head)")
+	cmd.Flags().Int64Var(&baseCL, "base-cl", 0, "Alias for --cl")
 	cmd.Flags().StringVar(&mountDir, "mount-dir", "", "Custom mount directory (defaults to /niebla/workspaces/<name>)")
 	cmd.Flags().BoolVar(&noFuse, "no-fuse", false, "Materialize workspace directly to disk without mounting FUSE")
 	cmd.Flags().BoolVar(&noHooks, "no-hooks", false, "Skip client post_create lifecycle hooks")
@@ -311,9 +314,10 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a virtual workspace and unmount it",
-		Args:  cobra.ExactArgs(1),
+		Use:     "delete <name>",
+		Aliases: []string{"destroy", "rm"},
+		Short:   "Delete a virtual workspace and unmount it",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			mgr, err := config.NewManager(rootFlags.ConfigDir)
@@ -363,6 +367,129 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force deletion even with unshelved modifications")
+
+	return cmd
+}
+
+func newWorkspaceMountCmd(rootFlags *RootFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mount <name>",
+		Short: "Mount or re-attach the FUSE filesystem daemon for an existing workspace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			mgr, err := config.NewManager(rootFlags.ConfigDir)
+			if err != nil {
+				return err
+			}
+
+			ws, err := mgr.Load(name)
+			if err != nil {
+				return err
+			}
+
+			if ws.NoFuse {
+				return fmt.Errorf("workspace %q was created in --no-fuse mode (direct materialization) and does not use FUSE mounting", name)
+			}
+
+			if ws.PID > 0 && isProcessAlive(ws.PID) && isMountPoint(ws.MountDir) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q is already mounted and active (PID %d).\n", name, ws.PID)
+				return nil
+			}
+
+			// Clean up any stale mount or zombie process if present
+			if isMountPoint(ws.MountDir) {
+				_ = unmountWorkspace(ws.MountDir)
+			}
+			if ws.PID > 0 && isProcessAlive(ws.PID) {
+				terminateProcess(ws.PID)
+			}
+
+			if err := os.MkdirAll(ws.MountDir, 0755); err != nil {
+				return fmt.Errorf("failed to ensure mount directory %s: %w", ws.MountDir, err)
+			}
+
+			nieblafsBin, err := findNieblafsBinary()
+			if err != nil {
+				return fmt.Errorf("nieblafs binary not found: %w", err)
+			}
+
+			_, cacheDir, err := provisionWorkspaceDirs(name)
+			if err != nil {
+				return fmt.Errorf("failed to resolve workspace cache dir: %w", err)
+			}
+
+			serverAddr := rootFlags.Server
+			if serverAddr == "" {
+				serverAddr = DefaultServerAddr
+			}
+
+			socketPath := ws.SocketPath
+			if socketPath == "" {
+				socketPath = filepath.Join(filepath.Dir(ws.ScratchDir), "nieblafs.sock")
+			}
+
+			pid, err := spawnNieblafs(nieblafsBin, ws.MountDir, ws.ScratchDir, cacheDir, ws.RootTreeHash, serverAddr, socketPath)
+			if err != nil {
+				return fmt.Errorf("failed to mount workspace %q: %w", name, err)
+			}
+
+			ws.PID = pid
+			ws.SocketPath = socketPath
+			if err := mgr.Save(ws); err != nil {
+				return fmt.Errorf("failed to update workspace metadata: %w", err)
+			}
+
+			pollMountActive(cmd.OutOrStdout(), pid, ws.MountDir, socketPath, ws.ScratchDir)
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q successfully mounted at %s (PID %d).\n", name, ws.MountDir, pid)
+			return nil
+		},
+	}
+
+	return cmd
+}
+
+func newWorkspaceUnmountCmd(rootFlags *RootFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unmount <name>",
+		Short: "Safely unmount the FUSE filesystem daemon for a workspace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			mgr, err := config.NewManager(rootFlags.ConfigDir)
+			if err != nil {
+				return err
+			}
+
+			ws, err := mgr.Load(name)
+			if err != nil {
+				return err
+			}
+
+			if ws.NoFuse {
+				return fmt.Errorf("workspace %q was created in --no-fuse mode (direct materialization) and does not use FUSE mounting", name)
+			}
+
+			if isMountPoint(ws.MountDir) {
+				if err := unmountWorkspace(ws.MountDir); err != nil {
+					return fmt.Errorf("failed to unmount %s: %w", ws.MountDir, err)
+				}
+			}
+
+			if ws.PID > 0 && isProcessAlive(ws.PID) {
+				terminateProcess(ws.PID)
+			}
+
+			ws.PID = 0
+			if err := mgr.Save(ws); err != nil {
+				return fmt.Errorf("failed to update workspace metadata: %w", err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q successfully unmounted from %s.\n", name, ws.MountDir)
+			return nil
+		},
+	}
 
 	return cmd
 }

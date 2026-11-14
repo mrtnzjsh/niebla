@@ -46,7 +46,9 @@ flowchart TD
         direction TB
         C1["workspace create &lt;name&gt;<br/>Instant CoW provision (FUSE / direct)"]
         C2["workspace list<br/>Inspect active mounts &amp; base CLs"]
-        C3["workspace delete &lt;name&gt;<br/>Safe unmount &amp; scratch cleanup"]
+        C3["workspace mount &lt;name&gt;<br/>Re-attach FUSE nieblafs daemon"]
+        C4["workspace unmount &lt;name&gt;<br/>Detach FUSE mountpoint"]
+        C5["workspace delete &lt;name&gt;<br/>Safe unmount &amp; scratch cleanup"]
     end
 
     subgraph Modes["Execution Modes"]
@@ -122,15 +124,49 @@ AI agents inspect the structured JSON array to locate existing workspaces, verif
 
 ---
 
+### `niebla workspace mount <name>`
+Re-attaches and mounts the background `nieblafs` FUSE daemon for an existing workspace.
+
+```bash
+niebla workspace mount <name>
+```
+
+#### Use Cases
+
+##### Reconnecting After System Reboot
+```bash
+niebla workspace mount feature-oauth
+```
+**Why**: When a workstation reboots or the background daemon is terminated, the workspace's metadata and scratch overlay remain intact in `~/.config/niebla/workspaces/` and `~/.niebla/workspaces/`. Running `niebla workspace mount` respawns `nieblafs`, establishes the FUSE mount at `mount_dir`, and verifies the IPC socket connection without re-downloading existing cached blobs.
+
+---
+
+### `niebla workspace unmount <name>`
+Safely detaches the FUSE mountpoint and terminates the background daemon process without deleting workspace data or scratch state.
+
+```bash
+niebla workspace unmount <name>
+```
+
+#### Use Cases
+
+##### Freeing FUSE System Resources
+```bash
+niebla workspace unmount backend-api
+```
+**Why**: When switching between projects or freeing kernel FUSE channels, `niebla workspace unmount` cleanly unmounts the VFS mountpoint and terminates the background process while preserving all un-shelved scratch edits.
+
+---
+
 ### `niebla workspace delete <name>`
-Safely unmounts the virtual filesystem and purges local scratch state.
+Safely unmounts the virtual filesystem and purges local scratch state (aliases: `destroy`, `rm`).
 
 ```bash
 niebla workspace delete <name> [flags]
 ```
 
 #### Flags
-* `--force`: Forces deletion even if un-shelved modifications exist in the scratch overlay.
+* `--force` (`-f`): Forces deletion even if un-shelved modifications exist in the scratch overlay.
 
 #### Use Cases
 
@@ -575,6 +611,40 @@ Creating resilience snapshot...
 Resilience backup completed in 4.2s.
 ```
 
+### `niebla backup prune`
+Evaluates retention policies and removes expired standalone backup bundles or ZFS snapshots across local and remote targets.
+
+```bash
+niebla backup prune [flags]
+```
+
+#### Flags
+* `--keep <count>`: Number of most recent backups to retain (defaults to `resilience.zfs.retention_count` in configuration, or 7).
+* `--target <driver>`: Target storage driver (`zfs`, `filesystem`, `nextcloud`, `s3`).
+* `--dir <path>`: Custom root directory path for filesystem-based backups.
+
+#### Use Cases
+
+##### Pruning ZFS Snapshots on Primary Storage
+```bash
+niebla backup prune --target zfs --keep 14
+```
+```text
+Pruning ZFS snapshots on tank/niebla (keeping newest 14 matching prefix "niebla-auto")...
+✓ Pruned 6 snapshot(s)
+```
+
+##### Pruning Expired Bundles on Remote Storage
+```bash
+niebla backup prune --target s3 --keep 30
+```
+```text
+Pruning 5 oldest backup(s) on s3 (keeping newest 30)...
+  Deleting niebla-20261001-0000.nieblabak...
+  Deleting niebla-20261002-0000.nieblabak...
+✓ Pruning complete. Retained 30 backup(s).
+```
+
 ---
 
 ## 12. AI Agent Harness Integration (`niebla skills`)
@@ -588,6 +658,10 @@ Ensures the central Hub skill catalog is populated and synchronizes symlinks acr
 niebla skills sync [flags]
 ```
 
+#### Flags
+* `-p, --proactive`: Pre-create configuration directories for all supported harnesses if they do not yet exist (default: `true`).
+* `--hub <dir>`: Custom Hub directory (defaults to `~/.local/share/niebla/skills/niebla`).
+
 ```text
 Hub populated at: /home/developer/.local/share/niebla/skills/niebla
 
@@ -599,3 +673,46 @@ Universal       SYNCED      ~/.agents/skills/niebla
 ```
 
 **Why**: With a single command, every AI coding assistant installed on the engineer's machine receives the complete Niebla skill set—enabling AI agents to natively create virtual workspaces, inspect diffs, shelve changelists, and apply review suggestions.
+
+### `niebla skills status`
+Audits the health and symlink resolution of all installed AI harnesses against the canonical Hub directory.
+
+```bash
+niebla skills status [flags]
+```
+
+#### Flags
+* `--hub <dir>`: Custom Hub directory to audit against.
+
+```text
+Target Hub: /home/developer/.local/share/niebla/skills/niebla
+
+HARNESS         STATUS      PATH
+Antigravity     SYNCED      ~/.gemini/antigravity/skills/niebla
+Claude Code     SYNCED      ~/.claude/skills/niebla
+Cursor          SYNCED      ~/.cursor/skills/niebla
+Universal       NOT FOUND   ~/.agents/skills/niebla
+```
+
+### `niebla skills export`
+Extracts embedded skill assets and prompt templates into an external directory for air-gapped deployment, CI pipelines, or custom agent development.
+
+```bash
+niebla skills export [flags]
+```
+
+#### Flags
+* `-d, --dir <path>`: Destination directory for exported skills (defaults to `./niebla-skills`).
+
+```bash
+niebla skills export --dir ./team-skills
+```
+```text
+✓ Exported 6 Niebla skill definition(s) to ./team-skills:
+  • niebla (Core VCS workflow skill)
+  • niebla-review-agent (Code hints & inline suggestions)
+  • niebla-ci (CI runner orchestration)
+  • niebla-config (Toolchain configuration & themes)
+  • forgejo-code-search (Self-hosted search)
+  • skill-creator (Custom skill authoring)
+```

@@ -127,3 +127,11 @@ To run Cotejo as a service:
 ```bash
 cotejo --config /etc/niebla/config.toml --port 8080 --server <server-host>:50051
 ```
+
+---
+
+## Related Documentation & API References
+
+* **[Cotejo HTTP & REST API Reference](/niebla/reference/cotejo-api/):** Complete catalog of HTMX routes, CI check run reporting endpoints (`/api/v1/ci/status`), inline commenting, and one-click suggestion patchsets.
+* **[The Code Review Lifecycle](/niebla/cotejo/review-workflows/):** Navigating inter-patchset diffs, intra-line word diffs, and thread resolution.
+* **[AI Code Hints & Personas](/niebla/cotejo/ai-assistance/):** 3-tier governance and automated review agents.
