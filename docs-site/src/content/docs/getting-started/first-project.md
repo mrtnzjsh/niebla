@@ -282,9 +282,19 @@ niebla shelve -m "feat(greeter): introduce greeting HTTP service with OWNERS pol
 
 Open the review link in your web browser:
 
-```
-http://localhost:8080/cl/101
-```
+* **Localhost (Default Local Server):**
+  ```text
+  http://localhost:8080/cl/101
+  ```
+* **Remote or Self-Hosted Team Endpoint:**
+  ```text
+  http://<cotejo-host>:8080/cl/101
+  # or behind a reverse proxy / TLS domain:
+  # https://cotejo.yourcompany.internal/cl/101
+  ```
+
+> [!TIP]
+> If your team runs `niebla-server` and Cotejo on a shared workstation, internal server, or Tailscale node, replace `localhost` with your host's IP address or domain (for example, `http://192.168.1.50:8080/cl/101` or `https://cotejo.internal.net/cl/101`). When configured with a remote server in `~/.config/niebla/config.toml`, the CLI output in Step 5 automatically emits your designated review endpoint.
 
 ### What You See in Cotejo:
 * **Side-by-Side Diffs:** Review syntax-highlighted code diffs for `OWNERS.toml`, `main.go`, and `main_test.go`.
@@ -336,6 +346,7 @@ niebla shelve -m "feat(greeter): add /healthz liveness probe per review feedback
 ✓ Uploaded to CAS
 ✓ Created Patchset 2 for CL 101
   Review URL: http://localhost:8080/cl/101?patchset=2
+              # (or http://<cotejo-host>:8080/cl/101?patchset=2)
 ```
 
 ### 3. Review the Inter-Diff in Cotejo
@@ -405,3 +416,4 @@ Congratulations! You have completed a full Niebla development cycle. Continue ex
 * **[Virtual Workspaces & Storage Economics](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/workspaces.md):** Deep dive into FUSE mounts, CAS deduplication, and local disk footprints.
 * **[Stacking Dependent Workspaces](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/development-lifecycle.md#stacking-dependent-workspaces):** Build features on top of pending, unsubmitted changelists.
 * **[IDE Setup & Configuration](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/ide-setup.md):** Configure VS Code, JetBrains IDEs, Neovim, and Emacs for virtual monorepos.
+

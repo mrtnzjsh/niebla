@@ -75,9 +75,8 @@ This uploads only your modified blobs into central Content-Addressable Storage (
 
 Open the **Cotejo** web interface in your browser:
 
-```
-http://localhost:8080/cl/42
-```
+* **Localhost:** `http://localhost:8080/cl/42`
+* **Remote / Self-Hosted:** `http://<cotejo-host>:8080/cl/42` (or `https://cotejo.yourcompany.internal/cl/42`)
 
 Here you can:
 - View syntax-highlighted side-by-side diffs.
