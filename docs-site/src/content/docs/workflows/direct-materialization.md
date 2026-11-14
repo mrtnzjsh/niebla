@@ -32,7 +32,7 @@ This mode materializes repository source trees directly into standard physical d
 
 ```mermaid
 flowchart TD
-    subgraph NoFuse["Direct Materialization Mode (--no-fuse)"]
+    subgraph NoFuse["Direct Materialization Mode<br/><i>(--no-fuse)</i>"]
         Tree["Base Merkle Tree (CL 104)"]
         CAS_DIR["Local CAS Storage (~/.cache/niebla/blobs)"]
         WORK_DIR["Workspace Directory (~/niebla/workspaces/ci-build/)"]

@@ -74,6 +74,11 @@
         relationshipLineColor: '#2DD4BF',
         relationshipTextColor: '#99F6E4',
       },
+      flowchart: {
+        htmlLabels: true,
+        useMaxWidth: true,
+        padding: 14,
+      },
     });
   }
 

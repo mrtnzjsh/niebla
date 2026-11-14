@@ -580,14 +580,22 @@ html[data-nav-collapsed="true"][data-toc-collapsed="true"] .main-pane .sl-contai
 .sl-markdown-content table {
 	width: 100% !important;
 	max-width: 100% !important;
-	display: block !important;
-	overflow-x: auto !important;
-	-webkit-overflow-scrolling: touch;
+	display: table !important;
+	table-layout: auto !important;
 	border-collapse: separate !important;
 	border-spacing: 0 !important;
 	margin: 1.5rem 0 2rem 0 !important;
 	border: 1px solid var(--sl-color-hairline) !important;
 	border-radius: 0.625rem !important;
+	font-size: 0.84rem !important;
+}
+
+@media (max-width: 50rem) {
+	.sl-markdown-content table {
+		display: block !important;
+		overflow-x: auto !important;
+		-webkit-overflow-scrolling: touch;
+	}
 }
 
 html[data-theme='dark'] .sl-markdown-content table {
@@ -606,19 +614,20 @@ html[data-theme='light'] .sl-markdown-content table {
 .sl-markdown-content th {
 	color: var(--sl-color-larimar-high) !important;
 	font-weight: 600 !important;
-	font-size: 0.85rem !important;
+	font-size: 0.76rem !important;
 	text-transform: uppercase !important;
-	letter-spacing: 0.05em !important;
-	padding: 0.75rem 1rem !important;
+	letter-spacing: 0.04em !important;
+	padding: 0.55rem 0.85rem !important;
 	border-bottom: 1px solid var(--sl-color-hairline) !important;
 	white-space: nowrap !important;
 }
 
 .sl-markdown-content td {
-	padding: 0.75rem 1rem !important;
+	padding: 0.55rem 0.85rem !important;
 	border-bottom: 1px solid rgba(241, 245, 249, 0.08) !important;
 	vertical-align: top !important;
-	line-height: 1.55 !important;
+	line-height: 1.48 !important;
+	font-size: 0.84rem !important;
 }
 
 .sl-markdown-content tr:last-child td {
@@ -629,14 +638,13 @@ html[data-theme='light'] .sl-markdown-content table {
 	background: rgba(45, 212, 191, 0.04) !important;
 }
 
-/* Flag & parameter tables: prevent short identifier tokens from awkward wraps */
 .sl-markdown-content table td:first-child {
-	white-space: nowrap !important;
 	font-weight: 600 !important;
 }
 
 .sl-markdown-content table td code {
-	white-space: nowrap !important;
+	font-size: 0.8rem !important;
+	padding: 0.12rem 0.32rem !important;
 }
 
 /* ==========================================================================
@@ -1065,7 +1073,10 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 	color: #2DD4BF !important;
 	fill: #2DD4BF !important;
 	font-weight: 700 !important;
-	letter-spacing: 0.03em;
+	font-size: 0.82rem !important;
+	letter-spacing: 0.02em;
+	line-height: 1.35 !important;
+	text-align: center !important;
 }
 
 .mermaid-modal-stage svg .edgePath .path,
@@ -1091,6 +1102,7 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 .mermaid-wrapper svg {
 	max-width: 100% !important;
 	height: auto !important;
+	overflow: visible !important;
 }
 
 /* Paleta Quisqueyana Accents on Mermaid SVGs */
@@ -1130,7 +1142,10 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 	color: #2DD4BF !important;
 	fill: #2DD4BF !important;
 	font-weight: 700 !important;
-	letter-spacing: 0.03em;
+	font-size: 0.82rem !important;
+	letter-spacing: 0.02em;
+	line-height: 1.35 !important;
+	text-align: center !important;
 }
 
 .mermaid-wrapper svg .edgePath .path,

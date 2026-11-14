@@ -18,21 +18,24 @@ AI capabilities in Cotejo follow a strict **3-Tier Governance Hierarchy** to ens
 
 ```mermaid
 flowchart TD
-    subgraph Tier1["Tier 1: Host & Admin Baseline (~/.config/niebla/*.toml)"]
-        T1_A["LLM Provider Endpoint (OpenAI, Ollama, vLLM)"]
+    subgraph Tier1["Tier 1: Host & Admin Baseline<br/><code>~/.config/niebla/*.toml</code>"]
+        direction TB
+        T1_A["LLM Provider Endpoint<br/><i>(OpenAI, Ollama, vLLM)</i>"]
         T1_B["TLS & Bearer Credentials"]
-        T1_C["Global Aperture Limits (max_context_lines: 1200)"]
+        T1_C["Global Aperture Limits<br/><i>(max_context_lines: 1200)</i>"]
     end
 
-    subgraph Tier2["Tier 2: Shared Repo Catalog (.niebla/agents.toml)"]
-        T2_A["Accessibility Agent (a11y-bot)"]
-        T2_B["Security Auditor (sec-bot)"]
-        T2_C["Architecture & Deprecation Checker (arch-bot)"]
+    subgraph Tier2["Tier 2: Shared Repo Catalog<br/><code>.niebla/agents.toml</code>"]
+        direction TB
+        T2_A["Accessibility Agent <i>(a11y-bot)</i>"]
+        T2_B["Security Auditor <i>(sec-bot)</i>"]
+        T2_C["Architecture Checker <i>(arch-bot)</i>"]
     end
 
-    subgraph Tier3["Tier 3: Subtree & File Policy (OWNERS.toml)"]
-        T3_A["services/greeter: agents = ['a11y-bot']"]
-        T3_B["per_file '*.sql': agents = ['sec-bot']"]
+    subgraph Tier3["Tier 3: Subtree & File Policy<br/><code>OWNERS.toml</code>"]
+        direction TB
+        T3_A["services/greeter:<br/><code>agents = ['a11y-bot']</code>"]
+        T3_B["per_file '*.sql':<br/><code>agents = ['sec-bot']</code>"]
     end
 
     Tier1 --> Tier2 --> Tier3
