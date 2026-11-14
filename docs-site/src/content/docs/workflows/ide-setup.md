@@ -8,9 +8,51 @@ sidebar:
 
 Because Niebla workspaces are mounted as standard POSIX directories, modern editors, language servers, and command-line tools function out of the box.
 
-However, because Niebla is **server-authoritative and does not use Git**, IDE extensions that assume a local `.git` repository should be tuned. Without tuning, an editor might search for `.git/config` across parent directories, start full-depot file watchers, or attempt recursive inotify scans on virtual directories.
+However, because Niebla is **server-authoritative and does not use Git**, working in an IDE involves an important conceptual shift regarding how the file tree operates.
 
-This guide provides tested, copy-paste configurations for **Visual Studio Code**, **Neovim**, and **Emacs**.
+---
+
+## The Virtual File Tree: Accessible vs. Loaded
+
+When you open a workspace directory (`~/niebla/workspaces/<name>`) in your editor, **the file tree will display the entire monorepo**. You can expand directories, browse shared libraries, click on files, and inspect code across the entire repository.
+
+However, **accessible does NOT mean loaded**.
+
+```mermaid
+flowchart LR
+    subgraph IDE["IDE File Tree (VS Code / Neovim / Emacs)"]
+        direction TB
+        F1["📁 cmd/"]
+        F2["📁 internal/"]
+        F3["📁 pkg/"]
+        F4["📄 main.go <i>(opened in editor)</i>"]
+        F5["📄 unused_service.go <i>(unopened)</i>"]
+    end
+
+    subgraph Memory["nieblafs In-Memory VFS"]
+        INODES["Synthetic Inodes<br/><i>(Names, sizes, modes: < 1MB in RAM)</i>"]
+    end
+
+    subgraph LocalDisk["Local NVMe Storage"]
+        CAS["Local CAS Cache<br/><i>(Only main.go fetched: ~4 KB)</i>"]
+        EMPTY["unused_service.go contents:<br/><b>0 Bytes on Disk</b>"]
+    end
+
+    IDE -->|"readdir / stat"| INODES
+    F4 -->|"open / read"| CAS
+    F5 -.->|"never read"| EMPTY
+```
+
+### How This Works Under the Hood
+
+1. **Synthetic Directory Entries:**
+   What your IDE sees in the file tree are lightweight **synthetic metadata inodes** held in memory by `nieblafs`. Directory listings (`readdir`) and file attributes (`stat`) resolve instantly from the in-memory Merkle tree.
+2. **Zero Initial Content Downloads:**
+   Seeing 500,000 files in your IDE sidebar does **not** mean 500,000 files were downloaded to your SSD. Unopened files consume **0 bytes of physical disk space**.
+3. **Lazy On-Demand Fetching:**
+   File contents (blobs) are streamed over HTTP/2 gRPC only at the exact moment a process (your editor, linter, or compiler) executes `read()` on that file.
+4. **Important IDE Takeaway:**
+   Avoid running extensions or shell scripts that recursively open or checksum every single file across the monorepo (e.g. unbounded full-disk grep or unconfigured whole-depot linters). Opening every file triggers on-demand streaming for all of them. This is why scoping file watchers and language servers is a best practice.
 
 ---
 
