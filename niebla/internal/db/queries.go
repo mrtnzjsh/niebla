@@ -396,3 +396,9 @@ func (d *DB) RecordRebaseEvent(ctx context.Context, clID, parentCL int64, trigge
 	}
 	return nil
 }
+
+// InvalidateApprovals marks all existing approvals on a changelist as stale when a new patchset is uploaded.
+func (d *DB) InvalidateApprovals(ctx context.Context, clID int64) error {
+	_, err := d.pool.Exec(ctx, "UPDATE cl_approvals SET stale = true WHERE cl_id = $1", clID)
+	return err
+}

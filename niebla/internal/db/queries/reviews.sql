@@ -53,10 +53,10 @@ WHERE reviewer = ANY($1::text[]);
 -- name: CountApprovals :one
 SELECT COUNT(*)
 FROM cl_approvals
-WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved');
+WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved') AND stale = false;
 
 -- name: GetApprovedReviewers :many
 SELECT reviewer
 FROM cl_approvals
-WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved')
+WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved') AND stale = false
 ORDER BY reviewer ASC;

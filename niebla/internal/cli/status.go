@@ -312,11 +312,16 @@ func ScanScratchChanges(scratchDir string, rootTreeHash []byte, fetchTree tree.F
 				return nil
 			}
 			baseEntry, _ := tree.ResolvePath(rootTreeHash, origPath, fetchTree)
-			changeMap[origPath] = FileChange{
-				Path:      origPath,
-				Type:      ChangeDeleted,
-				DiskPath:  path,
-				BaseEntry: baseEntry,
+			if baseEntry != nil {
+				changeMap[origPath] = FileChange{
+					Path:      origPath,
+					Type:      ChangeDeleted,
+					DiskPath:  path,
+					BaseEntry: baseEntry,
+				}
+			} else {
+				// The file is already absent in the base tree; prune the orphan whiteout marker
+				_ = os.Remove(path)
 			}
 			return nil
 		}

@@ -35,6 +35,10 @@ type Options struct {
 
 	// Filter optionally excludes matching paths from materialization.
 	Filter ignore.Matcher
+
+	// PruneStaleFiles removes files from destDir that existed in OldTreeHash but are missing from rootTreeHash.
+	PruneStaleFiles bool
+	OldTreeHash     []byte
 }
 
 // Stats reports metrics about a completed MaterializeTree invocation.
@@ -43,6 +47,7 @@ type Stats struct {
 	DirectoriesCreated int    `json:"directories_created"`
 	BytesWritten       uint64 `json:"bytes_written"`
 	HardlinkedFiles    int    `json:"hardlinked_files"`
+	FilesPruned        int    `json:"files_pruned,omitempty"`
 }
 
 type fileJob struct {
@@ -212,6 +217,23 @@ func MaterializeTree(
 		return nil, err
 	}
 
+	if opts.PruneStaleFiles && len(opts.OldTreeHash) > 0 && !bytes.Equal(opts.OldTreeHash, rootTreeHash) {
+		oldJobs, oldErr := collectMaterializationJobs(ctx, opts.OldTreeHash, destDir, fetchTree, opts.Filter, &Stats{})
+		if oldErr == nil {
+			newMap := make(map[string]bool, len(jobs))
+			for _, j := range jobs {
+				newMap[j.relPath] = true
+			}
+			for _, oldJ := range oldJobs {
+				if !newMap[oldJ.relPath] {
+					if rmErr := os.Remove(oldJ.destPath); rmErr == nil {
+						stats.FilesPruned++
+					}
+				}
+			}
+		}
+	}
+
 	return stats, nil
 }
 
@@ -236,6 +258,8 @@ func materializeFile(
 		if casPath, err := hardlinkCAS.BlobPath(shaHex); err == nil {
 			_ = os.Remove(job.destPath)
 			if linkErr := os.Link(casPath, job.destPath); linkErr == nil {
+				// Strip write permissions to protect shared CAS cache from in-place corruption
+				_ = os.Chmod(job.destPath, 0444)
 				return job.entry.Size, true, nil
 			}
 		}

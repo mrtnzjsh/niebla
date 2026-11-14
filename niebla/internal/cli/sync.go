@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"niebla/pkg/materialize"
 	"niebla/pkg/nieblafs/control"
 	nieblav1 "niebla/pkg/proto/nieblav1"
+	"niebla/pkg/tree"
 
 	"github.com/spf13/cobra"
 )
@@ -31,7 +34,82 @@ type SyncOutput struct {
 	ControlPurged   int    `json:"control_purged,omitempty"`
 }
 
-func handleSyncRebaseConflict(cmd *cobra.Command, ws *config.WorkspaceConfig, resp *nieblav1.SyncWorkspaceResponse, oldTreeHex, newTreeHex string, rootFlags *RootFlags, dryRun bool) error {
+func handleSyncRebaseConflict(
+	ctx context.Context,
+	cmd *cobra.Command,
+	ws *config.WorkspaceConfig,
+	resp *nieblav1.SyncWorkspaceResponse,
+	client nieblav1.NieblaServiceClient,
+	oldTreeHex, newTreeHex string,
+	rootFlags *RootFlags,
+	dryRun bool,
+) error {
+	var conflictedPaths []string
+
+	if !dryRun && len(resp.ParentRootTreeHash) > 0 {
+		oldTreeBytes, _ := hex.DecodeString(oldTreeHex)
+		fetchTree := makeTreeFetcher(ctx, client)
+		readBlob := func(sha []byte) ([]byte, error) {
+			var buf bytes.Buffer
+			fb := makeBlobFetcher(client, append([]string{filepath.Join(filepath.Dir(ws.ScratchDir), "cache")}, defaultBlobCacheDirs()...))
+			if err := fb(ctx, sha, &buf); err != nil {
+				return nil, err
+			}
+			return buf.Bytes(), nil
+		}
+		writeBlob := func(data []byte) ([]byte, error) {
+			sha := sha256.Sum256(data)
+			return sha[:], nil
+		}
+		writeTree := func(entries []tree.Entry) ([]byte, error) {
+			return tree.ComputeTreeHash(entries), nil
+		}
+
+		theirsLabel := fmt.Sprintf("PARENT CL %d", resp.ParentCl)
+		mineLabel := fmt.Sprintf("LOCAL WORKSPACE (%s)", ws.Name)
+
+		_, conflicts, _ := tree.ThreeWayTreeMerge(
+			ctx,
+			oldTreeBytes,
+			resp.ParentRootTreeHash,
+			resp.RootTreeHash,
+			fetchTree,
+			readBlob,
+			writeBlob,
+			writeTree,
+			theirsLabel,
+			mineLabel,
+		)
+
+		targetDir := ws.ScratchDir
+		if ws.NoFuse || targetDir == "" {
+			targetDir = ws.MountDir
+		}
+
+		for _, conflict := range conflicts {
+			if len(conflict.ConflictedOutput) > 0 {
+				conflictedPaths = append(conflictedPaths, conflict.Path)
+				outPath := filepath.Join(targetDir, filepath.FromSlash(conflict.Path))
+				_ = os.MkdirAll(filepath.Dir(outPath), 0755)
+				_ = os.WriteFile(outPath, conflict.ConflictedOutput, 0644)
+			}
+		}
+
+		// Reanchor FUSE daemon so it detects newly written scratch files
+		if !ws.NoFuse {
+			sockPath := ws.SocketPath
+			if sockPath == "" && ws.ScratchDir != "" {
+				sockPath = filepath.Join(filepath.Dir(ws.ScratchDir), "nieblafs.sock")
+			}
+			if sockPath != "" {
+				if _, err := os.Stat(sockPath); err == nil {
+					cClient := control.NewClient(sockPath)
+					_, _ = cClient.Reanchor(ctx, oldTreeHex, resp.ClId)
+				}
+			}
+		}
+	}
+
 	if rootFlags.JSON {
 		_ = writeJSON(cmd.OutOrStdout(), SyncOutput{
 			Workspace:       ws.Name,
@@ -50,9 +128,15 @@ func handleSyncRebaseConflict(cmd *cobra.Command, ws *config.WorkspaceConfig, re
 		if resp.RebaseConflictDetails != "" {
 			fmt.Fprintf(cmd.ErrOrStderr(), "   Conflicts: %s\n", resp.RebaseConflictDetails)
 		}
+		if len(conflictedPaths) > 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(), "   ✓ Injected conflict markers into %d workspace file(s):\n", len(conflictedPaths))
+			for _, cp := range conflictedPaths {
+				fmt.Fprintf(cmd.ErrOrStderr(), "     • %s\n", cp)
+			}
+		}
 		fmt.Fprintln(cmd.ErrOrStderr(), "   Please resolve the conflicting files in your workspace, then run 'niebla shelve' to commit the resolution.")
 	}
-	return fmt.Errorf("rebase conflicts detected with parent CL %d", resp.ParentCl)
+	return fmt.Errorf("rebase conflicts detected with parent CL %d: please resolve in editor and shelve", resp.ParentCl)
 }
 
 func applyWorkspaceSyncUpdate(
@@ -67,8 +151,17 @@ func applyWorkspaceSyncUpdate(
 	if ws.NoFuse {
 		fetchTree := makeTreeFetcher(ctx, client)
 		fetchBlob := makeBlobFetcher(client, append([]string{filepath.Join(filepath.Dir(ws.ScratchDir), "cache")}, defaultBlobCacheDirs()...))
-		if _, err := materialize.MaterializeTree(ctx, resp.RootTreeHash, ws.MountDir, fetchTree, fetchBlob, materialize.Options{}); err != nil {
+		oldTreeBytes, _ := hex.DecodeString(ws.RootTreeHash)
+		matOpts := materialize.Options{
+			PruneStaleFiles: true,
+			OldTreeHash:     oldTreeBytes,
+		}
+		stats, err := materialize.MaterializeTree(ctx, resp.RootTreeHash, ws.MountDir, fetchTree, fetchBlob, matOpts)
+		if err != nil {
 			return 0, fmt.Errorf("failed to materialize updated tree into %s: %w", ws.MountDir, err)
+		}
+		if stats != nil && stats.FilesPruned > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "  Pruned %d stale upstream deleted file(s).\n", stats.FilesPruned)
 		}
 		return 0, nil
 	}
@@ -91,7 +184,7 @@ func applyWorkspaceSyncUpdate(
 	return controlPurged, nil
 }
 
-func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool, noHooks bool) error {
+func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool, noHooks bool, force bool) error {
 	mgr, err := config.NewManager(rootFlags.ConfigDir)
 	if err != nil {
 		return err
@@ -117,6 +210,15 @@ func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool,
 	}
 	defer conn.Close()
 
+	if ws.NoFuse && !force && !dryRun {
+		oldTreeBytes, _ := hex.DecodeString(ws.RootTreeHash)
+		fetchTree := makeTreeFetcher(ctx, client)
+		changes, err := ScanWorkspaceChanges(ws, oldTreeBytes, fetchTree)
+		if err == nil && len(changes) > 0 {
+			return fmt.Errorf("workspace %q has %d uncommitted modification(s). Run 'niebla shelve' to save your work, or 'niebla sync --force' to overwrite", ws.Name, len(changes))
+		}
+	}
+
 	targetCL := ws.ActiveCL
 	if targetCL <= 0 {
 		targetCL = ws.BaseCL
@@ -134,7 +236,7 @@ func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool,
 	oldTreeHex := ws.RootTreeHash
 
 	if resp.NeedsRebase {
-		return handleSyncRebaseConflict(cmd, ws, resp, oldTreeHex, newTreeHex, rootFlags, dryRun)
+		return handleSyncRebaseConflict(ctx, cmd, ws, resp, client, oldTreeHex, newTreeHex, rootFlags, dryRun)
 	}
 
 	if oldTreeHex == newTreeHex {
@@ -218,18 +320,20 @@ func executeWorkspaceSync(cmd *cobra.Command, rootFlags *RootFlags, dryRun bool,
 func NewSyncCmd(rootFlags *RootFlags) *cobra.Command {
 	var dryRun bool
 	var noHooks bool
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Synchronize workspace with latest parent CL or trunk head",
 		Long:  "Fetches the updated parent Merkle tree, reconciles local scratch changes, and reports or injects rebase conflicts.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeWorkspaceSync(cmd, rootFlags, dryRun, noHooks)
+			return executeWorkspaceSync(cmd, rootFlags, dryRun, noHooks, force)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview sync operations without applying changes")
 	cmd.Flags().BoolVar(&noHooks, "no-hooks", false, "Skip client post_sync lifecycle hooks")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force synchronization even if local modifications exist in direct materialization mode")
 
 	return cmd
 }

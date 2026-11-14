@@ -30,7 +30,7 @@ func (q *Queries) AddReviewer(ctx context.Context, arg AddReviewerParams) error 
 const countApprovals = `-- name: CountApprovals :one
 SELECT COUNT(*)
 FROM cl_approvals
-WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved')
+WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved') AND stale = false
 `
 
 func (q *Queries) CountApprovals(ctx context.Context, clID int64) (int64, error) {
@@ -56,7 +56,7 @@ func (q *Queries) CountUnresolvedComments(ctx context.Context, clID int64) (int6
 const getApprovedReviewers = `-- name: GetApprovedReviewers :many
 SELECT reviewer
 FROM cl_approvals
-WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved')
+WHERE cl_id = $1 AND verdict IN ('lgtm', 'approved') AND stale = false
 ORDER BY reviewer ASC
 `
 

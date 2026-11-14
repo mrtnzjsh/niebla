@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
@@ -33,7 +34,7 @@ func TestCASCLIHelp(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, sub := range []string{"put", "get"} {
+	for _, sub := range []string{"put", "get", "gc"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("expected subcommand %q in cas help output", sub)
 		}
@@ -221,5 +222,74 @@ func TestCASPutAndGet_EndToEnd(t *testing.T) {
 	}
 	if !bytes.Equal(downloadedBytes, testData) {
 		t.Fatalf("downloaded content mismatch")
+	}
+}
+
+func TestCASGC(t *testing.T) {
+	tempDir := t.TempDir()
+	casDir := filepath.Join(tempDir, "cas")
+
+	// 1. Create a simulated blob in casDir
+	testData := []byte("gc candidate test blob")
+	h := sha256.Sum256(testData)
+	shaHex := hex.EncodeToString(h[:])
+	blobSubDir := filepath.Join(casDir, shaHex[:2], shaHex[2:4])
+	if err := os.MkdirAll(blobSubDir, 0755); err != nil {
+		t.Fatalf("failed to create blob dir: %v", err)
+	}
+	blobFile := filepath.Join(blobSubDir, shaHex)
+	if err := os.WriteFile(blobFile, testData, 0644); err != nil {
+		t.Fatalf("failed to write blob file: %v", err)
+	}
+
+	// Age the blob past 24 hours
+	past := time.Now().Add(-48 * time.Hour)
+	_ = os.Chtimes(blobFile, past, past)
+
+	// 2. Run 'cas gc --dry-run'
+	buf := new(bytes.Buffer)
+	rootCmd := NewRootCmd()
+	rootCmd.SetOut(buf)
+	rootCmd.SetArgs([]string{
+		"cas", "gc",
+		"--dir", casDir,
+		"--dry-run",
+		"--json",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("cas gc dry-run failed: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), `"unreferenced_blobs": 1`) {
+		t.Errorf("expected 1 unreferenced blob in dry run, got: %s", buf.String())
+	}
+
+	// Verify file still exists after dry-run
+	if _, err := os.Stat(blobFile); os.IsNotExist(err) {
+		t.Fatalf("file should still exist after dry-run")
+	}
+
+	// 3. Run 'cas gc' live
+	buf.Reset()
+	rootCmd = NewRootCmd()
+	rootCmd.SetOut(buf)
+	rootCmd.SetArgs([]string{
+		"cas", "gc",
+		"--dir", casDir,
+		"--json",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("cas gc live run failed: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), `"deleted_blobs": 1`) {
+		t.Errorf("expected 1 deleted blob in live run, got: %s", buf.String())
+	}
+
+	// Verify file was deleted
+	if _, err := os.Stat(blobFile); !os.IsNotExist(err) {
+		t.Errorf("file should have been deleted by gc")
 	}
 }

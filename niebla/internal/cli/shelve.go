@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +177,13 @@ func executeShelve(
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update workspace active CL metadata: %v\n", err)
 	}
 
+	// Clean up whiteout / tombstone markers in scratch for successfully shelved deletions
+	for _, change := range changes {
+		if change.Type == ChangeDeleted && change.DiskPath != "" {
+			_ = os.Remove(change.DiskPath)
+		}
+	}
+
 	if rootFlags.JSON {
 		return writeJSON(cmd.OutOrStdout(), ShelveOutput{
 			Workspace:    ws.Name,
@@ -216,20 +225,25 @@ func NewShelveCmd(rootFlags *RootFlags) *cobra.Command {
 	return cmd
 }
 
-func uploadBytesToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, data []byte) ([]byte, uint64, error) {
+func uploadReaderToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, r io.Reader) ([]byte, uint64, error) {
 	stream, err := client.UploadBlob(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to open UploadBlob stream: %w", err)
 	}
 
-	chunkSize := cas.DefaultChunkSize
-	for offset := 0; offset < len(data); offset += chunkSize {
-		end := offset + chunkSize
-		if end > len(data) {
-			end = len(data)
+	buf := make([]byte, cas.DefaultChunkSize)
+	for {
+		n, rErr := r.Read(buf)
+		if n > 0 {
+			if err := stream.Send(&nieblav1.UploadBlobRequest{Data: buf[:n]}); err != nil {
+				return nil, 0, fmt.Errorf("failed to send blob chunk: %w", err)
+			}
 		}
-		if err := stream.Send(&nieblav1.UploadBlobRequest{Data: data[offset:end]}); err != nil {
-			return nil, 0, fmt.Errorf("failed to send blob chunk: %w", err)
+		if rErr != nil {
+			if errors.Is(rErr, io.EOF) {
+				break
+			}
+			return nil, 0, fmt.Errorf("failed reading stream for upload: %w", rErr)
 		}
 	}
 
@@ -241,12 +255,11 @@ func uploadBytesToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, 
 	return resp.Sha256, resp.Size, nil
 }
 
-func uploadFileToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, diskPath string) (uploadedBlob, error) {
-	data, err := os.ReadFile(diskPath)
-	if err != nil {
-		return uploadedBlob{}, fmt.Errorf("failed to read %s: %w", diskPath, err)
-	}
+func uploadBytesToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, data []byte) ([]byte, uint64, error) {
+	return uploadReaderToCAS(ctx, client, bytes.NewReader(data))
+}
 
+func uploadFileToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, diskPath string) (uploadedBlob, error) {
 	info, err := os.Stat(diskPath)
 	if err != nil {
 		return uploadedBlob{}, fmt.Errorf("failed to stat %s: %w", diskPath, err)
@@ -257,7 +270,13 @@ func uploadFileToCAS(ctx context.Context, client nieblav1.NieblaServiceClient, d
 		fileMode = 0100755
 	}
 
-	sha, size, err := uploadBytesToCAS(ctx, client, data)
+	f, err := os.Open(diskPath)
+	if err != nil {
+		return uploadedBlob{}, fmt.Errorf("failed to open %s: %w", diskPath, err)
+	}
+	defer f.Close()
+
+	sha, size, err := uploadReaderToCAS(ctx, client, f)
 	if err != nil {
 		return uploadedBlob{}, err
 	}

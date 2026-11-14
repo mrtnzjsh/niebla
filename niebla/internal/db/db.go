@@ -39,6 +39,9 @@ var stackedRebasesSQL string
 //go:embed migrations/0007_comment_suggestions.sql
 var commentSuggestionsSQL string
 
+//go:embed migrations/0008_patchset_approvals.sql
+var patchsetApprovalsSQL string
+
 // DB wraps the pgxpool connection pool and provides access to database queries.
 type DB struct {
 	pool    *pgxpool.Pool
@@ -156,6 +159,9 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 	}
 	if _, err := d.pool.Exec(ctx, commentSuggestionsSQL); err != nil {
 		return fmt.Errorf("failed to execute comment suggestions schema migration: %w", err)
+	}
+	if _, err := d.pool.Exec(ctx, patchsetApprovalsSQL); err != nil {
+		return fmt.Errorf("failed to execute patchset approvals schema migration: %w", err)
 	}
 	return nil
 }

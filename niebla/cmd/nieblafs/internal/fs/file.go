@@ -102,10 +102,19 @@ func (f *File) ensureScratchPromoted(ctx context.Context) error {
 		}
 	}
 
-	// If base blob exists, copy it first to initialize scratch file
+	// If base blob exists, copy it first to initialize scratch file using streaming I/O
 	if f.blobPath != "" && fileExists(f.blobPath) {
-		if data, err := os.ReadFile(f.blobPath); err == nil {
-			_ = os.WriteFile(targetPath, data, 0644)
+		mode := os.FileMode(0644)
+		if f.mode != 0 {
+			mode = os.FileMode(f.mode)
+		}
+		if src, err := os.Open(f.blobPath); err == nil {
+			if dst, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode); err == nil {
+				buf := make([]byte, 1024*1024) // 1MB streaming buffer
+				_, _ = io.CopyBuffer(dst, src, buf)
+				_ = dst.Close()
+			}
+			_ = src.Close()
 		}
 	}
 

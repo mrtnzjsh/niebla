@@ -325,6 +325,11 @@ func (s *Server) ShelveCL(ctx context.Context, req *nieblav1.ShelveCLRequest) (*
 		return nil, err
 	}
 
+	// Invalidate prior approvals when a new patchset is uploaded
+	if shelved.PatchsetNumber > 1 {
+		_ = s.db.InvalidateApprovals(ctx, shelved.CLID)
+	}
+
 	s.assignReviewersAndAgents(ctx, shelved.CLID, shelved.ParentCLID, shelved.PatchsetNumber, req.RootTreeHash, req.Reviewers)
 
 	// Offload cascading rebase to background queue for sub-100ms shelve response
@@ -374,6 +379,12 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 		}
 	}
 
+	origCL, _ := s.db.GetCL(ctx, req.ClId)
+	var origTreeHash []byte
+	if origCL != nil {
+		origTreeHash = origCL.RootTreeHash
+	}
+
 	var mergeConflictSummary string
 	cl, err := s.db.SubmitCL(ctx, req.ClId, func(mCtx context.Context, cl *db.Changelist, headCL *db.Changelist) ([]byte, error) {
 		return s.performTrunkMerge(mCtx, cl, headCL, &mergeConflictSummary)
@@ -409,9 +420,18 @@ func (s *Server) SubmitCL(ctx context.Context, req *nieblav1.SubmitCLRequest) (*
 		))
 	}
 
+	var rebasedChildren []int64
+	if len(origTreeHash) > 0 {
+		rebased, rebErr := s.CascadeStackRebase(ctx, cl.CLID, origTreeHash, cl.RootTreeHash)
+		if rebErr == nil && len(rebased) > 0 {
+			rebasedChildren = rebased
+		}
+	}
+
 	return &nieblav1.SubmitCLResponse{
 		ClId:            cl.CLID,
 		CommittedAtUnix: cl.CommittedAt.Unix(),
+		RebasedChildren: rebasedChildren,
 	}, nil
 }
 
