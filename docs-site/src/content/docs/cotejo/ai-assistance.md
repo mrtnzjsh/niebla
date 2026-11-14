@@ -224,3 +224,4 @@ niebla config validate
 
 * **[Deployment, Auth & Theming](/niebla/cotejo/deployment-auth/):** Learn how to run Cotejo behind Tailscale or NGINX with custom color themes.
 * **[The Code Review Lifecycle](/niebla/cotejo/review-workflows/):** Master intra-line diffing, inter-diff patchset views, and keyboard shortcuts.
+

@@ -208,3 +208,4 @@ Configuration is valid!
 * **[Cotejo Overview & Philosophy](/niebla/cotejo/overview/):** Review the Google Critique model, attention sets, and segregated inboxes.
 * **[The Code Review Lifecycle](/niebla/cotejo/review-workflows/):** Explore intra-line diffing, inter-diff comparisons, and review voting.
 * **[AI Hints & Review Personas](/niebla/cotejo/ai-assistance/):** Author automated review agents and one-click code suggestions.
+

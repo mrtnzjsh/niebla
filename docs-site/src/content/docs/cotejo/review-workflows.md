@@ -145,3 +145,4 @@ Cotejo includes built-in vim-style keyboard shortcuts for rapid review without t
 
 * **[AI Hints & Review Personas](/niebla/cotejo/ai-assistance/):** Learn how Cotejo's integrated AI agents generate structured code suggestions and apply one-click patches.
 * **[Deployment, Auth & Theming](/niebla/cotejo/deployment-auth/):** Configure production reverse-proxies, user groups, and custom themes.
+
