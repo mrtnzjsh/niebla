@@ -286,3 +286,4 @@ server {
 | `443/tcp` | HTTPS | Corporate Network (`0.0.0.0/0` via VPN) | Cotejo web code review and inline comments. |
 | `5432/tcp` | PostgreSQL | Only `niebla-server` host (`10.10.0.10/32`) | Monorepo metadata database queries. |
 | `22/tcp` | SSH | Only dedicated storage network (`10.20.0.0/24`) | 10GbE ZFS snapshot replication stream. |
+

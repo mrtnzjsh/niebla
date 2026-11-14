@@ -206,3 +206,4 @@ If your network connection drops (e.g., traveling on a train or plane):
 1. **Local Editing & Testing:** You can continue editing, compiling, and running local tests inside your materialized workspace.
 2. **Local Diffing & Status:** `niebla status` and `niebla diff` work completely offline because they compare your working directory against locally cached base CAS chunks in `~/.cache/niebla/blobs`.
 3. **Reconnection:** Once back online, simply run `niebla shelve` to sync your changes with the central repository server.
+

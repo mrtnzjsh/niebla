@@ -22,7 +22,7 @@ Niebla enforces three fundamental architectural rules for toolchain configuratio
 
 ```mermaid
 flowchart TD
-    subgraph Precedence["Configuration Precedence Cascade (Highest to Lowest)"]
+    subgraph Precedence["Configuration Precedence Cascade<br/>(Highest to Lowest)"]
         direction TB
         P1["1. Explicit CLI Flags<br/><code>--server</code>, <code>--workspace</code>, <code>--config-dir</code>"]
         P2["2. Environment Variables<br/><code>NIEBLA_CONFIG</code>, <code>NIEBLA_SERVER</code>, <code>XDG_CONFIG_HOME</code>"]
@@ -707,3 +707,4 @@ While `~/.config/niebla/` contains host-specific, user, and infrastructure param
 - **`.niebla/agents.toml`:** Registers automated AI review personas, context aperture widths, and evaluation prompts.
 
 By decoupling host and client connection settings (`~/.config/niebla/`) from versioned codebase policy (`.niebla/`), Niebla ensures that team security rules travel with the repository while individual developers retain full control over local mount paths and editors.
+

@@ -244,3 +244,4 @@ $ cd ~
 $ niebla workspace delete feature-search
 ✓ Workspace feature-search unmounted and deleted.
 ```
+

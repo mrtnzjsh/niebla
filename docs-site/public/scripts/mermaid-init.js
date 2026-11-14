@@ -433,6 +433,25 @@
       el.style.overflow = 'visible';
     });
 
+    // 1b. Ensure cluster container rects are wide enough to envelop their titles
+    svgEl.querySelectorAll('.cluster').forEach(cluster => {
+      const rect = cluster.querySelector('rect');
+      const label = cluster.querySelector('.cluster-label') || cluster.querySelector('.nodeLabel');
+      if (!rect || !label) return;
+
+      try {
+        const labelBox = label.getBBox();
+        const rectWidth = parseFloat(rect.getAttribute('width')) || rect.getBBox().width;
+        if (labelBox.width > 0 && rectWidth > 0 && labelBox.width > rectWidth - 20) {
+          const neededWidth = Math.ceil(labelBox.width + 36);
+          const diff = neededWidth - rectWidth;
+          const currentX = parseFloat(rect.getAttribute('x')) || 0;
+          rect.setAttribute('x', (currentX - diff / 2).toFixed(1));
+          rect.setAttribute('width', neededWidth.toFixed(1));
+        }
+      } catch (_) {}
+    });
+
     // 2. Read existing viewBox values
     const vbAttr = svgEl.getAttribute('viewBox');
     if (!vbAttr) return;

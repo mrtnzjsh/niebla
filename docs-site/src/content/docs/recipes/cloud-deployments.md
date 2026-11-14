@@ -319,3 +319,4 @@ snapshot_on_submit = true
 | **Cotejo SSO Gateway** | ALB + Cognito / OIDC | Cloud Load Balancer + IAP | Application Gateway + Entra ID |
 | **Injected Header** | `X-Amzn-Oidc-Identity` | `X-Goog-Authenticated-User-Email` | `X-Forwarded-User` |
 | **Resilience Target** | Amazon S3 Standard / Glacier | Google Cloud Storage (S3 API) | Azure Blob Storage (SFTP / S3 MinIO) |
+

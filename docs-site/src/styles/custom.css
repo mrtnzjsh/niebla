@@ -1167,7 +1167,13 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 .mermaid-wrapper svg .cluster .nodeLabel,
 .mermaid-wrapper svg .cluster-label,
 .mermaid-wrapper svg .cluster-label text,
-.mermaid-wrapper svg .cluster-label span {
+.mermaid-wrapper svg .cluster-label span,
+.mermaid-wrapper svg .cluster-label div,
+.mermaid-modal-stage svg .cluster .nodeLabel,
+.mermaid-modal-stage svg .cluster-label,
+.mermaid-modal-stage svg .cluster-label text,
+.mermaid-modal-stage svg .cluster-label span,
+.mermaid-modal-stage svg .cluster-label div {
 	color: #2DD4BF !important;
 	fill: #2DD4BF !important;
 	font-weight: 700 !important;
@@ -1175,6 +1181,24 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 	letter-spacing: 0.02em;
 	line-height: 1.35 !important;
 	text-align: center !important;
+	white-space: normal !important;
+	word-break: normal !important;
+	overflow-wrap: break-word !important;
+}
+
+.mermaid-wrapper svg .cluster-label foreignObject,
+.mermaid-modal-stage svg .cluster-label foreignObject {
+	overflow: visible !important;
+	text-align: center !important;
+}
+
+.mermaid-wrapper svg .cluster-label foreignObject > div,
+.mermaid-modal-stage svg .cluster-label foreignObject > div {
+	display: inline-block !important;
+	text-align: center !important;
+	white-space: normal !important;
+	overflow-wrap: break-word !important;
+	word-break: normal !important;
 }
 
 /* Paleta Quisqueyana Accents on Mermaid SVGs */
