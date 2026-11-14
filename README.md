@@ -29,13 +29,13 @@ Niebla solves this by treating the monorepo as a **central, high-throughput serv
 
 ```mermaid
 flowchart TD
-    subgraph Workstation["Developer / Agent Workstation"]
+    subgraph Workstation["Developer & Agent Workstation"]
         direction TB
-        CLI["<b>niebla CLI</b><br/><code>workspace | status | diff | shelve | submit</code>"]
-        FS["<b>nieblafs (FUSE VFS)</b><br/>On-Demand Streaming &lt; 15ms"]
-        Direct["<b>Direct Mode (--no-fuse)</b><br/>Zero-Copy Inode Materialization"]
-        Scratch["<b>Scratch CoW Layer</b><br/>Private Local Modifications"]
-        CASLocal["<b>Shared CAS Cache</b><br/>Global Blob Deduplication"]
+        CLI["niebla CLI (workspace, status, diff, shelve, submit)"]
+        FS["nieblafs (Virtual FUSE VFS)"]
+        Direct["Direct Mode (--no-fuse materialization)"]
+        Scratch["Scratch CoW Layer (Local modifications)"]
+        CASLocal["Shared CAS Cache (Deduplicated blobs)"]
 
         CLI --> FS
         CLI --> Direct
@@ -45,23 +45,23 @@ flowchart TD
 
     subgraph Cluster["Repository Server Infrastructure"]
         direction TB
-        Server["<b>niebla-server (:50051)</b><br/>gRPC API &amp; Merkle Tree Engine"]
-        CASRemote["<b>Central CAS Storage</b><br/>Deduplicated SHA-256 Blobs"]
-        DB[("<b>PostgreSQL 16+</b><br/>Monotonic Revisions, Reviews, Approvals")]
-        Cascade["<b>Cascade Engine</b><br/>Automated Stacked Rebase Cascades"]
+        Server["niebla-server (:50051 gRPC API)"]
+        CASRemote["Central CAS Storage (Content-addressable blobs)"]
+        DB[("PostgreSQL 16+ (Revisions, reviews, approvals)")]
+        Cascade["Cascade Engine (Automated stacked rebases)"]
 
         Server --> CASRemote
         Server --> DB
         Server --> Cascade
     end
 
-    subgraph Web["Cotejo Review &amp; CI (:8080)"]
+    subgraph Web["Cotejo Review & CI (:8080)"]
         direction TB
-        Cotejo["<b>Cotejo Web Service</b><br/>Templ SSR + Chroma Syntax Diffing"]
-        SSE["<b>Real-Time SSE Stream</b><br/>Instant Updates Without Polling"]
-        Attention["<b>Attention Sets</b><br/>Turn-Based Review Tracking"]
-        Agents["<b>AI Review Personas</b><br/>Automated Code Hints &amp; Patches"]
-        CIHub["<b>CI Status API</b><br/><code>/api/v1/ci/status</code>"]
+        Cotejo["Cotejo Web Review Server"]
+        SSE["Real-Time SSE Event Stream"]
+        Attention["Attention Sets (Turn-based review tracking)"]
+        Agents["AI Review Personas (Automated hints & patches)"]
+        CIHub["CI Status API (/api/v1/ci/status)"]
 
         Cotejo --> SSE
         Cotejo --> Attention
@@ -69,9 +69,10 @@ flowchart TD
         Cotejo --> CIHub
     end
 
-    Workstation -->|"gRPC over HTTP/2<br/>(Bearer Token / TLS 1.3)"| Server
-    Workstation -->|"Browse Diffs &amp; Reviews"| Cotejo
-    Cotejo -->|"Query Merkle Trees &amp; Blobs"| Server
+    CLI -->|"gRPC (HTTP/2) / Bearer Auth"| Server
+    FS -->|"On-Demand Blob Stream (64KB)"| CASRemote
+    CLI -->|"Browser Review Link"| Cotejo
+    Cotejo -->|"Query Merkle Trees & Reviews"| Server
 ```
 
 ---
