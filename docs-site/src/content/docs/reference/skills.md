@@ -251,3 +251,4 @@ When an agent initializes in a workspace, it loads skills using standard priorit
 3. Canonical Niebla Hub (`~/.local/share/niebla/skills/niebla/`)
 
 By maintaining strict compatibility with open agent standards, Niebla ensures that custom domain expertise (such as internal APIs, database schemas, or deployment runbooks) can be shared seamlessly across human developers and AI coding partners.
+

@@ -706,5 +706,7 @@ While `~/.config/niebla/` contains host-specific, user, and infrastructure param
 - **`.niebla/hooks.toml`:** Specifies client-side and server-side lifecycle hooks (e.g., `pre_submit`, `post_create`, `pre_sync`).
 - **`.niebla/agents.toml`:** Registers automated AI review personas, context aperture widths, and evaluation prompts.
 
+For a comprehensive guide on implementing custom in-tree review scripts, AI personas, CAS binaries, and self-hosted repository approval gates, see the [In-Tree Governance Guide](/niebla/workflows/in-tree-governance/).
+
 By decoupling host and client connection settings (`~/.config/niebla/`) from versioned codebase policy (`.niebla/`), Niebla ensures that team security rules travel with the repository while individual developers retain full control over local mount paths and editors.
 

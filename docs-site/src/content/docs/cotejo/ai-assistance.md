@@ -194,6 +194,10 @@ trigger_paths = ["**/*.go", "**/*.rs"]
 auto_approve = true
 ```
 
+:::tip[Comprehensive In-Tree Governance]
+For a deep dive into authoring automated review scripts, generating structured JSON feedback or compiler line diagnostics, testing scripts against CoW scratch workspaces, and binding agent gates in subtree `OWNERS.toml`, see the [In-Tree Governance Guide](/niebla/workflows/in-tree-governance/).
+:::
+
 ---
 
 ## Configuring the LLM Provider

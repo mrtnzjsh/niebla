@@ -522,7 +522,7 @@ niebla cas put bin/service-arm64
 SHA256: 4f8b2d18c991a0293847e18928374b9281734918237498127394812739481234
 Size  : 18,491,200 bytes
 ```
-**Why**: Useful for caching build artifacts, test fixtures, and large compiler toolchains in central CAS without checking them into source code trees.
+**Why**: Useful for caching build artifacts, test fixtures, and large compiler toolchains in central CAS without checking them into source code trees. Also used to upload hermetic review binaries referenced by `type = "cas_binary"` in `.niebla/agents.toml` (see [In-Tree Governance: CAS Binaries](/niebla/workflows/in-tree-governance/#3-type--cas_binary-hermetic-content-addressed-review-binaries)).
 
 ### `niebla cas get <sha256>`
 Downloads a raw blob from CAS to local disk or `stdout`.
