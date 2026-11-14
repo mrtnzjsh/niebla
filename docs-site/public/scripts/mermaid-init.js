@@ -79,6 +79,10 @@
         useMaxWidth: true,
         padding: 20,
         diagramPadding: 20,
+        subGraphTitleMargin: {
+          top: 10,
+          bottom: 24,
+        },
       },
       sequence: {
         diagramMarginX: 20,

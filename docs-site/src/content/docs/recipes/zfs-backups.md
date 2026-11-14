@@ -16,7 +16,7 @@ Niebla features a native **ZFS Resilience Engine** that leverages OpenZFS copy-o
 
 ```mermaid
 flowchart TD
-    subgraph Primary["Primary Monorepo Server (:50051)"]
+    subgraph Primary["Primary Monorepo Server<br/>(gRPC Port 50051)"]
         direction TB
         Server["niebla-server Daemon"]
         PG[("PostgreSQL Cluster<br/>(Metadata)")]
@@ -32,11 +32,11 @@ flowchart TD
         CAS --> Streamer
     end
 
-    subgraph Network["Dedicated 10GbE Storage Network / Tailnet"]
+    subgraph Network["Dedicated 10GbE Network<br/>(Jumbo Frames MTU 9000)"]
         SSH["SSH Pipe (Port 22)<br/><code>aes128-gcm@openssh.com</code><br/>MTU 9000 (Jumbo Frames)"]
     end
 
-    subgraph Standby["Standby Storage Node (Off-Site / DR)"]
+    subgraph Standby["Standby Storage Node<br/>(Off-Site DR Replica)"]
         direction TB
         ReplicaUser["Unprivileged User: <code>niebla-repl</code><br/>(Delegated <code>zfs allow</code>)"]
         Recv["ZFS Receive Process<br/>(<code>zfs recv -F</code>)"]
@@ -345,3 +345,4 @@ To maximize streaming throughput over 10GbE or 25GbE links:
    Niebla's internal streamer automatically specifies hardware-accelerated AES-GCM ciphers (`-o Ciphers=aes128-gcm@openssh.com,aes256-gcm@openssh.com`) which achieve line-rate throughput with minimal CPU overhead.
 3. **Database Consistency:**
    When running PostgreSQL alongside CAS data on ZFS, Niebla's `Coordinator` automatically issues `SELECT pg_backup_start(...)` prior to snapshotting and `SELECT pg_backup_stop(...)` immediately after, guaranteeing transactional crash consistency across database records and CAS blobs.
+
