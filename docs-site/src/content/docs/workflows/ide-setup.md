@@ -1,9 +1,9 @@
 ---
 title: "IDE Setup & Configuration"
-description: Optimizing Visual Studio Code, Neovim, and Emacs for Niebla workspaces, disabling Git extensions, configuring file watchers, and setting up Language Server Protocols (LSP).
+description: Optimizing Visual Studio Code, JetBrains IDEs (IntelliJ IDEA, GoLand, PyCharm), Neovim, and Emacs for Niebla workspaces, disabling Git extensions, configuring file watchers, and setting up Language Server Protocols (LSP).
 sidebar:
   order: 4
-  label: IDE Setup (VS Code, Neovim, Emacs)
+  label: IDE Setup (VS Code, JetBrains, Neovim)
 ---
 
 Because Niebla workspaces are mounted as standard POSIX directories, modern editors, language servers, and command-line tools function out of the box.
@@ -20,7 +20,7 @@ However, **accessible does NOT mean loaded**.
 
 ```mermaid
 flowchart LR
-    subgraph IDE["IDE File Tree (VS Code / Neovim / Emacs)"]
+    subgraph IDE["IDE File Tree (VS Code / JetBrains / Neovim / Emacs)"]
         direction TB
         F1["📁 cmd/"]
         F2["📁 internal/"]
@@ -103,6 +103,98 @@ Add the following to your workspace or user settings:
   "rust-analyzer.check.command": "clippy"
 }
 ```
+
+---
+
+## JetBrains IDEs (IntelliJ IDEA, GoLand, PyCharm, WebStorm, CLion)
+
+### What to Expect
+JetBrains IDEs provide deep static code analysis, semantic refactoring, and project-wide symbol indexing. However, unlike VS Code or Neovim (which delegate queries on demand to language servers like `gopls` or `rust-analyzer`), **JetBrains IDEs use an internal Virtual File System (VFS) and an eager background indexing engine**.
+
+### The Indexing Pitfall: Eager Indexing vs. Lazy Streaming
+
+> [!WARNING]
+> By default, opening a project root in IntelliJ triggers a recursive scan of every directory and file to build AST symbol caches ("*Scanning files to index...*").
+> 
+> In a 500GB / 500,000-file Niebla monorepo, indexing the entire workspace root will force `nieblafs` to execute `read()` on **every file**, lazily streaming hundreds of gigabytes across your network and filling your local CAS NVMe storage.
+
+### Key Differences & Solutions for IntelliJ
+
+| Challenge in Niebla | JetBrains Behavior | Recommended Mitigation |
+| :--- | :--- | :--- |
+| **Unbounded Indexing** | Scans and indexes every file under the project root | Exclude untargeted monorepo directories or scope Content Roots |
+| **Git Detection** | Traverses upwards searching for `.git` and polls status | Set VCS Directory Mapping to `<none>` |
+| **File Watcher (`fsnotifier`)** | Attempts inotify watches across all directories | Exclude `.niebla/`, build outputs, and untargeted submodules |
+| **Safe Write Renames** | Saves changes via temporary swap files (`.tmp`) | Disable "Use safe write" to ensure direct CoW file mutation |
+
+---
+
+### Recommended IntelliJ / JetBrains Configuration
+
+#### 1. Scope Project Content Roots (Crucial)
+Rather than letting IntelliJ index the entire monorepo, configure the project module to only index the specific services or packages you are working on:
+
+* **Method A: Exclude Directories via UI**
+  1. In the **Project** tool window (`Alt+1` / `Cmd+1`), right-click any top-level directory you don't need (e.g. `services/legacy`, `frontend/`, `build/`).
+  2. Select **Mark Directory as** → **Excluded** (or press `Alt+E`).
+  3. Excluded directories remain visible in your file tree for reference, but IntelliJ will **never read or index their contents**, preserving 0-byte local disk usage.
+
+* **Method B: Configure Content Roots in Project Structure**
+  1. Open **Project Structure** (`Ctrl+Alt+Shift+S` on Linux/Windows, `Cmd+;` on macOS).
+  2. Under **Project Settings** → **Modules** → **Sources**:
+  3. Remove the monorepo root as a monolithic Content Root.
+  4. Click **+ Add Content Root** to add only your active service directories (e.g. `cmd/api` and `pkg/auth`).
+
+* **Method C: Open Subfolders Directly**
+  If your work is isolated to a single service or package, you can open the subfolder directly from your terminal:
+  ```bash
+  # Open only the target service directory in GoLand / IntelliJ
+  goland ~/niebla/workspaces/auth-ui/services/auth-service
+  ```
+  IntelliJ treats the subfolder as the project root, indexing only its immediate files.
+
+#### 2. Disable Git Version Control Mapping
+Prevent IntelliJ from continuously polling for `.git` status or showing "Unregistered VCS root" warnings:
+
+1. Open **Settings** / **Preferences** (`Ctrl+Alt+S` or `Cmd+,`).
+2. Go to **Version Control** → **Directory Mappings**.
+3. Select `<Project>` and change the VCS dropdown to **`<none>`** (or remove the entry).
+
+You can also check in a project configuration file at `.idea/vcs.xml`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <!-- Disable Git detection inside Niebla workspaces -->
+    <mapping directory="" vcs="" />
+  </component>
+</project>
+```
+
+#### 3. Optimize Synchronization and Safe Write
+Under **Settings** → **Appearance & Behavior** → **System Settings** → **Synchronization**:
+
+* **Uncheck "Use safe write (save changes to a temporary file first)"**:
+  Safe write creates temporary files and atomically renames them over the original. In virtual FUSE filesystems, disabling safe write ensures the editor performs direct in-place writes, cleanly triggering Niebla's kernel-level Copy-on-Write (CoW) promotion into the workspace's scratch overlay.
+* **Exclude Internal Niebla Paths in `.idea/<module>.iml`**:
+  ```xml
+  <?xml version="1.0" encoding="UTF-8"?>
+  <module type="WEB_MODULE" version="4">
+    <component name="NewModuleRootManager">
+      <content url="file://$MODULE_DIR$">
+        <!-- Exclude internal Niebla state and scratch overlay from indexing -->
+        <excludeFolder url="file://$MODULE_DIR$/.niebla" />
+        <excludeFolder url="file://$MODULE_DIR$/scratch" />
+      </content>
+    </component>
+  </module>
+  ```
+
+#### 4. Tune JVM Heap Memory
+When working with multiple scoped packages in a monorepo, ensure the IntelliJ process has sufficient heap space to hold syntax trees in memory without aggressive garbage collection pauses:
+* Navigate to **Help** → **Change Memory Settings**.
+* Set **Maximum Heap Size** to `4096 MB` or higher.
 
 ---
 

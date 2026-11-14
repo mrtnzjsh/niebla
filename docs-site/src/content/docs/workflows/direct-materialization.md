@@ -103,6 +103,6 @@ Compares modified physical files against the base CL blobs fetched from local CA
 
 ## Next Steps
 
-* **[IDE Setup & Configuration](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/ide-setup.md):** Configuring VS Code, Neovim, and Emacs for Niebla workspaces.
+* **[IDE Setup & Configuration](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/ide-setup.md):** Configuring VS Code, JetBrains IDEs, Neovim, and Emacs for Niebla workspaces.
 * **[Virtual Workspaces & Storage Economics](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/workspaces.md):** Deep dive into FUSE overlays, CAS sharding, and disk economics.
 
