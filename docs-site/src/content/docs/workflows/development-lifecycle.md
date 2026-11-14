@@ -171,7 +171,27 @@ niebla sync
 ```
 
 * **In FUSE Mode:** If there are no overlapping file conflicts, the server fast-forwards the base Merkle root tree and sends a `reanchor` IPC message over `nieblafs.sock`. The daemon purges its in-memory metadata cache and points to the new root tree in **sub-millisecond time with zero file copying**.
-* **In Conflict Situations:** If the server detects overlapping edits between upstream trunk and your local scratch changes, standard conflict markers (`<<<<<<< TRUNK`, `=======`, `>>>>>>> LOCAL`) are written into the scratch files for interactive resolution.
+* **In Conflict Situations:** If the server detects overlapping edits between upstream trunk and your local modifications, `niebla sync` executes an in-place 3-way merge and automatically injects standard conflict markers into your workspace files:
+  ```text
+  ⚠️  Rebase conflict detected with Parent CL 42!
+     Conflicts: pkg/auth/token.go (2 conflict hunks)
+     ✓ Injected conflict markers into 1 workspace file(s):
+       • pkg/auth/token.go
+     Please resolve the conflicting files in your workspace, then run 'niebla shelve' to commit the resolution.
+  ```
+
+### Resolving In-Place Rebase Conflicts
+1. Open the conflicted file in your IDE or text editor:
+   ```go
+   <<<<<<< PARENT CL 42
+   func ValidateToken(token string) (*Claims, error) {
+   =======
+   func ValidateToken(ctx context.Context, token string) (*Claims, error) {
+   >>>>>>> LOCAL WORKSPACE (feature-auth)
+   ```
+2. Manually edit the file to keep the desired resolution, removing the conflict markers.
+3. Run `niebla diff` to verify that all conflict markers have been eliminated and clean diffs are shown.
+4. Run `niebla shelve` to commit the conflict resolution and upload the new patchset to Cotejo. All orphan whiteout markers are automatically pruned upon shelving.
 
 ---
 

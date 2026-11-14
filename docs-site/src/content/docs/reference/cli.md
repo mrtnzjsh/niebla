@@ -354,6 +354,7 @@ niebla sync [flags]
 ### Flags
 * `--dry-run`: Previews incoming changes, potential rebase conflicts, and inode invalidations without touching local state.
 * `--no-hooks`: Skips client `post_sync` lifecycle hooks.
+* `-f`, `--force`: Forces synchronization even if uncommitted modifications exist in direct materialization (`--no-fuse`) mode.
 
 ### Use Cases
 
@@ -529,6 +530,22 @@ Downloads a raw blob from CAS to local disk or `stdout`.
 
 ```bash
 niebla cas get 4f8b2d18c... --dest /tmp/service-arm64
+```
+
+### `niebla cas gc`
+Executes mark-and-sweep garbage collection across local or server CAS storage, comparing blobs against active trunk heads and workspaces and removing unreferenced blobs older than a grace period.
+
+```bash
+niebla cas gc [--grace-period <duration>] [--dry-run] [--dir <path>]
+```
+```text
+✓ CAS Garbage Collection Completed:
+  • Total Scanned Blobs : 14,892
+  • Live Blobs Preserved: 13,204
+  • Unreferenced Blobs  : 1,688
+  • In-Grace Blobs Kept : 240
+  • Deleted Blobs       : 1,448
+  • Disk Space Reclaimed: 2,491,208,412 bytes
 ```
 
 ---

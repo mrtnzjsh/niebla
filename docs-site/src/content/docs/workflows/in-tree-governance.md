@@ -449,3 +449,4 @@ $ niebla submit
 ```
 
 From this commit onward, all future changelists touching database or authentication files will automatically execute the updated `sec-scanner.sh` rules!
+

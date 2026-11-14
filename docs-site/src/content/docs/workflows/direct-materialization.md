@@ -51,11 +51,21 @@ When `workspace create --no-fuse` is executed, the CLI resolves the base changel
 * When the local CAS cache (`~/.cache/niebla/blobs`) resides on the **same filesystem partition** as the workspace mount directory, Niebla hardlinks the files directly into the workspace using `os.Link`.
 * **Zero Storage Overhead:** Materializing a 100,000-file repository takes **milliseconds** and consumes **zero additional disk blocks**!
 * Both the CAS cache and the workspace directory point to the exact same physical disk inodes.
+* **Cache Poisoning Protection:** To prevent in-place edits from accidentally mutating the shared CAS cache, Niebla automatically sets hardlinked files to **read-only permissions (`0444`)**. Editors break the hardlink upon saving (copy-on-write decoupling).
 
-### 3. Fallback Streaming
+### 3. Synchronization Safety & Ghost File Pruning
+In direct materialization mode, `niebla sync` provides strict data protection:
+* **Dirty Worktree Guard:** If you have uncommitted local modifications, `niebla sync` halts with an error, preventing accidental loss of work:
+  ```text
+  ❌ workspace "feature-auth" has 3 uncommitted modification(s).
+     Run 'niebla shelve' to save your work, or 'niebla sync --force' to overwrite.
+  ```
+* **Stale Ghost File Pruning:** When files are deleted upstream on trunk, `niebla sync` automatically detects and removes them from your workspace disk, ensuring no orphaned ghost files remain.
+
+### 4. Fallback Streaming
 If CAS is located on a different disk partition or files are not yet cached locally, `MaterializeTree` streams chunks over gRPC and writes standard physical files to disk.
 
-### 4. No Background Daemon
+### 5. No Background Daemon
 In `--no-fuse` mode:
 * `DaemonPID` is `0`.
 * `SocketPath` is empty (`""`).
