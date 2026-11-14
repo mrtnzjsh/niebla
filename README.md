@@ -1,120 +1,219 @@
-# Niebla: Unified Monorepo & Code Review Toolchain
+# Niebla: Unified Monorepo & Code Review Platform
 
-Niebla is a server-authoritative, cloud-native monorepo version control and code review toolchain inspired by Google's **Piper**, **Clients-in-the-Cloud (CitC)**, and **Critique** systems.
+[![Documentation](https://img.shields.io/badge/docs-mrtnzjsh.github.io%2Fniebla-blue?style=flat-square)](https://mrtnzjsh.github.io/niebla/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go)](https://golang.org)
+[![NixOS Module](https://img.shields.io/badge/NixOS-Module%20Ready-5277C3?style=flat-square&logo=nixos)](https://nixos.org)
 
-**Strictly No Git**: Niebla replaces distributed Git packfiles with virtual, read-only FUSE mounts (`nieblafs`), local Copy-on-Write (CoW) scratch overlays, Content-Addressable Storage (CAS), and a dedicated web-based code review interface (**Cotejo**).
+**Niebla** is an open-source, server-authoritative monorepo version control and code review platform. 
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Developer Workstation                          │
-│                                                                        │
-│   Virtual Workspace Mount (/niebla/workspaces/<name>)                  │
-│   ├── FUSE Inode Cache (Virtual 500k-file tree: < 1MB RAM)            │
-│   └── Scratch Overlay (Local CoW modifications: bytes on disk)         │
-│                                                                        │
-│   CLI Toolchain: niebla status | niebla diff | niebla shelve           │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ gRPC (HTTP/2)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                     Central Repository Cluster                         │
-│                                                                        │
-│   niebla-server (:50051)                                               │
-│   ├── Merkle Tree Serialization & 3-Way Auto-Rebase Engine            │
-│   ├── Central CAS Storage (Deduplicated Content Blobs)                │
-│   └── PostgreSQL (Metadata, Patchsets, Reviews, Discussions)          │
-│                                                                        │
-│   Cotejo Code Review Service (:8080)                                  │
-│   ├── Real-Time Critique Web UI (Templ SSR + Chroma Syntax Highlighting)│
-│   ├── Attention Set State Machine & Segregated Inboxes                 │
-│   ├── Intra-Line Word Diffing & Patchset Inter-Diffs                  │
-│   └── Autonomous AI Review Agents & One-Click Patch Application        │
-└────────────────────────────────────────────────────────────────────────┘
+It is engineered from the ground up to eliminate the friction, clone bloat, and rebase sprawl inherent in distributed Git workflows—scaling effortlessly from **an individual developer hacking on a single laptop** to **fast-moving medium-sized engineering organizations** running distributed CI pipelines and autonomous AI coding swarms.
+
+---
+
+## The Vision: Monorepo Simplicity for Teams of Any Size
+
+As codebases grow, traditional distributed version control systems begin to degrade: downloading gigabytes of historical Git packfiles slows onboarding, branch switching pollutes local filesystems, merge skew causes silent regressions, and pull request inboxes drown in noisy notifications.
+
+Niebla solves this by treating the monorepo as a **central, high-throughput service**:
+
+1. **Zero-Clone Virtual Workspaces:** Workspaces provision in under 15 milliseconds. File trees are virtualized via FUSE (`nieblafs`) or materialized directly (`--no-fuse`), streaming file bodies on-demand and deduplicating blobs across all workspaces in a shared Content-Addressable Storage (CAS) cache.
+2. **Instant Change Detection:** You never wait for `status` to scan millions of clean files. Niebla tracks edits in a private Copy-on-Write (CoW) scratch layer, calculating status and diffs in $O(\text{changed})$ time.
+3. **Linear Patchsets Over Commit Soup:** Work is shelved into server-authoritative Changelists (CLs). Reviews progress through immutable patchsets with inter-diff comparisons, eliminating merge commits and branch spaghetti.
+4. **Actionable Code Review (Cotejo):** Review code in a blazing-fast web interface featuring intra-line word diffs, attention set state machines, and one-click AI code suggestion application.
+5. **Human & Agent Coexistence:** Designed for humans, but optimized with deterministic `--json` contracts, granular `OWNERS.toml` governance gates, and dedicated skill adapters for AI coding assistants.
+
+---
+
+## System Architecture
+
+```mermaid
+flowchart TD
+    subgraph Workstation["Developer / Agent Workstation"]
+        direction TB
+        CLI["<b>niebla CLI</b><br/><code>workspace | status | diff | shelve | submit</code>"]
+        FS["<b>nieblafs (FUSE VFS)</b><br/>On-Demand Streaming &lt; 15ms"]
+        Direct["<b>Direct Mode (--no-fuse)</b><br/>Zero-Copy Inode Materialization"]
+        Scratch["<b>Scratch CoW Layer</b><br/>Private Local Modifications"]
+        CASLocal["<b>Shared CAS Cache</b><br/>Global Blob Deduplication"]
+
+        CLI --> FS
+        CLI --> Direct
+        FS --> Scratch
+        FS --> CASLocal
+    end
+
+    subgraph Cluster["Repository Server Infrastructure"]
+        direction TB
+        Server["<b>niebla-server (:50051)</b><br/>gRPC API &amp; Merkle Tree Engine"]
+        CASRemote["<b>Central CAS Storage</b><br/>Deduplicated SHA-256 Blobs"]
+        DB[("<b>PostgreSQL 16+</b><br/>Monotonic Revisions, Reviews, Approvals")]
+        Cascade["<b>Cascade Engine</b><br/>Automated Stacked Rebase Cascades"]
+
+        Server --> CASRemote
+        Server --> DB
+        Server --> Cascade
+    end
+
+    subgraph Web["Cotejo Review &amp; CI (:8080)"]
+        direction TB
+        Cotejo["<b>Cotejo Web Service</b><br/>Templ SSR + Chroma Syntax Diffing"]
+        SSE["<b>Real-Time SSE Stream</b><br/>Instant Updates Without Polling"]
+        Attention["<b>Attention Sets</b><br/>Turn-Based Review Tracking"]
+        Agents["<b>AI Review Personas</b><br/>Automated Code Hints &amp; Patches"]
+        CIHub["<b>CI Status API</b><br/><code>/api/v1/ci/status</code>"]
+
+        Cotejo --> SSE
+        Cotejo --> Attention
+        Cotejo --> Agents
+        Cotejo --> CIHub
+    end
+
+    Workstation -->|"gRPC over HTTP/2<br/>(Bearer Token / TLS 1.3)"| Server
+    Workstation -->|"Browse Diffs &amp; Reviews"| Cotejo
+    Cotejo -->|"Query Merkle Trees &amp; Blobs"| Server
 ```
 
 ---
 
-## Cotejo: Google Critique-Inspired Code Review
+## Key Capabilities
 
-**Cotejo** is Niebla's native, web-based code review interface. Operating on port `8080` (with a live-reload proxy on port `7331` for local development), Cotejo is designed to eliminate the merge skew, review stalls, and noisy notification loops common to Git pull request workflows.
+### 1. Virtual Workspaces (`niebla workspace`)
+Never clone gigabytes of packfiles or juggle stashes. Each feature, bugfix, or experiment receives its own lightweight workspace:
+* **FUSE Mode (Default):** Virtual mount point backed by `nieblafs`. Storage on creation is virtually zero (< 100 KB).
+* **Direct Materialization (`--no-fuse`):** Optimized for Docker containers, Kubernetes pods, CI runners, and macOS environments where `/dev/fuse` is unavailable. Uses parallel streaming and hardlinks for fast checkouts.
+* **Mount Management:** Cleanly attach, detach, or recover workspace mounts with `niebla workspace mount` and `unmount`.
 
-### 1. Patchset Stacks vs. Git Pull Requests
+### 2. Instant Change Tracking & Shelving
+* **Fast Status:** Only modified files, newly added files, or whiteout deletion markers (`.wh.*`) occupy disk space in scratch. `niebla status` and `niebla diff` run instantaneously regardless of total monorepo size.
+* **Changelist Shelving:** `niebla shelve -m "..."` snapshots local edits into a new Merkle tree, uploads chunks to CAS in 64KB streams, and generates an immutable patchset with a direct Cotejo review URL.
 
-Instead of managing branching, rebasing, and squash merges on developer machines, Cotejo treats reviews as a linear stack of immutable, content-addressed **Patchsets** ($P_1, P_2, \dots$):
+### 3. Cotejo: High-Performance Code Review
+* **Two-Pass Intra-Line Diff Engine:** Line-level LCS diffs paired with character- and word-level slicing, retaining language syntax highlighting inside diff additions and deletions.
+* **Inter-Patchset Diffs:** Compare **Patchset 1 vs. Patchset 2** to review *only* the new changes made in response to feedback.
+* **The Attention Set:** Automatically tracks whose turn it is to act (Author vs. Reviewers), preventing reviews from stalling in limbo.
+* **One-Click Patch Application:** Reviewers or AI agents can provide replacement code suggestions; authors apply them with a single click (`✓ Apply Suggestion`), synthesizing a new patchset automatically.
+* **Vim Keyboard Ergonomics:** Rapid file navigation (`j`/`k`), jump to comments (`n`/`p`), and toggle reviewed files (`m`).
 
-* **Immutable Revisions:** Every `niebla shelve` snapshots your workspace's local changes into a new patchset Merkle tree.
-* **Inter-Diff Comparisons:** Reviewers can compare any two patchsets directly (e.g. **Patchset 1 vs. Patchset 2**) to see *only* the new lines modified to address review comments, without re-reviewing untouched files.
-* **Atomic Linear Submissions:** Submitting a changelist (`niebla submit`) performs a server-side three-way Merkle merge onto trunk, guaranteeing a clean, linear repository history.
+### 4. Monotonic Trunk & Stacked Development
+* **Strict Linear History:** Submissions serialize via database advisory locks (`pg_advisory_xact_lock`), incrementing a monotonic revision counter ($r1, r2, r3\dots$).
+* **Stacked Changelists:** Branch one feature from another using `niebla workspace create child --cl <parent_id>`.
+* **Automated Cloud Cascades:** When a parent CL commits to trunk, Niebla's background cascade engine automatically rebases dependent child changelists in the cloud.
 
-### 2. The Attention Set: Eliminating Review Deadlocks
+### 5. Enterprise Resilience & Disaster Recovery
+* **CAS Garbage Collection:** Mark-and-sweep GC (`niebla cas gc`) reclaims unreferenced blobs older than a configurable grace period.
+* **Envelope-Encrypted Archives:** `niebla backup create --encrypt` produces standalone `.nieblabak` bundles encrypted with AES-256-GCM or ChaCha20-Poly1305.
+* **10GbE ZFS Snapshot Replication:** Native block-level streaming for zero-downtime hot standbys and disaster recovery cutover.
 
-In typical code review systems, pull requests stall because it is ambiguous who needs to act next. Cotejo implements the **Attention Set state machine**:
-
-* **Author Shelves CL:** Reviewers enter the Attention Set; the author is cleared.
-* **Reviewer Requests Changes:** Reviewer leaves the Attention Set; author enters.
-* **Author Pushes Update:** Attention flips back to reviewers.
-* **Ready to Submit:** Once required approvals are granted, attention returns to the author to trigger `niebla submit`.
-
-At any time, developers can check **My Review Queue** (`/cls?tab=my-reviews`) to see only changelists requiring their immediate attention.
-
-### 3. High-Fidelity Intra-Line Word Diffing
-
-Cotejo's diff engine executes a **two-pass comparison**:
-1. **Line-Level LCS:** Identifies added, deleted, and unchanged lines.
-2. **Intra-Line Token Slicing:** For modified lines, a second pass highlights the exact modified words or characters.
-3. **Chroma Syntax Coloring:** Code retains full language syntax highlighting (keywords, types, strings) inside diff additions and deletions.
-
-### 4. Review Workflows & Interactivity
-
-* **Multi-Draft Commenting:** Author comments across dozens of files in an unsubmitted draft state (`is_draft = true`). Publish all notes in a single batch with **"Publish Comments"** to prevent spamming notifications.
-* **Multi-Line Drag Anchoring:** Click and drag across line numbers ($L_{\text{start}} \dots L_{\text{end}}$) to anchor comments to complete functions or multi-line blocks.
-* **Thread Resolution Gating:** Discussions require explicit resolution (`Resolved`). Repositories can block submissions via `allow_unresolved_comments = false` until all feedback is addressed.
-* **Per-Reviewer Progress Tracking:** Every file tracks review state independently (`reviewed` vs. `not reviewed` per user). Opening a file marks it reviewed; a live header progress bar displays `X of Y files reviewed by <user>`.
-* **Vim Keyboard Shortcuts:** Navigate files (`j`/`k`), jump between comments (`n`/`p`), and toggle review status (`m`) without touching the mouse.
-
-### 5. Autonomous AI Review Agents & One-Click Patches
-
-Cotejo integrates deeply with AI review agents and static analysis bots via a **3-Tier Governance Hierarchy**:
-
-* **Tier 1 (Host Baseline — `~/.config/niebla/*.toml`):** Configures LLM endpoints (OpenAI API, vLLM, Ollama, LiteLLM) and token limits.
-* **Tier 2 (Shared Repo Catalog — `.niebla/agents.toml`):** Defines reusable review agents (`type = "ai"`, `type = "cas_binary"`, `type = "in_tree"`).
-* **Tier 3 (Subtree Policy — `OWNERS.toml`):** Subtree maintainers attach specific agents (e.g. `agents = ["a11y-bot", "sec-bot"]`) to their directories.
-
-**One-Click Patch Application:** When an AI agent or human reviewer suggests replacement code, authors can click **`✓ Apply Suggestion`**. Cotejo splices the fix into the file, streams the new blob to CAS, computes a new Merkle tree, generates **Patchset $N+1$**, and automatically marks the comment resolved.
-
-### 6. Subtree Governance (`OWNERS.toml`)
-
-Code ownership is defined hierarchically within the repository tree:
-
-```toml
-# services/greeter/OWNERS.toml
-approvers = ["alice", "bob"]
-reviewers = ["carol"]
-required_approvals = 1
-require_green_ci = true
-allow_unresolved_comments = false
-
-[per_file]
-"*.go" = ["alice"]
-```
-
-`niebla submit` evaluates touched files against all parent `OWNERS.toml` files, rejecting submissions unless designated approvers sign off and CI check runs pass.
-
-### 7. Deployment, Identity & Theming
-
-* **Reverse Proxy Authentication:** Native support for Tailscale Auth, Cloudflare Access, Traefik, and NGINX using trusted header forwarding (`mode = "headers"` with `trusted_proxies`).
-* **Real-Time Server-Sent Events (SSE):** Live UI reactivity at `/events` pushes comment publications, CI updates, and patchset uploads without WebSocket complexity.
-* **Catppuccin & Custom Theming:** Presets include `catppuccin-mocha`, `catppuccin-latte`, `catppuccin-frappe`, `tokyo-night`, `dracula`, `nord`, and custom color token overrides.
+### 6. AI Agent Harness Integration
+Niebla ships with built-in skill adapters for modern AI coding environments:
+* **Google Antigravity, Claude Code, Cursor, and Universal `.agents`:** Run `niebla skills sync` to link all 4 skills (`niebla`, `niebla-ci`, `niebla-config`, `niebla-review-agent`) across your workstation harnesses.
 
 ---
 
-## Documentation Site
+## Quickstart
 
-Explore the full documentation site built with Astro & Starlight:
+### Option A: Declarative NixOS Deployment (Recommended)
 
-* **[Getting Started: Quickstart & Hello World Walkthrough](http://localhost:4321/niebla/getting-started/quickstart/)**
-* **[Workspaces & Storage Economics](http://localhost:4321/niebla/workflows/workspaces/)**
-* **[Cotejo Overview & Philosophy](http://localhost:4321/niebla/cotejo/overview/)**
-* **[The Code Review Lifecycle](http://localhost:4321/niebla/cotejo/review-workflows/)**
-* **[AI Code Hints & Review Personas](http://localhost:4321/niebla/cotejo/ai-assistance/)**
-* **[Deployment, Auth & Theming](http://localhost:4321/niebla/cotejo/deployment-auth/)**
+If you are running **NixOS**, the repository provides a complete, self-bootstrapping NixOS module.
+
+1. Add Niebla to your system flake inputs:
+   ```nix
+   inputs.niebla.url = "github:mrtnzjsh/niebla";
+   ```
+
+2. Enable the service in your NixOS configuration:
+   ```nix
+   {
+     services.niebla.enable = true;
+   }
+   ```
+
+3. Run `sudo nixos-rebuild switch`.  
+   **NixOS automatically handles everything:** compiles the binaries, launches an isolated PostgreSQL instance on port `5433`, applies database migrations, seeds Depot Root (CL 1), starts `niebla-server.service`, and boots `cotejo.service` on port `8080`.
+
+---
+
+### Option B: Standalone Manual Installation
+
+#### 1. Compile the Binaries
+Niebla is written in pure Go and builds with zero CGO dependencies:
+```bash
+cd niebla
+CGO_ENABLED=0 go build -o /usr/local/bin/niebla ./cmd/niebla
+CGO_ENABLED=0 go build -o /usr/local/bin/niebla-server ./cmd/niebla-server
+CGO_ENABLED=0 go build -o /usr/local/bin/nieblafs ./cmd/nieblafs
+CGO_ENABLED=0 go build -o /usr/local/bin/cotejo ./cmd/cotejo
+```
+
+#### 2. Start PostgreSQL & Background Services
+```bash
+# Run local PostgreSQL (or connect to an existing cluster)
+docker run -d --name niebla-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+
+# Start repository daemon & web review server
+niebla-server --db-url "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" &
+cotejo --db-url "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" &
+```
+
+---
+
+### The Developer Workflow in 60 Seconds
+
+```bash
+# 1. Create and enter a new virtual workspace
+niebla workspace create feature-api
+cd ~/niebla/workspaces/feature-api
+
+# 2. Make your modifications
+echo "package main" > main.go
+niebla status
+niebla diff
+
+# 3. Shelve into a Changelist for review
+niebla shelve -m "feat(api): initialize core service endpoint"
+# Output prints review URL: http://127.0.0.1:8080/cl/2
+
+# 4. Open Cotejo in your browser, review diffs, and approve
+# Navigate to http://127.0.0.1:8080/cl/2
+
+# 5. Land the change onto trunk
+niebla submit --cl 2
+```
+
+---
+
+## Documentation
+
+Comprehensive documentation, API specs, and runbooks are available at the **[Niebla Documentation Site](https://mrtnzjsh.github.io/niebla/)**:
+
+### Getting Started & Concepts
+* **[Architectural Philosophy](https://mrtnzjsh.github.io/niebla/getting-started/philosophy/):** Why server-authoritative Merkle trees outperform distributed packfiles at scale.
+* **[Quickstart Walkthrough](https://mrtnzjsh.github.io/niebla/getting-started/quickstart/):** Step-by-step tutorial from workspace creation to trunk submission.
+* **[Workspaces & Storage Economics](https://mrtnzjsh.github.io/niebla/workflows/workspaces/):** Five-layer workstation architecture and disk consumption benchmarks.
+
+### Workflows & Guides
+* **[The Development Lifecycle](https://mrtnzjsh.github.io/niebla/workflows/development-lifecycle/):** Everyday workflow patterns, stacked changelists, and sync conflict resolution.
+* **[Direct Materialization Mode (`--no-fuse`)](https://mrtnzjsh.github.io/niebla/workflows/direct-materialization/):** Running Niebla in containers, VMs, and environments without `/dev/fuse`.
+* **[Offline Mode & Deferred Sync](https://mrtnzjsh.github.io/niebla/workflows/offline-mode/):** Local caching strategies for working without internet access.
+* **[In-Tree Governance (`OWNERS.toml`)](https://mrtnzjsh.github.io/niebla/workflows/in-tree-governance/):** Subtree ownership rules, required sign-offs, and automated CI runner gates.
+* **[Troubleshooting Runbook](https://mrtnzjsh.github.io/niebla/workflows/troubleshooting/):** Unmounting zombie FUSE mounts, socket recovery, and database advisory lock debugging.
+
+### Cotejo Code Review
+* **[Review Lifecycle & Diffs](https://mrtnzjsh.github.io/niebla/cotejo/review-workflows/):** Navigating intra-line diffs, inter-patchset comparisons, and draft comments.
+* **[AI Code Hints & Personas](https://mrtnzjsh.github.io/niebla/cotejo/ai-assistance/):** 3-tier governance and one-click code suggestion application.
+* **[Deployment, Auth & Theming](https://mrtnzjsh.github.io/niebla/cotejo/deployment-auth/):** Reverse proxy authentication, Tailscale integration, and Catppuccin themes.
+
+### Technical & API References
+* **[CLI Technical Reference](https://mrtnzjsh.github.io/niebla/reference/cli/):** Comprehensive flag specification, JSON contracts, and automation examples.
+* **[Cotejo HTTP & REST API](https://mrtnzjsh.github.io/niebla/reference/cotejo-api/):** Endpoints, HTMX payloads, and CI check run status reporting (`/api/v1/ci/status`).
+* **[Security & Authentication Architecture](https://mrtnzjsh.github.io/niebla/reference/security-auth/):** Zero-trust models, gRPC bearer tokens, TLS 1.3, and Tailscale mesh security.
+* **[gRPC Service Specification](https://mrtnzjsh.github.io/niebla/reference/grpc-api/):** `NieblaService` Protobuf API, streaming chunk semantics, and error codes.
+* **[CloudEvents v1.0 & Webhooks](https://mrtnzjsh.github.io/niebla/reference/events/):** Event schemas and timing-safe HMAC-SHA256 verification code.
+* **[Disaster Recovery & ZFS Streaming](https://mrtnzjsh.github.io/niebla/recipes/disaster-recovery/):** Step-by-step standby promotion and envelope-encrypted backup restore.
+
+---
+
+## License
+
+Niebla is open source under the [MIT License](LICENSE).
