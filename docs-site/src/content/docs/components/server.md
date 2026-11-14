@@ -50,7 +50,7 @@ flowchart TD
 
 ## 3. gRPC Service Interface (`NieblaService`)
 
-All client-server communication is defined in [`pkg/proto/v1/niebla.proto`](file:///home/matatan/Developer/niebla/niebla/pkg/proto/v1/niebla.proto) under the `niebla.v1` package:
+All client-server communication is defined in [`pkg/proto/v1/niebla.proto`](https://github.com/mrtnzjsh/niebla/blob/main/niebla/pkg/proto/v1/niebla.proto) under the `niebla.v1` package:
 
 ### Tree & Metadata RPCs
 | Method | Request | Response | Description |
@@ -108,7 +108,7 @@ flowchart LR
 
 When `CL 101` lands on trunk:
 1. `niebla-server` queries all active changelists where `parent_cl = 101` and `status = 'shelved'`.
-2. For each child (`CL 102`), the server invokes the **Three-Way Merkle Merge Engine** ([`pkg/tree/merge.go`](file:///home/matatan/Developer/niebla/niebla/pkg/tree/merge.go)):
+2. For each child (`CL 102`), the server invokes the **Three-Way Merkle Merge Engine** ([`pkg/tree/merge.go`](https://github.com/mrtnzjsh/niebla/blob/main/niebla/pkg/tree/merge.go)):
    * **Base:** Parent's previous root tree.
    * **Theirs:** Parent's new committed trunk tree.
    * **Ours:** Child's current patchset tree.

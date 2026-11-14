@@ -413,7 +413,7 @@ This cleanly unmounts `nieblafs` and purges the scratch directory.
 
 Congratulations! You have completed a full Niebla development cycle. Continue exploring Niebla's advanced features:
 
-* **[Virtual Workspaces & Storage Economics](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/workspaces.md):** Deep dive into FUSE mounts, CAS deduplication, and local disk footprints.
-* **[Stacking Dependent Workspaces](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/development-lifecycle.md#stacking-dependent-workspaces):** Build features on top of pending, unsubmitted changelists.
-* **[IDE Setup & Configuration](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/ide-setup.md):** Configure VS Code, JetBrains IDEs, Neovim, and Emacs for virtual monorepos.
+* **[Virtual Workspaces & Storage Economics](/niebla/workflows/workspaces/):** Deep dive into FUSE mounts, CAS deduplication, and local disk footprints.
+* **[Stacking Dependent Workspaces](/niebla/workflows/development-lifecycle/#stacking-dependent-workspaces):** Build features on top of pending, unsubmitted changelists.
+* **[IDE Setup & Configuration](/niebla/workflows/ide-setup/):** Configure VS Code, JetBrains IDEs, Neovim, and Emacs for virtual monorepos.
 

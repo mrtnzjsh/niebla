@@ -57,7 +57,7 @@ Each component within Niebla is built with modern, statically typed, and depende
 
 ### Core Language & Runtime
 * **Go 1.26**: The entire toolchain (`niebla-server`, `nieblafs`, `niebla`, and `cotejo`) is written in Go. Go was selected for its native CSP concurrency primitives (`goroutines`, `channels`), first-class POSIX system call support (`golang.org/x/sys`), and robust cross-platform networking stack.
-* **Hermetic Packaging via Nix**: Builds are managed declaratively using [`flake.nix`](file:///home/matatan/Developer/niebla/niebla/flake.nix). Toolchain binaries compile with zero external dynamic runtime library requirements on Linux and macOS.
+* **Hermetic Packaging via Nix**: Builds are managed declaratively using [`flake.nix`](https://github.com/mrtnzjsh/niebla/blob/main/niebla/flake.nix). Toolchain binaries compile with zero external dynamic runtime library requirements on Linux and macOS.
 
 ### Virtual Filesystem (VFS) Layer
 * **`bazil.org/fuse`**: A pure-Go FUSE library communicating directly with the Linux kernel `/dev/fuse` interface.

@@ -271,6 +271,6 @@ end, { desc = 'Find files in Niebla workspace' })
 
 ## Next Steps
 
-* **[The Development Lifecycle](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/development-lifecycle.md):** From editing files and CoW promotion to shelving and code review in Cotejo.
-* **[Virtual Workspaces & Storage Economics](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/workspaces.md):** Deep dive into FUSE overlays, CAS sharding, and disk economics.
+* **[The Development Lifecycle](/niebla/workflows/development-lifecycle/):** From editing files and CoW promotion to shelving and code review in Cotejo.
+* **[Virtual Workspaces & Storage Economics](/niebla/workflows/workspaces/):** Deep dive into FUSE overlays, CAS sharding, and disk economics.
 

@@ -3,7 +3,7 @@ title: Content-Addressable Storage (CAS) & Merkle Trees
 description: Low-level architecture of Niebla's SHA-256 CAS storage engine, relative path sharding, streaming protocols, and 3-way Merkle tree merges.
 ---
 
-At the heart of Niebla's scale and performance is its **Content-Addressable Storage (CAS)** and **Merkle Tree Serialization** subsystem ([`pkg/cas/`](file:///home/matatan/Developer/niebla/niebla/pkg/cas) and [`pkg/tree/`](file:///home/matatan/Developer/niebla/niebla/pkg/tree)).
+At the heart of Niebla's scale and performance is its **Content-Addressable Storage (CAS)** and **Merkle Tree Serialization** subsystem ([`pkg/cas/`](https://github.com/mrtnzjsh/niebla/tree/main/niebla/pkg/cas) and [`pkg/tree/`](https://github.com/mrtnzjsh/niebla/tree/main/niebla/pkg/tree)).
 
 This subsystem eliminates Git's packfile bloat, makes Git-LFS obsolete by design, and enables automated, three-way Merkle tree rebases in constant time.
 
@@ -96,7 +96,7 @@ type NodeEntry struct {
 
 ## 5. Three-Way Merkle Merge Engine (`pkg/tree/merge.go`)
 
-When a parent changelist lands on trunk or a developer runs `niebla sync`, Niebla performs automated **Three-Way Tree Merges** ([`pkg/tree/merge.go`](file:///home/matatan/Developer/niebla/niebla/pkg/tree/merge.go)):
+When a parent changelist lands on trunk or a developer runs `niebla sync`, Niebla performs automated **Three-Way Tree Merges** ([`pkg/tree/merge.go`](https://github.com/mrtnzjsh/niebla/blob/main/niebla/pkg/tree/merge.go)):
 
 $$\text{Result Tree} = \text{Merge3}(\text{Base Tree}, \text{Ours (Child CL)}, \text{Theirs (Parent Committed)})$$
 
@@ -118,6 +118,6 @@ Because directories are Merkle trees, the merge engine compares hashes at the di
 * **Case 1:** If `H_ours == H_theirs`, no changes were made $\to$ retain `H_ours`.
 * **Case 2:** If `H_base == H_ours`, only the parent modified this subtree $\to$ fast-forward to `H_theirs` without inspecting children!
 * **Case 3:** If `H_base == H_theirs`, only the child modified this subtree $\to$ retain `H_ours`.
-* **Case 4:** If all three hashes differ, the engine recurses into the subdirectory. Only when two independent edits collide on the exact same leaf file does the engine fall back to line-by-line diffing ([`pkg/tree/diff3.go`](file:///home/matatan/Developer/niebla/niebla/pkg/tree/diff3.go)).
+* **Case 4:** If all three hashes differ, the engine recurses into the subdirectory. Only when two independent edits collide on the exact same leaf file does the engine fall back to line-by-line diffing ([`pkg/tree/diff3.go`](https://github.com/mrtnzjsh/niebla/blob/main/niebla/pkg/tree/diff3.go)).
 
 This design allows stacked changelists spanning millions of files to rebase in **a few milliseconds**.

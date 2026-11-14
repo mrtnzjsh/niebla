@@ -90,5 +90,5 @@ Here you can:
 
 Ready for an end-to-end, code-complete walkthrough? Continue to:
 
-* **[First Project: Hello World Walkthrough](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/getting-started/first-project.md):** Build a Go microservice from scratch, create an `OWNERS.toml` governance policy, shelve multiple patchsets, resolve Cotejo comments, and submit to trunk.
+* **[First Project: Hello World Walkthrough](/niebla/getting-started/first-project/):** Build a Go microservice from scratch, create an `OWNERS.toml` governance policy, shelve multiple patchsets, resolve Cotejo comments, and submit to trunk.
 

@@ -9,7 +9,7 @@ The `niebla` executable is the primary command-line interface for engineers and 
 
 ## 1. Architecture & Execution Model
 
-The CLI is structured into modular Cobra commands ([`internal/cli/`](file:///home/matatan/Developer/niebla/niebla/internal/cli)):
+The CLI is structured into modular Cobra commands ([`internal/cli/`](https://github.com/mrtnzjsh/niebla/tree/main/niebla/internal/cli)):
 
 ```mermaid
 flowchart TD

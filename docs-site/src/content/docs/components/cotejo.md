@@ -9,7 +9,7 @@ description: Architecture, Templ SSR components, intra-line diff engine, real-ti
 
 ## 1. Architectural Overview
 
-Cotejo is implemented as a high-performance Go web service ([`internal/web/`](file:///home/matatan/Developer/niebla/niebla/internal/web)):
+Cotejo is implemented as a high-performance Go web service ([`internal/web/`](https://github.com/mrtnzjsh/niebla/tree/main/niebla/internal/web)):
 
 ```mermaid
 flowchart TD

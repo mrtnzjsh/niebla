@@ -168,7 +168,7 @@ POSIX filesystems require that deleting a file immediately hides it from subsequ
 
 ## 6. The Go VFS Node & Handle Implementation
 
-The implementation in [`cmd/nieblafs/internal/fs/`](file:///home/matatan/Developer/niebla/niebla/cmd/nieblafs/internal/fs) maps FUSE interfaces to Go types:
+The implementation in [`cmd/nieblafs/internal/fs/`](https://github.com/mrtnzjsh/niebla/tree/main/niebla/cmd/nieblafs/internal/fs) maps FUSE interfaces to Go types:
 
 ```go
 // Directory node: handles path component resolution

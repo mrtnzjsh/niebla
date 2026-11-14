@@ -171,6 +171,6 @@ niebla workspace delete feature-auth
 
 ## Next Steps
 
-* **[The Development Lifecycle](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/development-lifecycle.md):** Step-by-step walkthrough from editing files and CoW promotion to `niebla status`, `niebla diff`, and shelving a CL.
-* **[Direct Materialization Mode (`--no-fuse`)](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/direct-materialization.md):** Running workspaces on macOS or containerized CI runners without `/dev/fuse`.
-* **[IDE Setup & Configuration](file:///home/matatan/Developer/niebla/docs-site/src/content/docs/workflows/ide-setup.md):** Optimizing VS Code, JetBrains IDEs, Neovim, and Emacs for virtual monorepos.
+* **[The Development Lifecycle](/niebla/workflows/development-lifecycle/):** Step-by-step walkthrough from editing files and CoW promotion to `niebla status`, `niebla diff`, and shelving a CL.
+* **[Direct Materialization Mode (`--no-fuse`)](/niebla/workflows/direct-materialization/):** Running workspaces on macOS or containerized CI runners without `/dev/fuse`.
+* **[IDE Setup & Configuration](/niebla/workflows/ide-setup/):** Optimizing VS Code, JetBrains IDEs, Neovim, and Emacs for virtual monorepos.
