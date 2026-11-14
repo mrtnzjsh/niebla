@@ -92,3 +92,4 @@ func TestWorkspaceMountUnmountCmd(t *testing.T) {
 		t.Errorf("unexpected output: %s", delBuf.String())
 	}
 }
+

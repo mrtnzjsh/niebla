@@ -10,7 +10,7 @@ Niebla was engineered around the reality that enterprise monorepos eventually ou
 
 ## The Git Dilemma at Monorepo Scale
 
-Git was designed for Linux kernel development, where every developer clones the entire history of the repository onto their laptop. At monorepo scale (hundreds of gigabytes, millions of files, large datasets):
+Git was designed for distributed development where every developer clones the entire history of the repository onto their laptop or remote development machine. At monorepo scale (hundreds of gigabytes, millions of files, large datasets):
 
 1. **Clone times become unbearable:** Downloading gigabytes of historical packfiles blocks developer onboarding.
 2. **Disk bloat:** Multiple branches and workspaces duplicate massive trees on developer disks.

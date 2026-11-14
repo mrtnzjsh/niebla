@@ -144,5 +144,6 @@ To understand how Niebla's components operate together, consider the lifecycle o
 
 * [The FUSE Virtual Filesystem (`nieblafs`) Internals](/niebla/architecture/fuse-internals/): Low-level documentation on kernel inode management, whiteout files, and streaming fetchers.
 * [`niebla-server` Technical Manual](/niebla/components/server/): Database schema, CAS engine, and cascade rebasing engine.
+* [Security & Authentication Architecture](/niebla/reference/security-auth/): Comprehensive guide to bearer tokens, TLS 1.3, Cotejo identity, CI credentials, and zero-trust mesh setups.
 * [`niebla` CLI Reference](/niebla/reference/cli/): Complete command reference, flags, and configuration resolution order.
 * [Cotejo Review UI Architecture](/niebla/cotejo/overview/): Critique-inspired interface, attention sets, and real-time SSE stream.
