@@ -331,3 +331,4 @@ Before deploying Niebla into shared team or production environments, verify the 
 | **4. Secrets Isolation** | No passwords or auth tokens hardcoded in `.niebla/*.toml` | `git grep -i "token = \""` |
 | **5. Webhook Validation** | Event receiver verifies `X-Niebla-Signature` before processing payloads | Unit tests on webhook receiver endpoint |
 | **6. CAS Hardlink Protection** | Local cache files materialized with read-only (`0444`) permissions | `ls -l ~/.cache/niebla/blobs/` |
+
