@@ -210,6 +210,19 @@ Comprehensive documentation, API specs, and runbooks are available at the **[Nie
 
 ---
 
+## Background & Academic References
+
+While Niebla is an independent, open-source implementation built on modern cloud-native standards (Go, PostgreSQL, gRPC, Content-Addressable Storage, and NixOS), its workflow philosophy is informed by empirical research on monorepo version control and modern code review:
+
+* **[Why Google Stores Billions of Lines of Code in a Single Repository](https://cacm.acm.org/research/why-google-stores-billions-of-lines-of-code-in-a-single-repository/)** (Communications of the ACM, 2016)  
+  *Rachel Potvin and Josh Levenberg* — Details the operational advantages of monolithic repositories, server-authoritative trunk workflows, and virtualized Copy-on-Write workspace mounts over distributed cloning.
+* **[Modern Code Review: A Case Study at Google](https://sadowski.github.io/publications/ICSE18-Critique.pdf)** (ACM/IEEE International Conference on Software Engineering, 2018)  
+  *Caitlin Sadowski, Emma Söderberg, Luke Church, Michal Sipko, and Alberto Bacchelli* — Studies the mechanics of Critique: linear patchset stacks, attention sets, small review increments, and separating human feedback from automated bot signals.
+* **[Software Engineering at Google: Lessons Learned from Programming Over Time](https://abseil.io/resources/swe-book)** (O'Reilly Media, 2020)  
+  *Titus Winters, Tom Manshreck, and Hyrum Wright* — Specifically Chapter 16 (*Version Control and Branch Management*) and Chapter 19 (*Critique: Google's Code Review Tool*), analyzing trunk-based development and the breakdown of long-lived pull-request branches.
+
+---
+
 ## License
 
 Niebla is open source under the [MIT License](LICENSE).
