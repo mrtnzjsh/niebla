@@ -27,6 +27,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Release and workflow runbook plans
+RELEASE_WORKFLOW_PLAN.md
+
 # Docs site artifacts
 docs-site/node_modules/
 docs-site/dist/
