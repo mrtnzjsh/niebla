@@ -399,6 +399,7 @@ EOF
                   User = "niebla";
                   Group = "niebla";
                   StateDirectory = "niebla/postgres";
+                  StateDirectoryMode = "0700";
                   WorkingDirectory = "${cfg.dataDir}/postgres";
                   ExecStartPre = pkgs.writeShellScript "niebla-pg-init" ''
                     set -eu

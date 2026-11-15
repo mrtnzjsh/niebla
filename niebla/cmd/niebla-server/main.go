@@ -161,9 +161,21 @@ func main() {
 
 	dbConfig := db.DefaultConfig(cfg.Server.DBURL)
 	dbConfig.AutoSpawn = *autoDBFlag && cfg.Server.ShouldAutoDB()
-	database, err := db.Connect(ctx, dbConfig)
+
+	var database *db.DB
+	const maxRetries = 10
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		database, err = db.Connect(ctx, dbConfig)
+		if err == nil {
+			break
+		}
+		if attempt < maxRetries {
+			log.Printf("[db] Database connection attempt %d/%d failed: %v. Retrying in 1s...", attempt, maxRetries, err)
+			time.Sleep(1 * time.Second)
+		}
+	}
 	if err != nil {
-		log.Fatalf("Failed to connect to database and apply migrations: %v", err)
+		log.Fatalf("Failed to connect to database and apply migrations after %d attempts: %v", maxRetries, err)
 	}
 	defer database.Close()
 	log.Printf("Connected to PostgreSQL and verified schema migrations.")
@@ -190,7 +202,7 @@ func main() {
 
 	repoServer.Register(grpcServer)
 
-	addr := fmt.Sprintf("%s:%d", *hostFlag, *portFlag)
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Failed to listen on %s: %v", addr, err)
