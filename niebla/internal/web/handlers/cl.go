@@ -223,6 +223,12 @@ func (h *CLHandler) HandleApproval(w http.ResponseWriter, r *http.Request) {
 	if verdict == "" {
 		verdict = r.FormValue("verdict")
 	}
+	if verdict == "" {
+		verdict = r.FormValue("action")
+	}
+	if verdict == "approve" {
+		verdict = "approved"
+	}
 	parsedVerdict, ok := types.ParseVerdict(verdict)
 	if !ok || (!parsedVerdict.IsApproval() && parsedVerdict != types.VerdictChangesRequested) {
 		http.Error(w, "invalid verdict value (must be approved, lgtm, or changes_requested)", http.StatusBadRequest)

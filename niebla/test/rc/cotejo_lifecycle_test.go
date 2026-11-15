@@ -118,7 +118,7 @@ func TestCotejoFullReviewLifecycle(t *testing.T) {
 	}
 
 	// 6. Reviewer Bob approves the CL (+1 / LGTM)
-	approvalForm := url.Values{"action": {"approve"}}.Encode()
+	approvalForm := url.Values{"verdict": {"approved"}}.Encode()
 	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/approval", clID), reviewer, strings.NewReader(approvalForm), "application/x-www-form-urlencoded")
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound {
 		t.Errorf("Approval submission failed with status %d: %s", resp.StatusCode, body)

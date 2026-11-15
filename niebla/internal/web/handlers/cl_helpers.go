@@ -281,7 +281,7 @@ func (h *CLHandler) classifyInboxRows(allCLs []db.Changelist, currentUser string
 		case isAuthor:
 			p.Counts.Outgoing++
 			p.Outgoing = append(p.Outgoing, row)
-		case isAssigned || len(assignedCLIDs) == 0:
+		case isAssigned:
 			p.Counts.MyReviews++
 			p.MyReviews = append(p.MyReviews, row)
 		}
