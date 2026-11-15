@@ -198,12 +198,9 @@ EOF
           echo "=========================================================="
         '';
 
-        MedievalTools = with pkgs; [
-          bazel_7
-          arion
-          docker-compose
-          sops
+        devTools = with pkgs; [
           go
+          sqlc
           protobuf
           protoc-gen-go
           protoc-gen-go-grpc
@@ -213,7 +210,6 @@ EOF
           tailwindcss
           air
           gnumake
-          chromium
         ];
       in {
         packages = {
@@ -234,11 +230,11 @@ EOF
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = MedievalTools;
+          buildInputs = devTools;
 
           shellHook = ''
             echo "⚡ Niebla Development Environment Activated ⚡"
-            echo "Available tools: $(go version) | $(bazel --version) | arion $(arion version)"
+            echo "Available tools: $(go version) | $(psql --version 2>/dev/null || echo 'PostgreSQL 16') | templ"
           '';
         };
       }

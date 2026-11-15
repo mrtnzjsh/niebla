@@ -1,6 +1,3 @@
-# Bazel symlinks and outputs
-/bazel-*
-
 # direnv cache / Nix environment files
 /.direnv/
 /bin/
