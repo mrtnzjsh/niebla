@@ -56,3 +56,7 @@ All notable changes to Niebla are documented in this file, adhering to [Keep a C
   - Pure Nix flake packaging for all 4 Go binaries (`niebla`, `niebla-server`, `nieblafs`, `cotejo`) and unified `niebla-suite`.
   - Production-ready NixOS module (`services.niebla`) with automated PostgreSQL database setup, systemd unit generation, and auto-migrations.
 
+### Fixed
+- **Cotejo Inbox Review Routing**: Corrected query assignment filter so unassigned reviewers only see changelists where they are explicitly assigned rather than all open changelists.
+- **Review Approval Verdict Parameter**: Added backwards-compatible form handler mapping `action=approve` to `verdict=approved` in `POST /cl/{id}/approval`.
+
