@@ -1,148 +1,78 @@
 ---
-title: "The Code Review Lifecycle"
-description: Diff viewing, intra-line word diffs, patchset comparisons, draft commenting, thread resolution, and keyboard shortcuts in Cotejo.
+title: Review Lifecycle & Diffs
+description: Navigating intra-line word diffs, comparing patchsets, drafting multi-line comments, voting, and using keyboard shortcuts in Cotejo.
 sidebar:
   order: 2
   label: Review Lifecycle & Diffs
 ---
 
-Reviewing code in Cotejo is centered around fast, distraction-free reading, fine-grained discussions, and rapid iteration between patchsets. 
-
-This guide details how to navigate diffs, compare patchset revisions, draft inline comments, and satisfy repository governance gates.
+This guide covers how to inspect diffs, compare patchset revisions, publish batched draft comments, and approve changelists in Cotejo.
 
 ---
 
-## 1. Navigating Diffs & Intra-Line Word Highlighting
+## 1. Two-Pass Intra-Line Diffs
 
-When viewing a changelist in Cotejo (`/cl/{id}`), you can toggle between **Side-by-Side** (two-pane split) and **Unified** (single-pane inline) diff modes.
+When viewing a changelist (`/cl/{id}`), you can switch between **Side-by-Side** and **Unified** diff layouts.
 
-### The Two-Pass Diff Engine
-
-Standard `diff -u` tools only report that an entire 80-character line was replaced. When reviewing complex expressions or multi-variable refactors, locating the modified variable takes unnecessary effort.
-
-Cotejo uses a **two-pass diff engine**:
-
-```mermaid
-flowchart LR
-    A["File Blobs<br/><i>(Base & Modified from CAS)</i>"] --> B["Pass 1: Line Diff<br/><i>(LCS Addition / Deletion Chunks)</i>"]
-    B --> C["Pass 2: Intra-Line Slicing<br/><i>(Character & Word Sub-Deltas)</i>"]
-    C --> D["Syntax Coloring<br/><i>(Chroma AST Lexer)</i>"]
-    D --> E["Rendered Diff View<br/><i>(Highlighted Token Changes)</i>"]
-```
-
-1. **Pass 1 (Line-Level LCS):** Cotejo calculates line-level additions, deletions, and unchanged context using the Longest Common Subsequence algorithm.
-2. **Pass 2 (Intra-Line Token Slicing):** For lines identified as modified, Cotejo performs a second pass within the line boundaries. Unchanged words are displayed normally, while the specific modified tokens receive prominent color highlights (`diff_add_bg` and `diff_del_bg`).
-3. **AST Syntax Coloring:** Tokens retain their semantic syntax colors (keywords, strings, type signatures) inside the diff highlight, ensuring syntax readability is never compromised.
+Rather than highlighting an entire modified line as a single block, Cotejo runs a two-pass diff engine:
+1. **Line-Level Diff:** Identifies added, deleted, and modified line blocks using [Longest Common Subsequence (LCS)](https://en.wikipedia.org/wiki/Longest_common_subsequence).
+2. **Intra-Line Word Slicing:** Within modified lines, isolates the exact tokens or characters that changed while preserving language syntax highlighting (`alecthomas/chroma/v2`).
 
 ---
 
 ## 2. Comparing Patchsets (Inter-Diffs)
 
-A primary advantage of Niebla's server-authoritative architecture is that every shelf operation creates an immutable, content-addressed **Patchset**.
-
-In the Cotejo review header, you can use the **Diff Comparison Selector** to compare any two revisions:
+Every `niebla shelve` creates a numbered patchset. Use the **Comparing** selector at the top of any changelist to choose which two snapshots to diff:
 
 ```text
 Comparing: [ Patchset 1 ▼ ]  to  [ Patchset 2 ▼ ]
 ```
 
-### Common Comparison Modes:
-
-* **Trunk vs. Latest Patchset (Cumulative Diff):**
-  Shows the entire changelist as it currently stands against upstream trunk. Ideal for initial reviews and final pre-submit verification.
-* **Patchset $N-1$ vs. Patchset $N$ (Inter-Diff):**
-  Shows **only the delta introduced in the latest update**.
-  * If an author changes 2 lines in response to your comment across a 40-file changelist, the Inter-Diff highlights **only those 2 lines**.
-  * You do not need to re-review the 39 untouched files.
-
-```mermaid
-flowchart TD
-    subgraph Cumulative["Trunk vs. Patchset 2"]
-        direction TB
-        F1["services/greeter/main.go (140 lines added)"]
-        F2["services/greeter/main_test.go (90 lines added)"]
-        F3["services/greeter/OWNERS.toml (25 lines added)"]
-    end
-
-    subgraph InterDiff["Patchset 1 vs. Patchset 2 (Inter-Diff)"]
-        direction TB
-        F1_delta["services/greeter/main.go: +12 lines (added /healthz endpoint)"]
-        F2_delta["<i>(No changes)</i>"]
-        F3_delta["<i>(No changes)</i>"]
-    end
-```
+* **Trunk vs. Latest Patchset:** Shows the full cumulative change against the base trunk commit.
+* **Patchset $N-1$ vs. Patchset $N$ (Inter-Diff):** Shows **only** what changed between those two patchsets. If an author changed 3 lines in 1 file out of a 30-file CL to address your feedback, the inter-diff displays only those 3 lines.
 
 ---
 
-## 3. Commenting & Thread Resolution
+## 3. Draft Comments & Multi-Line Selection
 
-### Multi-Draft Commenting
-To prevent flooding authors with fragmented notification emails or chat pings while a review is in progress:
-* All comments you post initially save in an **unsubmitted draft state** (`is_draft = true`).
-* Drafts are highlighted with a distinctive dashed amber border and are visible **only to you**.
-* You can edit, reword, or delete drafts freely as you read through other files.
-* When you finish reviewing, click **"Publish Comments"** in the top navigation bar. This atomically publishes all drafts, updates the changelist Attention Set, and notifies the author in a single batch.
+### Batched Draft Comments
+To avoid sending a notification for every individual comment as you read through a changelist:
+1. New comments save as private **Drafts** (`is_draft = true`) visible only to you.
+2. You can edit or discard drafts across any number of files while reviewing.
+3. Click **Publish Comments** in the top bar to publish all drafts at once, record your review verdict, and update the Attention Set.
 
-### Multi-Line Range Drag Selection
-Rather than leaving a comment on a single line that refers vaguely to "lines 45 through 52":
-1. Hover your cursor over the line numbers on either pane.
-2. **Click and drag** from the start line to the end line.
-3. The selected range ($L_{\text{start}} \dots L_{\text{end}}$) highlights, and a draft comment box expands directly underneath.
-4. The line range is stored directly in the database (`line_number` and `end_line_number`), allowing reviewers and AI agents to anchor comments to complete functions or code blocks.
+### Multi-Line Range Comments
+To anchor a comment to a block of code rather than a single line:
+1. Click and drag across the line numbers from the start line to the end line.
+2. Write your comment (and optional ```` ```suggestion ```` block) in the form that opens below the selection.
 
-### Thread Resolution & Submit Gates
-Cotejo treats review discussions as tasks that must be resolved:
-* Every thread tracks an explicit status: **Open** or **Resolved**.
-* Authors or reviewers can click **"Mark as Resolved"** once an item has been addressed or answered.
-* **Submit Gating:** If a subtree's `OWNERS.toml` specifies `allow_unresolved_comments = false`, running `niebla submit` will **strictly fail** until every thread is marked resolved.
+### Resolving Threads
+Every comment thread tracks an **Open** or **Resolved** state. When `allow_unresolved_comments = false` is set in `OWNERS.toml` (or `allow_submit_with_unresolved_comments = false` in `config.toml`), `niebla submit` is blocked until all threads are marked resolved.
 
 ---
 
-## 4. Voting & Sign-Off Mechanics
+## 4. Review Verdicts & Governance Sidebar
 
-When publishing comments or completing a review, reviewers select a verdict:
+When publishing your review, select a verdict:
 
-| Verdict | Meaning | Impact on Changelist |
+| Verdict | Meaning | Effect on Submission |
 | :--- | :--- | :--- |
-| **`LGTM` (Looks Good To Me)** | Full approval | Satisfies `required_approvals` threshold for touched paths in `OWNERS.toml`. |
-| **`Changes Requested`** | Blocking feedback | Blocks `niebla submit`; flips Attention Set to the author. |
-| **`Commented`** | Questions / Suggestions | Posts comments without approving or blocking. |
+| **`LGTM`** | Approved | Counts toward `required_approvals` and subtree `OWNERS.toml` sign-off. |
+| **`Changes Requested`** | Blocking feedback | Blocks `niebla submit` and moves the author into the Attention Set. |
+| **`Commented`** | Non-blocking note | Publishes comments without approving or blocking. |
 
-### The Dynamic Governance Panel
-The sidebar of every changelist displays the **Governance Panel**, which evaluates the change in real-time against `OWNERS.toml`:
-
-```text
-Governance & Submit Gates:
-  ✓ Required Approvals: 1 / 1 (alice signed off)
-  ✓ Discussion Threads: 3 / 3 resolved
-  ✓ CI Check Runs: 2 / 2 passed (unit-tests, linter)
-  ✓ Trunk Rebase: Up to date (Clean fast-forward)
-
-Status: READY TO SUBMIT
-```
-
-If any condition is unmet (e.g. `bob` has not approved `services/greeter/*.go`, or a thread remains open), Cotejo clearly highlights the blocking requirement and disables the submit button.
+The **Governance Panel** in the right sidebar evaluates `OWNERS.toml` rules, unresolved thread counts, and CI check runs in real time to indicate whether the changelist is ready to submit.
 
 ---
 
-## 5. Keyboard Navigation Quick Reference
-
-Cotejo includes built-in vim-style keyboard shortcuts for rapid review without touching the mouse:
+## 5. Keyboard Shortcuts
 
 | Shortcut | Action | Description |
 | :--- | :--- | :--- |
-| `j` / `k` | Next / Previous File | Scrolls smoothly to the next or previous file in the changelist. |
-| `n` / `p` | Next / Previous Comment | Jumps directly to the next or previous discussion thread. |
-| `m` | Toggle Reviewed | Toggles the active file between `reviewed` and `not reviewed`. |
-| `r` | Reply | Opens a reply box on the currently focused comment thread. |
-| `e` | Expand All / Collapse All | Toggles all diff accordions on the page. |
-| `?` | Keyboard Help | Opens the keyboard shortcut cheat-sheet modal. |
-| `Esc` | Close | Closes open comment boxes, menus, or modals. |
-
----
-
-## Next Steps
-
-* **[AI Hints & Review Personas](/niebla/cotejo/ai-assistance/):** Learn how Cotejo's integrated AI agents generate structured code suggestions and apply one-click patches.
-* **[Deployment, Auth & Theming](/niebla/cotejo/deployment-auth/):** Configure production reverse-proxies, user groups, and custom themes.
-
+| `j` / `k` | Next / Previous File | Scroll to the next or previous file in the changelist. |
+| `n` / `p` | Next / Previous Comment | Jump to the next or previous comment thread. |
+| `m` | Toggle Reviewed | Mark or unmark the focused file as `reviewed`. |
+| `r` | Reply | Open a reply box on the focused comment thread. |
+| `e` | Expand / Collapse All | Toggle all file diff panels on the page. |
+| `?` | Shortcut Help | Open the keyboard shortcut reference modal. |
+| `Esc` | Close | Close open comment forms or modals. |

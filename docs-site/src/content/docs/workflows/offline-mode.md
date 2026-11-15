@@ -1,102 +1,51 @@
 ---
-title: "Offline & Disconnected Monorepo Workflows"
-description: Complete guide to working on laptop workstations during flights, remote travel, or network outages without active connectivity to niebla-server.
+title: Offline Development
+description: How to warm the local CAS cache and work on a Niebla monorepo without network connectivity.
 sidebar:
-  order: 7
-  label: Offline Monorepo Development
+  order: 6
+  label: Offline Development
 ---
 
-Because Niebla virtual workspaces use lazy on-demand streaming over HTTP/2 gRPC to materialize file blobs as they are opened, developers frequently ask: **"Can I work on an airplane without internet access?"**
-
-The answer is **yes**. With appropriate local cache warming and understanding of Niebla's local Copy-on-Write (CoW) delta model, you can edit, build, test, diff, and inspect monorepo projects completely offline.
+Because Niebla caches file blobs in `~/.cache/niebla/blobs` and tracks edits locally in your workspace scratch directory, you can edit, build, test, and inspect diffs completely offline.
 
 ---
 
-## 1. Offline Capabilities Matrix
+## 1. What Works Offline
 
-| Operation | Offline Support | Mechanism & Notes |
+| Operation | Offline Support | Notes |
 | :--- | :---: | :--- |
-| **Reading Cached Files** | ✅ **Full** | Blobs already present in `~/.cache/niebla/blobs` are served from local NVMe storage at native disk speed. |
-| **Reading Uncached Files** | ⚠️ **Requires Cache** | Fails with `EIO` unless pre-warmed into local CAS prior to disconnecting. |
-| **Modifying Existing Files** | ✅ **Full** | Writes are directed to your local scratch directory (`~/.niebla/workspaces/<name>/scratch/`). |
-| **Adding / Deleting Files** | ✅ **Full** | New files and `.wh.*` deletion whiteouts are stored entirely in local scratch. |
-| **Building & Running Tests** | ✅ **Full** | Compilers (`go build`, `cargo build`, `bazel`) and local test suites run normally against scratch and cached files. |
-| **`niebla status`** | ✅ **Full** | Evaluates local scratch files against the workspace's base Merkle tree without server queries. |
-| **`niebla diff`** | ✅ **Full** | Computes intra-line word diffs using locally cached base blobs. |
-| **`niebla workspace create`** | ❌ **Requires Server** | Allocating new workspace IDs and root trees requires dialing `niebla-server`. |
-| **`niebla sync`** | ❌ **Requires Server** | Checking upstream parent/trunk movement requires gRPC connectivity. |
-| **`niebla shelve`** | ❌ **Requires Server** | Uploading new blobs and recording patchsets requires `niebla-server`. |
+| **Read cached files** | ✅ Yes | Served directly from `~/.cache/niebla/blobs`. |
+| **Read uncached files ([FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace))** | ⚠️ Needs cache | Returns `EIO` unless pre-warmed into local [CAS](https://en.wikipedia.org/wiki/Content-addressable_storage) before disconnecting. |
+| **Edit, add, or delete files** | ✅ Yes | Stored locally in `~/.niebla/workspaces/<name>/scratch/`. |
+| **Compile & run local tests** | ✅ Yes | Runs against scratch files and cached CAS blobs. |
+| **`niebla status` & `niebla diff`** | ✅ Yes | Compares local scratch edits against cached base blobs. |
+| **`workspace create` / `sync` / `shelve`** | ❌ Needs server | Requires [gRPC](https://en.wikipedia.org/wiki/GRPC) connection to `niebla-server`. |
 
 ---
 
-## 2. Pre-Flight Preparation: Warming the Local CAS Cache
+## 2. Warming the Cache Before Disconnecting
 
-Before boarding a flight or disconnecting from your corporate network, warm your local CAS blob cache for the subtrees or services you plan to work on:
+* **In Direct Materialization Mode (`--no-fuse`):** All files in your workspace are already materialized on disk—no extra steps are needed.
+* **In FUSE Mode:** Before going offline, run your build/test suite or read the directories you plan to work on so `nieblafs` populates `~/.cache/niebla/blobs`:
 
 ```bash
-# 1. In Direct Materialization mode (--no-fuse):
-# Files are already 100% materialized on disk. Zero cache warming required!
-
-# 2. In FUSE Virtual Mode:
-# Recursively touch or build your target packages to populate local CAS:
 cd ~/niebla/workspaces/feature-auth
 
-# Eagerly stream all files in your service subtree:
+# Stream all files in target subdirectories into the local CAS cache
 find services/auth pkg/crypto -type f -exec cat {} + > /dev/null
 
-# Or trigger your standard build/test suite while still online:
+# Or run your test suite to cache all transitive dependencies
 go test ./services/auth/...
 ```
 
-Once a blob has been streamed into `~/.cache/niebla/blobs/`, it is immutable and retained on disk indefinitely until explicitly pruned via `niebla cas gc`.
+Cached blobs remain in `~/.cache/niebla/blobs` until explicitly pruned with `niebla cas gc`.
 
 ---
 
-## 3. Developing While Disconnected
+## 3. Working Offline & Reconnecting
 
-While offline, your day-to-day coding loop functions identically to standard local Git workflows:
+While offline, edit files and check your changes normally with `niebla status` and `niebla diff`.
 
-```bash
-# 1. Edit code in your IDE or editor
-$EDITOR services/auth/login.go
-
-# 2. Add new test files
-touch services/auth/passkey_test.go
-
-# 3. Inspect working copy status (runs 100% locally)
-niebla status
-# Output:
-#   Workspace: feature-auth
-#   Base CL  : 104
-#   Clean    : false
-#   Changes  :
-#     [M] services/auth/login.go
-#     [A] services/auth/passkey_test.go
-
-# 4. Review unified diffs locally
-niebla diff
-```
-
----
-
-## 4. Reconnecting & Synchronizing Upstream
-
-When you regain internet access:
-
-1. **Verify Server Reachability**:
-   ```bash
-   niebla config path
-   ```
-2. **Synchronize Base Tree (`niebla sync`)**:
-   Pull down any changes that landed on trunk while you were disconnected:
-   ```bash
-   niebla sync
-   ```
-   - If disjoint changes occurred, `niebla` fast-forwards your base tree cleanly.
-   - If overlapping file changes occurred, `niebla` injects standard conflict markers (`<<<<<<<`) into your scratch files for interactive editing.
-3. **Shelve Your Work for Review (`niebla shelve`)**:
-   Once tests pass, upload your offline modifications to central CAS and create a changelist:
-   ```bash
-   niebla shelve -m "feat(auth): add passkey authentication support"
-   ```
-
+Once you regain connectivity:
+1. Run `niebla sync` to pull any upstream trunk commits that landed while you were offline (and resolve any conflicts if needed).
+2. Run `niebla shelve -m "..."` to upload your modified blobs and publish a changelist.

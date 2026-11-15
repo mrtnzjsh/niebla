@@ -1,118 +1,65 @@
 ---
 title: "Direct Materialization Mode (--no-fuse)"
-description: Deep dive into Niebla's direct physical materialization mode for macOS, Docker/Podman CI runners, and environments without /dev/fuse.
+description: Running Niebla workspaces on macOS, Docker/Podman containers, and CI runners without /dev/fuse.
 sidebar:
   order: 3
   label: Direct Materialization (--no-fuse)
 ---
 
-While the virtual FUSE filesystem (`nieblafs`) is the default on Linux developer workstations, certain environments cannot or should not load kernel extensions or FUSE drivers.
-
-For these environments, Niebla provides **Direct Materialization Mode (`--no-fuse`)**:
+While the [FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace) virtual filesystem (`nieblafs`) is the default on Linux workstations, some environments do not expose `/dev/fuse`. For these environments, Niebla provides **Direct Materialization Mode (`--no-fuse`)**:
 
 ```bash
-niebla workspace create ci-build --no-fuse
+niebla workspace create my-feature --no-fuse
 ```
 
-This mode materializes repository source trees directly into standard physical directories on local disk while maintaining full cryptographic parity with the central Merkle tree.
+To make `--no-fuse` the default for all workspaces in your shell, set `export NIEBLA_NO_FUSE=true` in `~/.zshrc` or `~/.bashrc`.
 
 ---
 
-## When to Use Direct Materialization Mode
+## 1. When to Use `--no-fuse`
 
-| Environment | Why `--no-fuse` Is Ideal |
+| Environment | Why `--no-fuse` Fits |
 | :--- | :--- |
-| **macOS Workstations** | Apple requires third-party kernel extension approvals and system reboots for `macFUSE`, while `FUSE-T` relies on external NFS translation bridges. Direct materialization runs natively on macOS Darwin (`aarch64` and `x86_64`) with **zero system extensions**. |
-| **Unprivileged CI/CD Containers** | Standard Docker, Podman, Kubernetes, and GitHub Actions runners operate without `--privileged` or `/dev/fuse` character device passthrough. Direct materialization works out of the box in any unprivileged container. |
-| **High-Throughput Batch Compilers** | Workloads with intense parallel random access where eliminating userspace-to-kernel context switching yields maximum compilation throughput. |
+| **macOS Workstations** | Runs natively on macOS (`arm64` and `amd64`) without installing `macFUSE` kernel extensions or rebooting to lower system security settings. |
+| **Unprivileged CI Containers** | Standard Docker, Podman, and Kubernetes pods run without `--privileged` or `--device /dev/fuse`. |
+| **Heavy Full-Tree Builds** | Workloads that read nearly every file in the repository avoid userspace-to-kernel FUSE context switches. |
 
 ---
 
-## Architecture & How It Works Under the Hood
+## 2. How Direct Materialization Works
 
 ```mermaid
-flowchart TD
-    subgraph NoFuse["Direct Materialization Mode<br/><i>(--no-fuse)</i>"]
-        Tree["Base Merkle Tree (CL 104)"]
-        CAS_DIR["Local CAS Storage (~/.cache/niebla/blobs)"]
-        WORK_DIR["Workspace Directory (~/niebla/workspaces/ci-build/)"]
-        Worker["Parallel Worker Pool (pkg/materialize)"]
-
-        Tree -->|"Resolve Tree Manifests"| Worker
-        CAS_DIR -.->|"Zero-Copy Hardlinks (os.Link)"| WORK_DIR
-        Worker -->|"Write physical files"| WORK_DIR
-    end
+flowchart LR
+    Tree["Base Merkle Tree"] -->|"Parallel Worker Pool"| Worker["pkg/materialize"]
+    CAS["Local CAS Cache<br/>(~/.cache/niebla/blobs)"] -.->|"Zero-Copy Hardlinks (os.Link)"| WorkDir["Workspace Directory"]
+    Worker -->|"Stream missing blobs"| WorkDir
 ```
 
-### 1. Parallel Tree Traversal
-When `workspace create --no-fuse` is executed, the CLI resolves the base changelist's root Merkle tree and invokes `pkg/materialize.MaterializeTree`. A concurrent worker pool resolves tree manifests and blob digests in parallel.
-
-### 2. Zero-Copy Hardlink Optimization (`os.Link`)
-* When the local CAS cache (`~/.cache/niebla/blobs`) resides on the **same filesystem partition** as the workspace mount directory, Niebla hardlinks the files directly into the workspace using `os.Link`.
-* **Zero Storage Overhead:** Materializing a 100,000-file repository takes **milliseconds** and consumes **zero additional disk blocks**!
-* Both the CAS cache and the workspace directory point to the exact same physical disk inodes.
-* **Cache Poisoning Protection:** To prevent in-place edits from accidentally mutating the shared CAS cache, Niebla automatically sets hardlinked files to **read-only permissions (`0444`)**. Editors break the hardlink upon saving (copy-on-write decoupling).
-
-### 3. Synchronization Safety & Ghost File Pruning
-In direct materialization mode, `niebla sync` provides strict data protection:
-* **Dirty Worktree Guard:** If you have uncommitted local modifications, `niebla sync` halts with an error, preventing accidental loss of work:
-  ```text
-  ❌ workspace "feature-auth" has 3 uncommitted modification(s).
-     Run 'niebla shelve' to save your work, or 'niebla sync --force' to overwrite.
-  ```
-* **Stale Ghost File Pruning:** When files are deleted upstream on trunk, `niebla sync` automatically detects and removes them from your workspace disk, ensuring no orphaned ghost files remain.
-
-### 4. Fallback Streaming
-If CAS is located on a different disk partition or files are not yet cached locally, `MaterializeTree` streams chunks over gRPC and writes standard physical files to disk.
-
-### 5. No Background Daemon
-In `--no-fuse` mode:
-* `DaemonPID` is `0`.
-* `SocketPath` is empty (`""`).
-* The workspace is a standard physical directory on disk, completely free from daemon lifecycles.
+1. **Parallel Tree Resolution:** `pkg/materialize.MaterializeTree` walks the base changelist's [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree) using a concurrent worker pool.
+2. **Zero-Copy [Hardlinks](https://en.wikipedia.org/wiki/Hard_link) (`os.Link`):** When `~/.cache/niebla/blobs` is on the same filesystem partition as the workspace directory, Niebla hardlinks cached blobs directly into the workspace.
+3. **Read-Only Cache Protection (`0444`):** Hardlinked files are marked read-only (`0444`) so editors break the hardlink on save instead of mutating the shared [CAS](https://en.wikipedia.org/wiki/Content-addressable_storage) cache in place.
+4. **No Background Daemon:** The workspace is a standard directory on disk (`PID: 0`, no `nieblafs.sock` socket).
 
 ---
 
-## Status, Diffing & Shelving in `--no-fuse` Mode
+## 3. Syncing & Status in `--no-fuse` Mode
 
-All standard `niebla` commands work seamlessly in `--no-fuse` mode:
+All standard commands (`niebla status`, `niebla diff`, `niebla shelve`, `niebla sync`, `niebla submit`) work identically in `--no-fuse` mode:
 
-### Change Inspection (`niebla status`)
-In `--no-fuse` mode, `niebla status` traverses the physical workspace directory:
-* Compares file modification timestamps (`mtime`) and file sizes against the base Merkle tree.
-* Recomputes SHA-256 digests only for files with changed sizes or timestamps.
-* Deleted files are identified by their physical absence from disk (without needing whiteout markers).
-* Respects `.nieblaignore` rules, skipping ignored directories via `filepath.SkipDir`.
-
-### Unified Diffs (`niebla diff`)
-Compares modified physical files against the base CL blobs fetched from local CAS or `niebla-server`.
-
-### Shelving (`niebla shelve`)
-1. Reads modified physical files from the workspace directory.
-2. Streams modified blobs to central CAS on `niebla-server`.
-3. Constructs compact binary Merkle tree manifests (`pkg/tree`), computing recursive cryptographic hashes up to the root.
-4. Calls `ShelveCL`, creating Patchset $N$ identically to FUSE mode.
+* **Fast Status Checks:** `niebla status` compares file sizes and modification timestamps (`mtime`) against the base Merkle tree, computing [SHA-256](https://en.wikipedia.org/wiki/SHA-2) hashes only for files whose metadata changed.
+* **Dirty Worktree Guard on Sync:** Running `niebla sync` with unshelved local edits stops with a safety warning so your changes are never overwritten accidentally (use `niebla shelve` first, or `niebla sync --force` to discard local changes).
+* **Deleted File Cleanup:** When upstream commits delete files, `niebla sync` removes those files from your local workspace directory automatically.
 
 ---
 
-## Comparison Matrix: FUSE Mode vs. Direct Materialization
+## 4. Comparison: FUSE Mode vs. Direct Materialization
 
-| Feature / Metric | Virtual FUSE Mode (Default) | Direct Materialization Mode (`--no-fuse`) |
+| Feature | Virtual FUSE Mode (Default) | Direct Materialization (`--no-fuse`) |
 | :--- | :--- | :--- |
-| **Creation Latency** | **< 100 ms** (instant VFS mount) | 100 ms (with CAS hardlinks) to seconds (full download) |
-| **Initial Disk Usage** | **< 100 KB** (metadata & scratch only) | Full repository working tree size (or 0 extra bytes with hardlinks) |
-| **Blob Fetching** | **Lazy on-demand** (streamed on `read()`) | **Eager** (materialized upon workspace creation) |
-| **Kernel Requirements** | Linux kernel `/dev/fuse` support | **None** (pure userspace POSIX filesystem calls) |
-| **Container Compatibility** | Requires `--device /dev/fuse --cap-add SYS_ADMIN` | **Universal** (runs in any unprivileged Docker/Podman container) |
-| **macOS Support** | Requires macFUSE or FUSE-T | **Native out-of-the-box** on macOS Darwin (`aarch64` & `x86_64`) |
-| **Sync Latency (`niebla sync`)** | Sub-millisecond (in-memory cache re-anchor) | Re-materializes updated blobs on disk |
-| **Whiteout Deletions** | OverlayFS `.wh.<filename>` markers | Standard file deletions (`os.Remove`) |
-| **Background Daemon** | Runs supervised `nieblafs` daemon | **None** (`PID: 0`) |
-
----
-
-## Next Steps
-
-* **[IDE Setup & Configuration](/niebla/workflows/ide-setup/):** Configuring VS Code, JetBrains IDEs, Neovim, and Emacs for Niebla workspaces.
-* **[Virtual Workspaces & Storage Economics](/niebla/workflows/workspaces/):** Deep dive into FUSE overlays, CAS sharding, and disk economics.
-
+| **Creation Time** | **< 100 ms** | ~100 ms (with warm CAS hardlinks) to seconds (cold cache) |
+| **Initial Disk Space** | **< 100 KB** | 0 extra blocks when hardlinked to local CAS; full tree size otherwise |
+| **Blob Fetching** | Lazy (streamed on `read()`) | Eager (materialized on `workspace create` / `sync`) |
+| **Kernel Requirements** | Linux `/dev/fuse` (`fuse3`) | None (standard POSIX filesystem calls) |
+| **Container Support** | Requires `--device /dev/fuse` | Runs in any unprivileged container |
+| **macOS Support** | Requires third-party FUSE driver | **Native out of the box** |
+| **Background Daemon** | Supervised `nieblafs` process | None (`PID: 0`) |

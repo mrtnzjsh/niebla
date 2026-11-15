@@ -1,212 +1,75 @@
 ---
-title: "Deployment, Auth & Theming"
-description: Production deployment, reverse proxy authentication with Tailscale and NGINX, real-time Server-Sent Events (SSE), and theme customization in Cotejo.
+title: Authentication & Theming
+description: Configure identity resolution, real-time Server-Sent Events (SSE), and color themes for the Cotejo web review UI.
 sidebar:
   order: 4
-  label: Deployment, Auth & Theming
+  label: Authentication & Theming
 ---
 
-Cotejo is engineered to run seamlessly across single-developer laptops, air-gapped internal subnets, and large enterprise infrastructure behind identity-aware reverse proxies.
+This guide covers how to configure user authentication, real-time browser updates, and visual themes for **Cotejo**.
 
-This guide details daemon execution, production authentication modes, real-time event streaming, and custom UI theming.
-
----
-
-## 1. Running the Cotejo Service
-
-Cotejo can be started directly via the CLI or supervised via systemd.
-
-### Direct Execution
-
-```bash
-# Start Cotejo connected to a local or remote niebla-server
-cotejo --config ~/.config/niebla/config.toml --port 8080 --server 127.0.0.1:50051
-```
-
-### Production Systemd Service (`/etc/systemd/system/cotejo.service`)
-
-```ini
-[Unit]
-Description=Cotejo Code Review Web Service
-After=network.target niebla-server.service
-Requires=niebla-server.service
-
-[Service]
-Type=simple
-User=niebla
-Group=niebla
-ExecStart=/usr/local/bin/cotejo --config /etc/niebla/config.toml
-Restart=always
-RestartSec=5s
-LimitNOFILE=65536
-
-# Sandboxing & Security Hardening
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/cache/niebla /var/log/niebla
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-```
+For production systemd service units and NGINX/cloud load balancer setups, see [Production & Cloud Deployments](/niebla/recipes/cloud-deployments/) and [Security & Authentication](/niebla/reference/security-auth/).
 
 ---
 
-## 2. Authentication Models & Identity Resolution
+## 1. Authentication Modes (`[critique.auth]`)
 
-Identity in Cotejo is configured under the `[critique.auth]` section in `~/.config/niebla/config.toml`:
+Cotejo resolves the active reviewer identity according to `[critique.auth]` in `~/.config/niebla/config.toml`:
 
-```toml
-[critique.auth]
-mode = "headers" # "developer", "headers", or "oidc"
-```
+| Mode | Use Case | How Identity Is Resolved |
+| :--- | :--- | :--- |
+| `local` / `developer` | Single-developer workstations | Uses `default_user` (defaults to `$USER`). |
+| `headers` | Reverse proxies (NGINX, Caddy, Cloudflare Access, Cloud IAP) | Reads `header_name` (e.g., `X-Forwarded-User`) from requests arriving from `trusted_proxies`. |
+| `tailscale` | Private Tailscale mesh networks | Queries `/run/tailscale/tailscaled.sock` (WhoIs API) to verify the peer's Tailscale login. See [Tailscale Private Mesh](/niebla/recipes/tailscale/). |
+| `oidc` | Direct OAuth2 / [OIDC](https://en.wikipedia.org/wiki/OpenID_Connect) federation | Validates `Authorization: Bearer <jwt>` ([JWT](https://en.wikipedia.org/wiki/JSON_Web_Token)) against your OIDC provider's JWKS endpoint. |
 
-### Mode 1: Developer Mode (`mode = "developer"` or `mode = "local"`)
-Designed for local workstations and single-tenant setups:
-* Identity defaults dynamically to the active operating system user (`$USER`).
-* You can configure an explicit fallback user:
-  ```toml
-  [critique.auth]
-  mode = "developer"
-  default_user = "alice"
-  # Enable ?reviewer=bob query parameter testing in local development
-  allow_query_override = true
-  ```
-
-### Mode 2: Reverse Proxy Header Auth (`mode = "headers"`)
-The recommended deployment model for enterprise infrastructure using **Tailscale**, **Cloudflare Access**, **Traefik**, **Caddy**, or **NGINX**.
-
-The reverse proxy handles TLS termination and user authentication (SAML, Okta, Google Workspace), passing the verified username to Cotejo in an HTTP header:
-
+### Example: Reverse Proxy Header Auth
 ```toml
 [critique.auth]
 mode = "headers"
-header_name = "X-Forwarded-User" # or "Tailscale-User-Login"
+header_name = "X-Forwarded-User"
 default_user = "nobody"
-
-# Strictly restrict header trust to trusted reverse proxy IPs / CIDRs
 trusted_proxies = ["127.0.0.1/32", "10.0.0.0/8"]
 allow_query_override = false
 ```
 
-#### Example NGINX Reverse Proxy Configuration
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name cotejo.internal.mycompany.com;
-
-    ssl_certificate     /etc/ssl/certs/cotejo.crt;
-    ssl_certificate_key /etc/ssl/private/cotejo.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Forward authenticated user from internal SSO / mTLS
-        proxy_set_header X-Forwarded-User $remote_user;
-
-        # Server-Sent Events (SSE) streaming requirements
-        proxy_set_header Connection '';
-        proxy_http_version 1.1;
-        chunked_transfer_encoding off;
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 86400s;
-    }
-}
-```
+:::caution[Reverse Proxy SSE Buffering]
+Cotejo pushes real-time review updates over [Server-Sent Events (SSE)](https://en.wikipedia.org/wiki/Server-sent_events) (`GET /events`). When placing NGINX in front of Cotejo, disable proxy buffering (`proxy_buffering off; proxy_cache off;`) so SSE frames stream immediately to connected browsers.
+:::
 
 ---
 
-## 3. Real-Time Reactivity via Server-Sent Events (SSE)
+## 2. Visual Themes & Syntax Highlighting (`[critique.theme]`)
 
-Unlike legacy code review tools that poll endpoints or require complex WebSocket handshakes, Cotejo uses **Server-Sent Events (SSE)** at `/events`.
+Cotejo ships with 8 built-in color presets and supports custom hex/RGBA palettes in `~/.config/niebla/config.toml` (or `~/.config/niebla/theme.toml`).
 
-```mermaid
-flowchart LR
-    Browser1["Alice's Browser"] -->|"1. Shelve Patchset 2"| Cotejo["Cotejo HTTP Server"]
-    Cotejo -->|"2. Broadcast SSE Frame"| Dispatcher["SSE Event Dispatcher"]
-    Dispatcher -->|"3. event: patchset_created"| Browser1
-    Dispatcher -->|"4. event: patchset_created"| Browser2["Bob's Browser"]
-    Dispatcher -->|"5. event: comment_added"| Browser3["Carol's Browser"]
-```
-
-### Event Stream Architecture
-* When a reviewer posts a draft, publishes comments, or applies an AI suggestion, Cotejo emits lightweight event frames:
-  ```text
-  event: comment_published
-  data: {"cl_id": 101, "patchset": 2, "author": "alice"}
-  ```
-* Connected browsers catch the event and use HTMX target swaps to update the review UI **instantly without a full page refresh**.
-
----
-
-## 4. Visual Themes & Syntax Highlighting
-
-Cotejo includes built-in themes and customizable palettes configured in `~/.config/niebla/config.toml` (or `~/.config/niebla/theme.toml`):
-
-### Built-in Presets
-
+### Using a Built-In Preset
 ```toml
 [critique.theme]
-# Supported presets: "catppuccin-mocha", "catppuccin-latte", "catppuccin-frappe",
-#                    "catppuccin-macchiato", "tokyo-night", "dracula", "nord", "github-dark", "custom"
+# Presets: "catppuccin-mocha", "catppuccin-macchiato", "catppuccin-frappe",
+#          "catppuccin-latte", "tokyo-night", "dracula", "nord", "github-dark", "custom"
 preset = "catppuccin-mocha"
-
-# Chroma syntax highlighting style matching your preset
 syntax_style = "catppuccin-mocha"
 ```
 
-### Custom Palette Overrides (Paleta Quisqueyana)
-
-To customize UI colors or match your team's design system, specify custom color tokens:
-
+### Custom Color Overrides
 ```toml
 [critique.theme]
 preset = "custom"
 syntax_style = "tokyonight-night"
 
 [critique.theme.colors]
-bg_canvas       = "#0f172a"                 # Slate 900
-bg_surface      = "#1e293b"                 # Slate 800
-bg_card         = "#334155"                 # Slate 700
-border          = "#475569"                 # Slate 600
-text_primary    = "#f8fafc"                 # Slate 50
-text_muted      = "#94a3b8"                 # Slate 400
-accent          = "#2dd4bf"                 # Larimar Blue (#2DD4BF)
-diff_add_bg     = "rgba(45, 212, 191, 0.18)" # Larimar Green
+bg_canvas       = "#0f172a"
+bg_surface      = "#1e293b"
+bg_card         = "#334155"
+border          = "#475569"
+text_primary    = "#f8fafc"
+text_muted      = "#94a3b8"
+accent          = "#2dd4bf"
+diff_add_bg     = "rgba(45, 212, 191, 0.18)"
 diff_add_border = "#2dd4bf"
-diff_del_bg     = "rgba(244, 63, 94, 0.18)"  # Rose Red
+diff_del_bg     = "rgba(244, 63, 94, 0.18)"
 diff_del_border = "#f43f5e"
 ```
 
-### Fast-Fail Validation
-
-After modifying your configuration, run the validation tool:
-
-```bash
-niebla config validate
-```
-
-**Output:**
-```text
-✓ Validating ~/.config/niebla/config.toml:
-  - Port allocations: OK (Server: 50051, Web: 8080, Proxy: 7331)
-  - Theme preset: 'catppuccin-mocha' (Valid Chroma syntax style)
-  - Reverse proxy header auth: OK (Trusted proxies configured)
-Configuration is valid!
-```
-
----
-
-## Next Steps
-
-* **[Security & Authentication Architecture](/niebla/reference/security-auth/):** Complete guide to the 5 trust zones, gRPC bearer tokens, TLS 1.3, and Tailscale zero-trust runbooks.
-* **[Cotejo Overview & Philosophy](/niebla/cotejo/overview/):** Review the Google Critique model, attention sets, and segregated inboxes.
-* **[The Code Review Lifecycle](/niebla/cotejo/review-workflows/):** Explore intra-line diffing, inter-diff comparisons, and review voting.
-* **[AI Hints & Review Personas](/niebla/cotejo/ai-assistance/):** Author automated review agents and one-click code suggestions.
-
+Run `niebla config validate` after editing to verify that all color tokens and Chroma syntax style names are valid.

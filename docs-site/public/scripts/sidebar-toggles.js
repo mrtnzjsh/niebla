@@ -194,12 +194,26 @@
     });
   }
 
+  function wrapTables() {
+    const tables = document.querySelectorAll('.sl-markdown-content > table');
+    tables.forEach((table) => {
+      if (table.parentElement && table.parentElement.classList.contains('niebla-table-wrap')) {
+        return;
+      }
+      const wrapper = document.createElement('div');
+      wrapper.className = 'niebla-table-wrap';
+      table.parentNode.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    });
+  }
+
   function init() {
     injectNavToggle();
     injectTocToggle();
     injectEdgeTabs();
     setupKeyboardShortcuts();
     updateButtonStates();
+    wrapTables();
   }
 
   if (document.readyState === 'loading') {

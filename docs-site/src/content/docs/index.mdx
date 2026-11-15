@@ -1,17 +1,17 @@
 ---
 title: Niebla Documentation
-description: Server-authoritative, virtualized monorepo toolchain inspired by Google Piper, CitC, and Critique.
+description: Open-source, server-authoritative monorepo version control and code review platform.
 template: splash
 hero:
-  tagline: High-performance monorepo version control and code review toolchain built on content-addressable storage, FUSE virtual workspaces, and AI review agents.
+  tagline: Fast monorepo version control and code review built on content-addressable storage, virtual workspaces, and linear patchsets. 100% open source with zero telemetry.
   image:
     file: ../../assets/logo.svg
   actions:
-    - text: Quickstart Guide
+    - text: Quickstart Walkthrough
       link: /niebla/getting-started/quickstart/
       icon: right-arrow
       variant: primary
-    - text: Core Architecture
+    - text: Overview & Philosophy
       link: /niebla/getting-started/philosophy/
       icon: external
       variant: secondary
@@ -19,25 +19,25 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Key Features
+## Key Capabilities
 
 <CardGrid>
   <Card title="Instant Virtual Workspaces" icon="rocket">
-    Mount massive monorepo checkouts in milliseconds using **NieblaFS**. File bytes are streamed lazily on-demand over gRPC and cached locally.
+    Create workspaces in milliseconds. **NieblaFS** mounts the repository tree virtually, streaming file contents on demand and caching blobs locally.
   </Card>
   <Card title="Content-Addressable Storage" icon="document">
-    Unified SHA-256 CAS engine. Eliminates Git packfile bloat and makes Git-LFS obsolete by design.
+    Source files and multi-gigabyte binaries share a single [SHA-256](https://en.wikipedia.org/wiki/SHA-2) [content-addressable storage](https://en.wikipedia.org/wiki/Content-addressable_storage) engine—eliminating Git packfile bloat and `git-lfs`.
   </Card>
   <Card title="Cotejo Code Review" icon="laptop">
-    A Google Critique-inspired web review interface with intra-line diffing, threaded comments, approval gating, and real-time SSE DOM updates.
+    Web code review built around immutable patchsets, intra-line word diffs, attention sets, and real-time [Server-Sent Events (SSE)](https://en.wikipedia.org/wiki/Server-sent_events).
   </Card>
-  <Card title="Autonomous AI Review Agents" icon="puzzle">
-    Built-in agents (`review-agent`, `ai-hint-agent`) with Adaptive Context Aperture offering one-click patchset suggestions.
+  <Card title="Opt-In AI Review & Hints" icon="puzzle">
+    Run automated review scripts, hermetic linters, or AI personas (via local Ollama/vLLM or your own API keys) with one-click patch application.
   </Card>
-  <Card title="Monotonic Trunk History" icon="random">
-    Strict trunk revision monotonicity with automated cascading rebases for stacked changelists.
+  <Card title="Linear Trunk History" icon="random">
+    Commits serialize into a monotonic [trunk](https://en.wikipedia.org/wiki/Trunk-based_development) sequence (`r1, r2, r3...`) with automatic cloud rebasing for stacked changelists.
   </Card>
-  <Card title="Nix & NixOS Native" icon="setting">
-    First-class NixOS service modules (`services.niebla`) and Home Manager developer modules (`programs.niebla`).
+  <Card title="100% Open Source & Private" icon="setting">
+    MIT-licensed with nothing proprietary or obfuscated. Niebla never phones home or collects external metrics—all data stays on your hardware.
   </Card>
 </CardGrid>

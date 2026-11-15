@@ -1,56 +1,39 @@
 ---
-title: "CloudEvents & Webhook Payloads Reference"
-description: Complete specification of Niebla's CloudEvents v1.0 event bus, webhook dispatching architecture, JSON payload schemas, and HMAC-SHA256 signature verification code samples.
+title: "CloudEvents & Webhooks"
+description: Specification of Niebla's CloudEvents v1.0 event bus, webhook configuration, JSON payload schemas, and HMAC-SHA256 signature verification.
 sidebar:
-  order: 5
-  label: CloudEvents & Webhooks Catalog
+  order: 6
 ---
 
-Niebla features an asynchronous enterprise event emitter ([`pkg/events`](https://github.com/mrtnzjsh/niebla/tree/main/niebla/pkg/events)) that publishes standardized events whenever changelists are created, shelved, submitted, rebased, or reviewed.
+When enabled in `config.toml`, `niebla-server` publishes asynchronous [CNCF CloudEvents v1.0](https://cloudevents.io/) notifications whenever changelists are created, shelved, rebased, submitted, or verified by CI check runs.
 
-All emitted events conform to the [CNCF CloudEvents v1.0 specification](https://cloudevents.io/), ensuring seamless interoperability with Apache Kafka, AWS EventBridge, GCP Eventarc, Slack bots, and internal CI/CD dispatchers.
+Events are strictly opt-in (`[events] enabled = false` by default) and are only delivered to endpoints or local scripts you configure.
 
 ---
 
-## 1. Webhook Dispatch Architecture
+## 1. Webhook Configuration
 
-```mermaid
-flowchart LR
-    subgraph Server["Niebla Server Event Pipeline"]
-        Event["Event Emitted<br/>(niebla.cl.submitted)"]
-        Sign["Sign Payload<br/>HMAC-SHA256(Secret)"]
-        Dispatch["HTTP POST Dispatcher<br/>(Retry Backoff: 3x)"]
-    end
-
-    subgraph Subscribers["External Subscribers"]
-        CI["CI Orchestrator"]
-        Slack["Slack / Discord Bot"]
-        Audit["Audit Log Ingestion"]
-    end
-
-    Event --> Sign
-    Sign --> Dispatch
-    Dispatch --> CI
-    Dispatch --> Slack
-    Dispatch --> Audit
-```
-
-Webhooks are configured in `~/.config/niebla/config.toml`:
+Configure `[events]` in `~/.config/niebla/config.toml` (or `events.toml`):
 
 ```toml
-[events.webhook]
+[events]
 enabled = true
-url = "https://ci.internal/api/v1/niebla-webhook"
-secret = "$ENV{WEBHOOK_SIGNING_SECRET}"
-timeout_ms = 5000
+sink = "webhook" # "webhook", "exec", "log", or "noop"
+filter = ["niebla.cl.*", "niebla.check_run.*"]
+buffer_size = 256
+
+[events.webhook]
+endpoint = "https://ci.internal/api/v1/niebla-webhook"
+secret_token_env = "NIEBLA_EVENT_SECRET"
+timeout_ms = 3000
 max_retries = 3
 ```
 
 ---
 
-## 2. CloudEvents Envelope Structure
+## 2. CloudEvents Envelope & HTTP Headers
 
-Every webhook POST request delivers a JSON payload with standard CloudEvents v1.0 attributes:
+Every webhook `POST` request sends a CloudEvents v1.0 JSON envelope:
 
 ```json
 {
@@ -65,17 +48,19 @@ Every webhook POST request delivers a JSON payload with standard CloudEvents v1.
 }
 ```
 
-### Request Headers
-- `Content-Type`: `application/json`
-- `X-Niebla-Event`: The CloudEvents `type` (e.g. `niebla.cl.submitted`)
-- `X-Niebla-Signature`: `sha256=<hex_hmac>` calculated over the raw request body using your configured `secret`.
+| HTTP Header | Value Format | Description |
+| :--- | :--- | :--- |
+| `Content-Type` | `application/json` | JSON payload encoding. |
+| `X-Niebla-Event` | `niebla.cl.submitted` | CloudEvents `type` string for fast routing. |
+| `X-Niebla-Signature` | `sha256=<hex_hmac>` | [HMAC-SHA256](https://en.wikipedia.org/wiki/HMAC) signature computed over the raw request body using `secret_token_env`. |
 
 ---
 
 ## 3. Event Catalog & Payload Schemas
 
-### 1. `niebla.cl.created`
-Emitted when a new changelist is first shelved.
+### `niebla.cl.created`
+
+Emitted when a new changelist (`Patchset 1`) is first shelved.
 
 ```json
 {
@@ -95,8 +80,9 @@ Emitted when a new changelist is first shelved.
 }
 ```
 
-### 2. `niebla.cl.shelved`
-Emitted when a new revision/patchset ($N+1$) is uploaded to an existing changelist.
+### `niebla.cl.shelved`
+
+Emitted when an updated patchset ($N+1$) is uploaded to an existing changelist.
 
 ```json
 {
@@ -114,8 +100,9 @@ Emitted when a new revision/patchset ($N+1$) is uploaded to an existing changeli
 }
 ```
 
-### 3. `niebla.cl.submitted`
-Emitted when a changelist is committed to trunk with a monotonic `trunk_revision`.
+### `niebla.cl.submitted`
+
+Emitted when a changelist is committed to the linear trunk.
 
 ```json
 {
@@ -132,8 +119,9 @@ Emitted when a changelist is committed to trunk with a monotonic `trunk_revision
 }
 ```
 
-### 4. `niebla.cl.rebased`
-Emitted when an active child changelist is automatically re-parented onto an updated parent commit or trunk revision.
+### `niebla.cl.rebased`
+
+Emitted when a stacked child changelist is automatically re-parented onto an updated parent CL or trunk revision.
 
 ```json
 {
@@ -150,8 +138,9 @@ Emitted when an active child changelist is automatically re-parented onto an upd
 }
 ```
 
-### 5. `niebla.check_run.completed`
-Emitted when an automated test runner or review agent completes execution.
+### `niebla.check_run.completed`
+
+Emitted when a CI check run or automated review agent finishes executing.
 
 ```json
 {
@@ -173,26 +162,14 @@ Emitted when an automated test runner or review agent completes execution.
 
 ---
 
-## 4. HMAC-SHA256 Signature Verification Samples
+## 4. HMAC-SHA256 Signature Verification
 
-To ensure webhook requests genuinely originate from your `niebla-server`, verify the `X-Niebla-Signature` header:
+Always verify `X-Niebla-Signature` using [constant-time comparison](https://en.wikipedia.org/wiki/Timing_attack) before processing webhook payloads.
 
-### Python (FastAPI / Flask)
-```python
-import hmac
-import hashlib
+### Go
 
-def verify_niebla_signature(secret: str, raw_body: bytes, header_sig: str) -> bool:
-    if not header_sig.startswith("sha256="):
-        return False
-    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    provided = header_sig.split("=", 1)[1]
-    return hmac.compare_digest(expected, provided)
-```
-
-### Go (Standard Library)
 ```go
-package main
+package webhook
 
 import (
 	"crypto/hmac"
@@ -201,33 +178,32 @@ import (
 	"strings"
 )
 
-func VerifyNieblaSignature(secret string, body []byte, signatureHeader string) bool {
-	if !strings.HasPrefix(signatureHeader, "sha256=") {
+func VerifySignature(secret string, body []byte, sigHeader string) bool {
+	if !strings.HasPrefix(sigHeader, "sha256=") {
 		return false
 	}
-	expected := hmac.New(sha256.New, []byte(secret))
-	expected.Write(body)
-	expectedHex := hex.EncodeToString(expected.Sum(nil))
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expected := mac.Sum(nil)
 
-	providedHex := strings.TrimPrefix(signatureHeader, "sha256=")
-	return hmac.Equal([]byte(expectedHex), []byte(providedHex))
+	provided, err := hex.DecodeString(strings.TrimPrefix(sigHeader, "sha256="))
+	if err != nil {
+		return false
+	}
+	return hmac.Equal(expected, provided)
 }
 ```
 
-### TypeScript (Node.js / Express)
-```typescript
-import * as crypto from 'crypto';
+### Python
 
-export function verifyNieblaSignature(secret: string, rawBody: Buffer, headerSig: string): boolean {
-  if (!headerSig || !headerSig.startsWith('sha256=')) {
-    return false;
-  }
-  const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(rawBody);
-  const expected = hmac.digest('hex');
-  const provided = headerSig.slice(7);
+```python
+import hashlib
+import hmac
 
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-}
+def verify_signature(secret: str, raw_body: bytes, sig_header: str) -> bool:
+    if not sig_header.startswith("sha256="):
+        return False
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    provided = sig_header.split("=", 1)[1]
+    return hmac.compare_digest(expected, provided)
 ```
-

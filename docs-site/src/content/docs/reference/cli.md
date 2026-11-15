@@ -1,718 +1,318 @@
 ---
-title: "CLI Command Reference & Use Cases"
-description: Complete reference for the unified niebla developer CLI with deep explanations, practical use cases, flag specifications, and automation patterns.
+title: "CLI Command Reference"
+description: Reference for the unified niebla CLI, including global flags, workspace lifecycle, shelving, trunk submission, CI execution, CAS operations, and backups.
 sidebar:
   order: 1
-  label: CLI Reference & Use Cases
 ---
 
-The `niebla` executable is the central developer CLI for interacting with the Niebla server-authoritative monorepo toolchain. Unlike traditional VCS tools that manipulate entire on-disk clones, `niebla` manages virtualized Copy-on-Write (CoW) workspaces, streams blobs on demand from central Content-Addressable Storage (CAS), and synchronizes Merkle tree manifests over high-throughput gRPC.
+The `niebla` CLI manages virtual [Copy-on-Write (CoW)](https://en.wikipedia.org/wiki/Copy-on-write) workspaces, streams file blobs from [Content-Addressable Storage (CAS)](https://en.wikipedia.org/wiki/Content-addressable_storage), and coordinates changelist reviews and [trunk](https://en.wikipedia.org/wiki/Trunk-based_development) submissions with `niebla-server`.
 
-Every command is designed for dual ergonomics: clean, human-readable terminal output with ANSI styling for developers, and deterministic `--json` schemas for AI coding agents and CI runners.
+Every command supports human-readable terminal output by default and deterministic `--json` output for scripts, CI pipelines, and AI coding agents.
 
 ---
 
-## 1. Global Flags & Operational Model
+## 1. Global Flags & Configuration Precedence
 
-Every `niebla` subcommand inherits global flags that configure network transport, workspace resolution, and output formatting.
+All `niebla` subcommands accept the following global flags:
 
-| Flag | Env Variable | Default | Description |
+| Flag | Environment Variable | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--server <addr>` | `NIEBLA_SERVER` | `127.0.0.1:50051` | gRPC server endpoint for repository operations. |
-| `--workspace <name>` | `NIEBLA_WORKSPACE` | Auto-detected | Explicit workspace name (bypasses directory-tree traversal). |
+| `--server <addr>` | `NIEBLA_SERVER` | `127.0.0.1:50051` | Target `niebla-server` [gRPC](https://en.wikipedia.org/wiki/GRPC) endpoint (`host:port`). |
+| `--workspace <name>` | `NIEBLA_WORKSPACE` | Auto-detected | Explicit workspace name (bypasses directory traversal). |
 | `--config-dir <dir>` | `NIEBLA_CONFIG_DIR` | `~/.config/niebla/workspaces` | Directory storing local workspace metadata files. |
-| `--json` | `NIEBLA_JSON` | `false` | Emits structured JSON output to `stdout` for scripts and AI agents. |
+| `--json` | `NIEBLA_JSON` | `false` | Emit structured JSON output to `stdout`. |
 
-### Configuration Precedence
-When resolving runtime parameters (such as the server address), `niebla` applies strict hierarchical precedence:
-1. **Explicit CLI flags** (`--server 10.0.0.5:50051`)
-2. **Environment variables** (`export NIEBLA_SERVER="10.0.0.5:50051"`)
-3. **Workspace-level metadata** (`~/.config/niebla/workspaces/<name>.toml`)
-4. **User configuration cascade** (`~/.config/niebla/config.toml`)
-5. **Compile-time defaults** (`127.0.0.1:50051`)
+### Precedence Order
 
-### Automatic Root Discovery
-When invoked from any directory without `--workspace`, `niebla` inspects `$PWD` and walks up the directory tree looking for a `.niebla/workspace.toml` control marker. This allows developers to run commands from any deeply nested subdirectory within their mounted workspace without passing positional paths.
+Runtime settings resolve in the following order (highest to lowest):
+
+1. Explicit CLI flags (`--server 10.0.0.5:50051`)
+2. Environment variables (`NIEBLA_SERVER`)
+3. Workspace metadata (`.niebla/workspace.toml`)
+4. User configuration files (`~/.config/niebla/*.toml`)
+5. Built-in defaults (`127.0.0.1:50051`)
+
+When invoked without `--workspace`, `niebla` walks up from the current working directory to locate `.niebla/workspace.toml`, allowing you to run commands from any subdirectory inside a workspace.
 
 ---
 
 ## 2. Workspace Lifecycle (`niebla workspace`)
 
-Workspaces are isolated, lightweight views of the monorepo. Creating a workspace takes under 15 milliseconds because no files are copied to disk; instead, the CLI initializes an in-memory virtual mount or sparse scratch overlay backed by `niebla-server`.
+### `niebla workspace create`
 
-```mermaid
-flowchart TD
-    subgraph Commands["Workspace Commands"]
-        direction TB
-        C1["workspace create &lt;name&gt;<br/>Instant CoW provision (FUSE / direct)"]
-        C2["workspace list<br/>Inspect active mounts &amp; base CLs"]
-        C3["workspace mount &lt;name&gt;<br/>Re-attach FUSE nieblafs daemon"]
-        C4["workspace unmount &lt;name&gt;<br/>Detach FUSE mountpoint"]
-        C5["workspace delete &lt;name&gt;<br/>Safe unmount &amp; scratch cleanup"]
-    end
-
-    subgraph Modes["Execution Modes"]
-        direction TB
-        M1["Virtual FUSE Mode (Default)<br/>On-demand streaming via nieblafs"]
-        M2["Direct Materialization (--no-fuse)<br/>Physical disk files for CI &amp; containers"]
-    end
-
-    Commands --> Modes
-```
-
-### `niebla workspace create <name>`
-Provisions and mounts a new virtual workspace.
+Creates and mounts a new virtual [FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace) workspace (or materializes files directly when `--no-fuse` is set).
 
 ```bash
 niebla workspace create <name> [flags]
 ```
 
-#### Flags
-* `--cl <int>`: Base Changelist ID to branch from (default: `0`, meaning current trunk head).
-* `--no-fuse`: Disables the FUSE driver and materializes files directly to disk.
-* `--mount-dir <path>`: Custom directory for the mount point (default: `~/niebla/workspaces/<name>`).
-* `--no-hooks`: Skips client `post_create` lifecycle hooks defined in `config.toml`.
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--cl <id>` | `0` (trunk head) | Base changelist or trunk revision to branch from. |
+| `--no-fuse` | `false` | Materialize files directly to disk without mounting FUSE. |
+| `--path <subpath>` | `""` (full repo) | Restrict `--no-fuse` materialization to a specific directory subtree. |
+| `--mount-dir <dir>` | `~/niebla/workspaces/<name>` | Custom destination directory for the workspace. |
+| `--no-hooks` | `false` | Skip `post_create` hooks defined in `.niebla/hooks.toml`. |
 
-#### Use Cases
-
-##### Use Case 1: Starting a New Feature from Trunk Head
 ```bash
+# Create an instant FUSE workspace from trunk head
 niebla workspace create feature-oauth
-cd ~/niebla/workspaces/feature-oauth
-```
-**Why**: Creates an instant virtual workspace pinned to the latest stable trunk revision. Developers can open the entire multi-gigabyte monorepo in their IDE immediately without waiting for a multi-hour Git clone.
 
-##### Use Case 2: Branching from an In-Flight CL (Stacked Development)
-```bash
+# Branch a stacked workspace from an in-flight changelist
 niebla workspace create backend-api --cl 104
-```
-**Why**: When building a service that depends on uncommitted changes in review (`CL 104`), this branches directly from CL 104's Merkle tree. All un-submitted parent files are immediately accessible in the child workspace.
 
-##### Use Case 3: Containerized CI or Environments Without `/dev/fuse`
-```bash
-niebla workspace create ci-runner-build --no-fuse --mount-dir /build/src
+# Materialize a workspace without FUSE (macOS, Docker, or CI)
+niebla workspace create ci-build --no-fuse --mount-dir /tmp/src
 ```
-**Why**: Docker containers, Kubernetes pods, and unprivileged VMs often restrict `/dev/fuse` access. The `--no-fuse` flag instructs `niebla` to fetch tree manifests and materialize files directly into physical storage using parallel CAS streaming.
 
 ---
 
 ### `niebla workspace list`
-Displays all registered local workspaces, mount paths, base revisions, and daemon health statuses.
+
+Lists all registered local workspaces, their base CL revisions, mount paths, and FUSE daemon statuses.
 
 ```bash
-niebla workspace list [flags]
+niebla workspace list [--json]
 ```
-
-#### Use Cases
-
-##### Auditing Active Workspaces Across Multiple Projects
-```bash
-niebla workspace list
-```
-```text
-NAME             BASE CL   MOUNT PATH                                STATUS
-feature-oauth    142       /home/developer/niebla/workspaces/oauth   MOUNTED (PID 8412)
-backend-api      104       /home/developer/niebla/workspaces/api     MOUNTED (PID 9104)
-ci-test-run      150       /tmp/ci-test-run                          DIRECT (NO-FUSE)
-```
-
-##### Automated Health Check via AI Agent
-```bash
-niebla workspace list --json
-```
-AI agents inspect the structured JSON array to locate existing workspaces, verify whether the `nieblafs` background daemon is responsive, or identify stale workspaces requiring cleanup.
 
 ---
 
-### `niebla workspace mount <name>`
-Re-attaches and mounts the background `nieblafs` FUSE daemon for an existing workspace.
+### `niebla workspace mount` & `unmount`
+
+Re-attaches or detaches the background `nieblafs` FUSE daemon for an existing workspace without deleting local scratch edits.
 
 ```bash
+# Re-mount a workspace after a system reboot
 niebla workspace mount <name>
-```
 
-#### Use Cases
-
-##### Reconnecting After System Reboot
-```bash
-niebla workspace mount feature-oauth
-```
-**Why**: When a workstation reboots or the background daemon is terminated, the workspace's metadata and scratch overlay remain intact in `~/.config/niebla/workspaces/` and `~/.niebla/workspaces/`. Running `niebla workspace mount` respawns `nieblafs`, establishes the FUSE mount at `mount_dir`, and verifies the IPC socket connection without re-downloading existing cached blobs.
-
----
-
-### `niebla workspace unmount <name>`
-Safely detaches the FUSE mountpoint and terminates the background daemon process without deleting workspace data or scratch state.
-
-```bash
+# Unmount the FUSE filesystem and stop the background daemon
 niebla workspace unmount <name>
 ```
 
-#### Use Cases
-
-##### Freeing FUSE System Resources
-```bash
-niebla workspace unmount backend-api
-```
-**Why**: When switching between projects or freeing kernel FUSE channels, `niebla workspace unmount` cleanly unmounts the VFS mountpoint and terminates the background process while preserving all un-shelved scratch edits.
-
 ---
 
-### `niebla workspace delete <name>`
-Safely unmounts the virtual filesystem and purges local scratch state (aliases: `destroy`, `rm`).
+### `niebla workspace delete`
+
+Unmounts the workspace, stops its `nieblafs` daemon, and deletes its local scratch directory (aliases: `destroy`, `rm`).
 
 ```bash
 niebla workspace delete <name> [flags]
 ```
 
-#### Flags
-* `--force` (`-f`): Forces deletion even if un-shelved modifications exist in the scratch overlay.
-
-#### Use Cases
-
-##### Cleaning Up Completed Features
-```bash
-niebla workspace delete feature-oauth
-```
-**Why**: Gracefully signals the background `nieblafs` daemon to flush pending writes, unmounts the FUSE mountpoint, terminates the daemon process, and removes the local workspace scratch cache (`~/.cache/niebla/workspaces/<name>`). If unsaved modifications exist, `niebla` halts with an error to prevent accidental data loss unless `--force` is specified.
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `-f, --force` | `false` | Force deletion even if unshelved modifications exist in scratch storage. |
 
 ---
 
 ## 3. Change Inspection (`niebla status` & `niebla diff`)
 
-Niebla separates base repository files from local modifications through a Copy-on-Write (CoW) scratch layer. Clean files remain un-materialized in CAS; only modified, newly added, or deleted files occupy disk space in scratch storage.
-
 ### `niebla status`
-Inspects pending workspace changes in the scratch overlay against the base Merkle tree.
+
+Scans the local CoW scratch overlay ($O(\text{modified files})$) and lists pending workspace changes against the base [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree).
 
 ```bash
-niebla status [flags]
+niebla status [--json]
 ```
 
-#### Output Classification
-* `M` **(Modified)**: File existed in the base tree and has been edited in scratch.
-* `A` **(Added)**: File was newly created in the workspace.
-* `D` **(Deleted)**: File was deleted in the workspace (tracked via `.wh.<filename>` whiteout markers in scratch).
-
-#### Use Cases
-
-##### Instant Status on Multi-Million-File Repositories
-```bash
-niebla status
-```
-```text
-Workspace: feature-oauth (Base CL 142)
-
-Changes (3 files):
-  M  services/auth/handler.go
-  A  services/auth/token_test.go
-  D  services/auth/legacy_auth.go
-```
-**Why**: Traditional tools (`git status`) must recursively run `stat()` calls across hundreds of thousands of files on disk ($O(N)$), causing multi-second delays. Niebla scans only the local scratch directory ($O(\text{changed})$), executing in single-digit milliseconds regardless of repository size.
-
-##### Automated AI Coding Loop
-Coding agents run `niebla status --json` after generating code to verify which files were modified and ensure no stray temporary files were left un-ignored:
-
-```json
-{
-  "workspace": "feature-oauth",
-  "base_cl": 142,
-  "clean": false,
-  "changes": [
-    {
-      "path": "services/auth/handler.go",
-      "type": "M"
-    },
-    {
-      "path": "services/auth/token_test.go",
-      "type": "A"
-    }
-  ]
-}
-```
+| Status Code | Meaning |
+| :--- | :--- |
+| `M` | Modified file in the local scratch overlay. |
+| `A` | Newly created file in the workspace. |
+| `D` | Deleted file (tracked via `.wh.<name>` [whiteout](https://en.wikipedia.org/wiki/Union_mount) marker). |
 
 ---
 
-### `niebla diff [path]`
-Displays unified diffs comparing scratch modifications against the immutable base Merkle tree.
+### `niebla diff`
+
+Displays a syntax-highlighted unified diff comparing local scratch modifications against the base Merkle tree. Base blobs are fetched on demand from CAS.
 
 ```bash
-niebla diff [path] [flags]
-```
-
-#### Features
-* Intra-line, syntax-highlighted word additions and deletions.
-* Scoped diffing: passing an optional `[path]` restricts diff generation to a single file or subdirectory.
-* On-demand base blob fetching: base file content is fetched from CAS only when diffing that specific file.
-
-#### Use Cases
-
-##### Pre-Shelve Code Review
-```bash
-# Review all pending changes in the workspace
+# Diff all modified files in the workspace
 niebla diff
 
-# Restrict inspection to a single file
+# Diff a specific file or directory
 niebla diff services/auth/handler.go
-```
-```diff
---- services/auth/handler.go (Base CL 142)
-+++ services/auth/handler.go (Scratch)
-@@ -45,7 +45,7 @@
- func ValidateToken(token string) (*Claims, error) {
--    if token == "" {
-+    if strings.TrimSpace(token) == "" {
-         return nil, ErrEmptyToken
-     }
 ```
 
 ---
 
 ## 4. Changelist Shelving (`niebla shelve`)
 
-In Niebla's Google Critique-inspired model, work is not pushed to remote Git branches. Instead, working copy changes are **shelved** into server-authoritative **Changelists (CLs)**. Shelving uploads new blobs to CAS, synthesizes an updated Merkle tree manifest, and registers a patchset for peer and AI review in Cotejo.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Dev as Developer
-    participant CLI as niebla CLI
-    participant Server as niebla-server
-    participant CAS as Central CAS
-    participant DB as PostgreSQL
-    participant Web as Cotejo Web UI
-
-    Dev->>CLI: niebla shelve -m "feat(auth): add OAuth2 token validation"
-    CLI->>CLI: Scan scratch layer ($O(\text{changed})$)
-    CLI->>CAS: Stream dirty blobs via UploadBlob RPC
-    CLI->>Server: Build updated Merkle tree
-    Server->>DB: Record CL & Patchset in cl_patchsets
-    Server-->>CLI: Return CL ID & Cotejo URL
-    CLI-->>Dev: Print: http://localhost:8080/cl/145
-```
+Uploads modified scratch files to CAS, synthesizes an updated Merkle tree on `niebla-server`, and creates a new Changelist (CL) or appends a new Patchset ($N+1$) to the active CL for review in Cotejo.
 
 ```bash
 niebla shelve -m "<description>" [flags]
 ```
 
-### Flags
-* `-m, --message "<description>"` *(required)*: Summary and body of the changelist.
-* `--cl <int>`: Updates an existing changelist by creating a new **Patchset ($N+1$)**. Defaults to the workspace's active CL.
-* `--new-cl`: Forces creation of a brand new CL even if the workspace already tracks an active CL.
-* `--on-cl <int>`: Stacks this CL on top of a specific parent changelist.
-* `--reviewers "<list>"`: Comma-separated list of reviewer usernames or `@group` aliases defined in `config.toml`.
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `-m, --message <text>` | *(required)* | Changelist summary and description. |
+| `--cl <id>` | Active workspace CL | Update a specific changelist by uploading Patchset $N+1$. |
+| `--new-cl` | `false` | Force creation of a new CL even if the workspace tracks an active CL. |
+| `--on-cl <id>` | `0` | Stack this changelist on top of parent changelist `<id>`. |
+| `--reviewers <list>` | `""` | Comma-separated reviewer usernames or `@group` aliases. |
 
-### Use Cases
-
-#### Use Case 1: Creating a New Changelist for Initial Review
 ```bash
-niebla shelve -m "feat(auth): implement RFC 6749 OAuth2 bearer validation" \
-  --reviewers "jdoe,mrtnz,@sec-team"
-```
-```text
-✓ Successfully shelved CL 145 (Patchset 1)
-  Parent CL   : 142 (Trunk Head)
-  Files       : 3 modified, 1 added, 0 deleted
-  Review URL  : http://localhost:8080/cl/145
-```
-**Why**: Uploads only the modified blobs to CAS, generates a fresh CL number, resolves the `@sec-team` group into individual reviewers, and outputs the Cotejo review link.
+# Create a new CL and assign reviewers
+niebla shelve -m "feat(auth): add OAuth2 token validation" --reviewers "alice,@sec-team"
 
-#### Use Case 2: Iterating on Review Feedback (Creating Patchset 2)
-When reviewers or AI review bots leave comments on `CL 145`, the developer makes edits in their workspace and runs:
-```bash
-niebla shelve -m "address review comments: validate token expiration claims"
-```
-```text
-✓ Successfully updated CL 145 (Patchset 2)
-  Review URL  : http://localhost:8080/cl/145
-```
-**Why**: Automatically detects that the workspace is already working on `CL 145` and creates **Patchset 2**. In Cotejo, reviewers can immediately perform an intra-line inter-diff between Patchset 1 and Patchset 2 to verify that feedback was addressed.
+# Upload a new patchset to the active CL after addressing review feedback
+niebla shelve -m "fix: validate token expiration claim"
 
-#### Use Case 3: Creating a Stacked Changelist Chain
-```bash
-# Branch service implementation on top of database migration in CL 145
+# Stack a child CL on top of CL 145
 niebla shelve -m "feat(api): expose OAuth endpoints" --on-cl 145
 ```
-**Why**: Enables clean, modular pull requests without large, unreviewable diffs. When `CL 145` lands on trunk, child CLs automatically cascade and rebase their parent pointer.
 
 ---
 
-## 5. Monotonic Trunk Submission (`niebla submit`)
+## 5. Trunk Submission (`niebla submit`)
 
-Once a changelist receives all mandatory human sign-offs (e.g., `LGTM` and `Approved` per `OWNERS.toml`), passes AI automated persona checks, and satisfies CI check runs, it can be submitted to trunk.
-
-Niebla enforces a **linear, monotonic trunk**. There are no merge commits or branch spaghetti; commits are serialized under database advisory locks.
+Runs local `pre_submit` hooks, verifies server-side governance gates (`OWNERS.toml` approvals, unresolved comments, and required CI check runs), and atomically commits the changelist to the linear trunk.
 
 ```bash
 niebla submit [flags]
 ```
 
-### Flags
-* `--cl <int>`: Explicit CL ID to submit (defaults to the workspace's active CL).
-* `--no-verify`: Skips local pre-submit verification hooks.
-* `--force`: Bypasses non-blocking check runs (requires administrative privileges).
-
-### Lifecycle Workflow
-1. **Local Pre-Submit Hooks**: The CLI executes linters, formatters, and test suites defined in `.niebla/hooks.toml`. If any hook fails, the submit is aborted locally before reaching the server.
-2. **Server-Side Governance Gate**: The server checks that:
-   - All directory owners have approved (`OWNERS.toml`).
-   - Blocking AI bots (e.g. `sec-bot`) have marked threads resolved.
-   - Required CI check runs have passed.
-3. **Atomic Linear Commit**: The server acquires `pg_advisory_xact_lock`, increments `trunk_revision_seq`, and records the changelist as submitted.
-4. **Workspace Re-anchoring**: The workspace resets its active CL and updates its base CL revision.
-
-### Use Cases
-
-#### Landing an Approved Feature
-```bash
-niebla submit
-```
-```text
-Running pre-submit hooks...
-  ✓ go-lint: passed (1.2s)
-  ✓ unit-tests: passed (3.4s)
-Submitting CL 145 to trunk...
-✓ Successfully submitted CL 145 as Trunk Revision 308!
-  Workspace base CL updated: 142 -> 308
-  Active CL reset: clean working copy ready for next task.
-```
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--cl <id>` | Active workspace CL | Explicit changelist ID to submit. |
+| `--no-verify` | `false` | Skip local client `pre_submit` verification hooks. |
+| `--force` | `false` | Bypass non-blocking check runs (requires administrative permission). |
 
 ---
 
 ## 6. Workspace Synchronization (`niebla sync`)
 
-Long-running workspaces inevitably fall behind trunk as colleagues land changelists. The `niebla sync` command reconciles the workspace's base tree with the latest upstream trunk or parent patchset while preserving un-shelved scratch edits.
+Re-anchors the workspace's base Merkle tree to the latest trunk head (or updated parent CL) while preserving local unshelved scratch edits. In FUSE mode, `niebla sync` invalidates stale kernel [inodes](https://en.wikipedia.org/wiki/Inode) over `nieblafs.sock` so updated files appear immediately.
 
 ```bash
 niebla sync [flags]
 ```
 
-### Flags
-* `--dry-run`: Previews incoming changes, potential rebase conflicts, and inode invalidations without touching local state.
-* `--no-hooks`: Skips client `post_sync` lifecycle hooks.
-* `-f`, `--force`: Forces synchronization even if uncommitted modifications exist in direct materialization (`--no-fuse`) mode.
-
-### Use Cases
-
-#### Use Case 1: Re-anchoring to Upstream Trunk
-```bash
-niebla sync
-```
-```text
-✓ Successfully synced workspace "feature-oauth" with Trunk Revision 315.
-  Base tree updated: 7a8f... -> b2c4...
-  Virtual filesystem re-anchored (14 cached inodes invalidated).
-```
-**Why**: In FUSE mode, `niebla sync` connects to `nieblafs.sock` and invalidates cached in-memory inodes. Upstream additions and modifications appear in the file tree immediately without restarting IDEs or unmounting the filesystem.
-
-#### Use Case 2: Detecting and Resolving Rebase Conflicts
-```bash
-niebla sync --dry-run
-```
-If an upstream commit modified a file that also has dirty scratch edits:
-```text
-⚠️  Rebase conflict detected with Parent CL 315!
-   Conflicts: services/auth/handler.go
-   Please resolve the conflicting files in your workspace, then run 'niebla shelve' to commit the resolution.
-```
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--dry-run` | `false` | Preview incoming upstream changes and potential conflicts without modifying local state. |
+| `--no-hooks` | `false` | Skip `post_sync` hooks defined in `.niebla/hooks.toml`. |
+| `-f, --force` | `false` | Force sync even if uncommitted changes exist in `--no-fuse` mode. |
 
 ---
 
-## 7. Stateless Tree Materialization (`niebla export`)
+## 7. Stateless Tree Export (`niebla export`)
 
-The `niebla export` command provides hermetic, FUSE-free tree materialization for CI runners, build agents, and deployment packagers.
+Materializes an immutable changelist or trunk revision into a target directory without registering a workspace or mounting FUSE. Designed for ephemeral CI runners and release packaging.
 
 ```bash
 niebla export --dest <dir> [flags]
 ```
 
-### Flags
-* `--dest <dir>` *(required)*: Target directory where files will be written.
-* `--cl <int>`: Specific CL ID to materialize (default: `0`, meaning trunk head).
-* `--patchset <int>`: Specific patchset iteration of the CL (defaults to latest).
-* `--concurrency <N>`: Parallel download worker threads (default: `8`).
-* `--cas-dir <dir>`: Path to local CAS blob store. When present, `niebla export` creates **zero-copy hardlinks** instead of copying bytes.
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--dest <dir>` | *(required)* | Target directory where files will be written. |
+| `--cl <id>` | `0` (trunk head) | Changelist ID to export. |
+| `--patchset <n>` | Latest patchset | Specific patchset number of `--cl` to export. |
+| `--concurrency <n>` | `8` | Number of parallel CAS download workers. |
+| `--cas-dir <dir>` | `""` | Local CAS directory; uses zero-copy [hardlinks](https://en.wikipedia.org/wiki/Hard_link) (`0444`) when available. |
 
-### Use Cases
-
-#### Use Case 1: Blazing-Fast Hermetic CI Checkout
 ```bash
+# Materialize CL 145 using zero-copy hardlinks from a warm runner cache
 niebla export --cl 145 --dest /ci/workspace --cas-dir ~/.cache/niebla/blobs
-```
-```text
-✓ Materialized CL 145 (Patchset 2) into /ci/workspace
-  Files       : 14,820
-  Directories : 1,240
-  Bytes       : 482 MB (100% hardlinked from local CAS cache)
-  Duration    : 180ms
-```
-**Why**: Because build runners retain a shared local CAS cache, `niebla export` creates hardlinks into `/ci/workspace`. A 500 MB codebase materializes in under 200 milliseconds, completely eliminating git checkout overhead in CI pipelines.
-
-#### Use Case 2: Packaging Production Deployment Artifacts
-```bash
-# Export exact trunk head for release packaging
-niebla export --dest /tmp/release-build
 ```
 
 ---
 
-## 8. CI Pipeline Orchestration (`niebla ci`)
-
-The `niebla ci` subsystem bridges automated build runners with Cotejo's live review UI.
-
-```mermaid
-flowchart LR
-    Runner["CI Runner Agent"] -->|1. Starts| Exec["niebla ci exec -- &lt;cmd&gt;"]
-    Exec -->|2. Reports Running| Server["Cotejo Server (:8080)"]
-    Exec -->|3. Runs Command & Captures Logs| Subprocess["go test ./... / bazel test //..."]
-    Subprocess -->|4. Exits| Exec
-    Exec -->|5. Uploads Logs to CAS & Reports Passed/Failed| Server
-```
+## 8. CI Orchestration (`niebla ci`)
 
 ### `niebla ci exec`
-Wraps any build or test command, reporting `running` at launch, streaming console logs, uploading output logs to CAS, and reporting `passed` or `failed` based on process exit code.
+
+Wraps a build or test command, reports `running` to Cotejo at launch, streams console output into CAS, and reports `passed` or `failed` based on the command's exit code.
 
 ```bash
 niebla ci exec --cl <id> --runner <name> [flags] -- <command> [args...]
 ```
 
-#### Flags
-* `--cl <int>` *(required)*: Target changelist ID.
-* `--runner <name>` *(required)*: Unique runner identifier (e.g. `unit-tests`, `linter`, `bazel-build`).
-* `--patchset <int>`: Specific patchset iteration (default: latest).
-* `--external-url <url>`: Direct hyperlink to external CI job dashboard (e.g. GitHub Actions or Forgejo run).
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--cl <id>` | *(required)* | Target changelist ID. |
+| `--runner <name>` | *(required)* | Runner identifier matching `OWNERS.toml` / `ci.toml` (e.g., `unit-tests`). |
+| `--patchset <n>` | Latest patchset | Target patchset number. |
+| `--external-url <url>` | `""` | Link to an external CI dashboard (e.g., Forgejo or GitHub Actions run). |
 
-#### Use Case: Running Automated Unit Tests in CI
 ```bash
-niebla ci exec --cl 145 --runner "go-unit-tests" \
-  --external-url "https://ci.internal.net/builds/9821" \
-  -- go test -v ./services/auth/...
+niebla ci exec --cl 145 --runner "go-unit-tests" -- go test -v ./...
 ```
-**Why**: 
-1. Immediately posts a `running` check run status to Cotejo.
-2. Reviewers watching the review page see a live spinner.
-3. Upon test completion, `niebla` streams the full console output into CAS and marks the check run as `passed` (exit code 0) or `failed` (non-zero).
-4. Reviewers in Cotejo can click the runner badge to view the full log without leaving the review interface.
 
 ---
 
 ### `niebla ci report`
-Directly updates check run status for custom CI integrations and webhook handlers.
+
+Directly reports a check run status to Cotejo from custom CI scripts or webhooks.
 
 ```bash
 niebla ci report --cl <id> --runner <name> --status <status> [flags]
 ```
 
-#### Valid Statuses
-`queued` | `running` | `passed` | `failed` | `canceled` | `skipped`
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--cl <id>` | *(required)* | Target changelist ID. |
+| `--runner <name>` | *(required)* | Runner identifier. |
+| `--status <state>` | *(required)* | One of: `queued`, `running`, `passed`, `failed`, `canceled`, `skipped`. |
+| `--patchset <n>` | Latest patchset | Target patchset number. |
+| `--log-file <path>` | `""` | Path to a local log file to upload to CAS and attach to the check run. |
+| `--url <url>` | `""` | External CI run URL. |
 
-#### Use Case: Custom Webhook Reporting
+---
+
+## 9. Configuration Management (`niebla config`)
+
+Inspects, initializes, and validates the `~/.config/niebla/*.toml` configuration cascade. See [Configuration (`config.toml`)](/niebla/reference/configuration/) for the full schema.
+
+| Subcommand | Flags | Description |
+| :--- | :--- | :--- |
+| `niebla config path` | — | Print paths to all active configuration files in load order. |
+| `niebla config show` | `--resolved` | Print raw or fully merged configuration (with environment variables expanded). |
+| `niebla config validate` | `[file]` | Validate [TOML](https://en.wikipedia.org/wiki/TOML) syntax, section uniqueness, port collisions, and theme presets. |
+| `niebla config init` | `--force` | Generate a baseline `~/.config/niebla/config.toml` file. |
+
+---
+
+## 10. Low-Level CAS Operations (`niebla cas`)
+
+Directly interacts with the [SHA-256](https://en.wikipedia.org/wiki/SHA-2) Content-Addressable Storage engine. Also used to upload hermetic review binaries (`type = "cas_binary"`) referenced in [`.niebla/agents.toml`](/niebla/workflows/in-tree-governance/#3-automated-review-agents-nieblaagentstoml).
+
 ```bash
-niebla ci report --cl 145 --runner "sonarqube" \
-  --status "passed" \
-  --log-file /tmp/sonar-report.txt \
-  --external-url "https://sonar.internal.net/project/auth"
+# Upload a file or binary to CAS and print its SHA-256 digest
+niebla cas put <file>
+
+# Download a blob by its 64-character hex SHA-256 digest
+niebla cas get <sha256> [--out <file>]
+
+# Run mark-and-sweep garbage collection on unreferenced blobs
+niebla cas gc [--grace-period 24h] [--dry-run] [--dir <path>]
 ```
 
 ---
 
-## 9. Toolchain Configuration (`niebla config`)
+## 11. Backups & Disaster Recovery (`niebla backup`)
 
-The `niebla config` subsystem inspects, initializes, and validates the multi-file configuration cascade (`~/.config/niebla/*.toml`).
+Manages [ZFS](https://en.wikipedia.org/wiki/ZFS) snapshot replication and [AES-256-GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) encrypted backup bundles. See [ZFS Backups & Disaster Recovery](/niebla/recipes/disaster-recovery/) for operational runbooks.
 
-| Subcommand | Description |
-| :--- | :--- |
-| `niebla config path` | Displays absolute paths to all discovered configuration files in load priority. |
-| `niebla config show` | Prints the fully resolved in-memory configuration with environment expansions. |
-| `niebla config validate [file]` | Fast-fail syntax, semantic, port collision, and theme preset validation. |
-| `niebla config init [--force]` | Generates a clean default `~/.config/niebla/config.toml` skeleton. |
-
-### Use Cases
-
-#### Validating Configuration Before Service Restart
-```bash
-niebla config validate
-```
-```text
-Validating /home/developer/.config/niebla/config.toml...
-  ✓ Syntax: valid TOML
-  ✓ Server Bindings: 127.0.0.1:50051 (available)
-  ✓ Web Bindings: 127.0.0.1:8080 (available)
-  ✓ Cotejo Theme: "caribbean-dark" (recognized preset)
-  ✓ AI Providers: OpenAI endpoint TLS verified
-Configuration is valid!
-```
+| Subcommand | Flags | Description |
+| :--- | :--- | :--- |
+| `niebla backup create` | `--mode zfs\|bundle`, `--upload s3` | Trigger a ZFS snapshot stream or create an encrypted `.nbk` bundle. |
+| `niebla backup list` | `--target zfs\|s3\|filesystem` | List available recovery points across local and remote targets. |
+| `niebla backup verify` | `<file>` | Verify bundle checksums and cryptographic signatures. |
+| `niebla backup restore` | `<file>` | Restore PostgreSQL metadata and CAS blobs from a backup bundle. |
+| `niebla backup prune` | `--target <driver>`, `--keep <n>` | Prune expired snapshots or bundles according to retention count. |
 
 ---
 
-## 10. Low-Level CAS Storage (`niebla cas`)
+## 12. AI Agent Skills (`niebla skills`)
 
-Content-Addressable Storage (CAS) is the foundational blob layer of Niebla. Every file and Merkle tree manifest is stored indexed by its SHA-256 hash.
+Synchronizes Niebla's bundled AI agent skills (`niebla`, `niebla-config`, `niebla-ci`, `niebla-review-agent`) across installed coding harnesses (Antigravity, Claude Code, Cursor, and `.agents`). See [AI Agent Skills](/niebla/reference/skills/) for details.
 
-### `niebla cas put <file>`
-Uploads an arbitrary local file or binary into central CAS, returning its SHA-256 hash and size.
-
-```bash
-niebla cas put bin/service-arm64
-```
-```text
-SHA256: 4f8b2d18c991a0293847e18928374b9281734918237498127394812739481234
-Size  : 18,491,200 bytes
-```
-**Why**: Useful for caching build artifacts, test fixtures, and large compiler toolchains in central CAS without checking them into source code trees. Also used to upload hermetic review binaries referenced by `type = "cas_binary"` in `.niebla/agents.toml` (see [In-Tree Governance: CAS Binaries](/niebla/workflows/in-tree-governance/#3-type--cas_binary-hermetic-content-addressed-review-binaries)).
-
-### `niebla cas get <sha256>`
-Downloads a raw blob from CAS to local disk or `stdout`.
-
-```bash
-niebla cas get 4f8b2d18c... --dest /tmp/service-arm64
-```
-
-### `niebla cas gc`
-Executes mark-and-sweep garbage collection across local or server CAS storage, comparing blobs against active trunk heads and workspaces and removing unreferenced blobs older than a grace period.
-
-```bash
-niebla cas gc [--grace-period <duration>] [--dry-run] [--dir <path>]
-```
-```text
-✓ CAS Garbage Collection Completed:
-  • Total Scanned Blobs : 14,892
-  • Live Blobs Preserved: 13,204
-  • Unreferenced Blobs  : 1,688
-  • In-Grace Blobs Kept : 240
-  • Deleted Blobs       : 1,448
-  • Disk Space Reclaimed: 2,491,208,412 bytes
-```
-
----
-
-## 11. Resilience & Disaster Recovery (`niebla backup`)
-
-Enterprise disaster resilience for repositories operating at multi-terabyte scales.
-
-| Subcommand | Purpose |
-| :--- | :--- |
-| `niebla backup create` | Generates an envelope-encrypted standalone bundle (`.nieblabak`) or triggers 10GbE ZFS snapshot replication. |
-| `niebla backup list` | Lists all local and remote replication snapshots across S3, WebDAV, and ZFS targets. |
-| `niebla backup verify <file>` | Verifies cryptographic integrity, signatures, and blob checksums. |
-| `niebla backup restore <file>` | Recovers database records and CAS blobs after catastrophic storage loss. |
-| `niebla backup prune` | Evaluates retention schedules (daily, weekly, monthly) and prunes expired snapshots. |
-
-### Use Case: Creating an Envelope-Encrypted Offline Archive
-```bash
-niebla backup create --encrypt --dest /mnt/secure-backup/
-```
-```text
-Creating resilience snapshot...
-  ✓ Dumped PostgreSQL metadata (142 MB)
-  ✓ Scanned CAS blob references (48,120 blobs)
-  ✓ Envelope encrypted via AES-256-GCM (Master Key: ENV_SECURE)
-  ✓ Generated standalone bundle: /mnt/secure-backup/niebla-20261113-2048.nieblabak
-Resilience backup completed in 4.2s.
-```
-
-### `niebla backup prune`
-Evaluates retention policies and removes expired standalone backup bundles or ZFS snapshots across local and remote targets.
-
-```bash
-niebla backup prune [flags]
-```
-
-#### Flags
-* `--keep <count>`: Number of most recent backups to retain (defaults to `resilience.zfs.retention_count` in configuration, or 7).
-* `--target <driver>`: Target storage driver (`zfs`, `filesystem`, `nextcloud`, `s3`).
-* `--dir <path>`: Custom root directory path for filesystem-based backups.
-
-#### Use Cases
-
-##### Pruning ZFS Snapshots on Primary Storage
-```bash
-niebla backup prune --target zfs --keep 14
-```
-```text
-Pruning ZFS snapshots on tank/niebla (keeping newest 14 matching prefix "niebla-auto")...
-✓ Pruned 6 snapshot(s)
-```
-
-##### Pruning Expired Bundles on Remote Storage
-```bash
-niebla backup prune --target s3 --keep 30
-```
-```text
-Pruning 5 oldest backup(s) on s3 (keeping newest 30)...
-  Deleting niebla-20261001-0000.nieblabak...
-  Deleting niebla-20261002-0000.nieblabak...
-✓ Pruning complete. Retained 30 backup(s).
-```
-
----
-
-## 12. AI Agent Harness Integration (`niebla skills`)
-
-Niebla ships with first-class skill adapters for AI coding harnesses (Google Antigravity, Claude Code, Cursor, and universal `.agents`).
-
-### `niebla skills sync`
-Ensures the central Hub skill catalog is populated and synchronizes symlinks across all installed developer harnesses on the workstation.
-
-```bash
-niebla skills sync [flags]
-```
-
-#### Flags
-* `-p, --proactive`: Pre-create configuration directories for all supported harnesses if they do not yet exist (default: `true`).
-* `--hub <dir>`: Custom Hub directory (defaults to `~/.local/share/niebla/skills/niebla`).
-
-```text
-Hub populated at: /home/developer/.local/share/niebla/skills/niebla
-
-HARNESS         STATUS      PATH
-Antigravity     SYNCED      ~/.gemini/antigravity/skills/niebla
-Claude Code     SYNCED      ~/.claude/skills/niebla
-Cursor          SYNCED      ~/.cursor/skills/niebla
-Universal       SYNCED      ~/.agents/skills/niebla
-```
-
-**Why**: With a single command, every AI coding assistant installed on the engineer's machine receives the complete Niebla skill set—enabling AI agents to natively create virtual workspaces, inspect diffs, shelve changelists, and apply review suggestions.
-
-### `niebla skills status`
-Audits the health and symlink resolution of all installed AI harnesses against the canonical Hub directory.
-
-```bash
-niebla skills status [flags]
-```
-
-#### Flags
-* `--hub <dir>`: Custom Hub directory to audit against.
-
-```text
-Target Hub: /home/developer/.local/share/niebla/skills/niebla
-
-HARNESS         STATUS      PATH
-Antigravity     SYNCED      ~/.gemini/antigravity/skills/niebla
-Claude Code     SYNCED      ~/.claude/skills/niebla
-Cursor          SYNCED      ~/.cursor/skills/niebla
-Universal       NOT FOUND   ~/.agents/skills/niebla
-```
-
-### `niebla skills export`
-Extracts embedded skill assets and prompt templates into an external directory for air-gapped deployment, CI pipelines, or custom agent development.
-
-```bash
-niebla skills export [flags]
-```
-
-#### Flags
-* `-d, --dir <path>`: Destination directory for exported skills (defaults to `./niebla-skills`).
-
-```bash
-niebla skills export --dir ./team-skills
-```
-```text
-✓ Exported 6 Niebla skill definition(s) to ./team-skills:
-  • niebla (Core VCS workflow skill)
-  • niebla-review-agent (Code hints & inline suggestions)
-  • niebla-ci (CI runner orchestration)
-  • niebla-config (Toolchain configuration & themes)
-  • forgejo-code-search (Self-hosted search)
-  • skill-creator (Custom skill authoring)
-```
+| Subcommand | Flags | Description |
+| :--- | :--- | :--- |
+| `niebla skills sync` | `--proactive`, `--hub <dir>` | Extract embedded skills to the local Hub and symlink all agent harnesses. |
+| `niebla skills status` | `--hub <dir>` | Verify symlink health across installed agent harnesses. |
+| `niebla skills export` | `--dir <path>` | Export embedded `SKILL.md` files into a custom directory. |

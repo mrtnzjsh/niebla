@@ -1,18 +1,15 @@
 ---
-title: "gRPC Service & Wire Protocol Reference"
-description: Complete architectural specification of the NieblaService Protocol Buffers (protobuf) interface, streaming semantics, metadata authentication headers, and wire status codes.
+title: "gRPC Wire API"
+description: Specification of the NieblaService Protocol Buffers (protobuf) interface, streaming RPCs, authentication headers, and status codes.
 sidebar:
   order: 4
-  label: gRPC Service & Wire API
 ---
 
-All communication between developer clients, the `nieblafs` virtual file system daemon, CI runner agents, and `niebla-server` is powered by high-performance **HTTP/2 gRPC** defined under `niebla.v1.NieblaService`.
-
-This page provides the complete technical specification of the RPC methods, streaming protocols, message schemas, and authentication headers.
+All communication between the `niebla` CLI, the `nieblafs` [FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace) daemon, `cotejo`, and `niebla-server` uses HTTP/2 [gRPC](https://en.wikipedia.org/wiki/GRPC) and [Protocol Buffers](https://en.wikipedia.org/wiki/Protocol_Buffers) defined in `niebla.v1.NieblaService`.
 
 ---
 
-## 1. Service Definition & Package
+## 1. Service Definition
 
 ```protobuf
 syntax = "proto3";
@@ -46,28 +43,28 @@ service NieblaService {
 
 ## 2. Authentication Metadata Headers
 
-Every RPC must present authentication metadata unless running in permissive local development mode. Credentials are sent using HTTP/2 metadata headers:
+When `server.auth_tokens` is configured on `niebla-server`, every unary and streaming RPC must include a bearer token in its HTTP/2 metadata:
 
 | Header Name | Format | Description |
 | :--- | :--- | :--- |
-| `authorization` | `Bearer <token>` | Standard RFC 6750 bearer token authorization. |
-| `x-niebla-token` | `<token>` | Alternative header for environments where proxies strip standard `authorization` headers. |
+| `authorization` | `Bearer <token>` | Standard RFC 6750 bearer token header. |
+| `x-niebla-token` | `<token>` | Fallback header for reverse proxies that strip `authorization`. |
 
-### Go Client Authentication Example
 ```go
 ctx := metadata.AppendToOutgoingContext(
     context.Background(),
     "authorization", "Bearer "+os.Getenv("NIEBLA_TOKEN"),
 )
-client.GetTree(ctx, &nieblav1.GetTreeRequest{TreeHash: hash})
+resp, err := client.GetTree(ctx, &nieblav1.GetTreeRequest{TreeHash: hash})
 ```
 
 ---
 
-## 3. Metadata & Tree Operations
+## 3. Metadata & Tree Messages
 
 ### `GetTree`
-Traverses a directory's Merkle tree manifest with paged streaming.
+
+Returns paged directory entries for a 32-byte [SHA-256](https://en.wikipedia.org/wiki/SHA-2) [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree) digest.
 
 ```protobuf
 message GetTreeRequest {
@@ -83,101 +80,106 @@ message GetTreeResponse {
 
 message NodeEntry {
   string name = 1;            // Entry filename or directory name
-  uint32 mode = 2;            // POSIX permissions (e.g. 0100644, 0100755, 0040755)
+  uint32 mode = 2;            // POSIX permissions (e.g., 0100644, 0100755, 0040755)
   uint64 size = 3;            // Uncompressed size in bytes
-  bytes blob_sha256 = 4;      // 32-byte SHA-256 hash (nil for directories)
-  bytes sub_tree_hash = 5;    // 32-byte SHA-256 Merkle hash (nil for leaf files)
+  bytes blob_sha256 = 4;      // 32-byte SHA-256 hash (empty for directories)
+  bytes sub_tree_hash = 5;    // 32-byte SHA-256 Merkle hash (empty for files)
 }
 ```
 
 ---
 
-## 4. Content Streaming Operations
+## 4. Content Streaming Messages
 
 ### `GetBlob` / `ReadBlob`
-Streams blob content from Content-Addressable Storage (CAS) with optional byte range offsets.
+
+Streams file bytes from [Content-Addressable Storage (CAS)](https://en.wikipedia.org/wiki/Content-addressable_storage) with optional byte-range slicing (`offset` and `length`).
 
 ```protobuf
 message GetBlobRequest {
-  bytes sha256 = 1;           // 32-byte SHA-256 digest of the desired blob
-  uint64 offset = 2;          // Byte offset to start reading from
-  uint64 length = 3;          // Number of bytes to read (0 = read until EOF)
+  bytes sha256 = 1;           // 32-byte SHA-256 digest of the blob
+  uint64 offset = 2;          // Starting byte offset
+  uint64 length = 3;          // Bytes to read (0 = read until EOF)
 }
 
 message BlobChunk {
-  bytes data = 1;             // Binary chunk slice (default: 64KB)
+  bytes data = 1;             // Binary chunk slice (64 KB default)
 }
 ```
 
-### `UploadBlob` (Client Streaming)
-Streams raw file bytes to `niebla-server`'s temporary staging directory (`.tmp/`). As chunks stream in, the server computes the SHA-256 checksum on-the-fly and atomically commits the file to its hash-sharded path (`ab/cd/<hash>`) once closed.
+### `UploadBlob`
+
+Streams raw file chunks from the client into `niebla-server`'s staging directory (`.tmp/`). The server computes the SHA-256 digest on the fly and atomically renames the file to its sharded CAS path (`ab/cd/<sha256>`) when the stream closes.
 
 ```protobuf
 message UploadBlobRequest {
-  bytes data = 1;             // File chunk slice (typically 64KB chunks)
+  bytes data = 1;             // File chunk slice (64 KB default)
 }
 
 message UploadBlobResponse {
   bytes sha256 = 1;           // Verified 32-byte SHA-256 digest
-  uint64 size = 2;            // Total bytes committed to storage
+  uint64 size = 2;            // Total bytes committed to CAS
 }
 ```
 
 ---
 
-## 5. Workspace & Changelist Lifecycles
+## 5. Workspace & Changelist Messages
 
 ### `ShelveCL`
-Uploads modified/added scratch files, computes recursive Merkle tree hashes, and records a changelist or new patchset.
+
+Records a new changelist or appends a new patchset ($N+1$) to an existing changelist.
 
 ```protobuf
 message ShelveCLRequest {
   string workspace_id = 1;
-  string author = 2;          // Author username or authenticated principal
-  string description = 3;     // Changelist commit message
-  bytes root_tree_hash = 4;   // 32-byte Merkle root computed by client
-  int64 parent_cl = 5;        // Parent changelist (or 0 for trunk head)
+  string author = 2;
+  string description = 3;
+  bytes root_tree_hash = 4;   // 32-byte Merkle root of the shelved tree
+  int64 parent_cl = 5;        // Parent CL ID (0 for trunk head)
   repeated string reviewers = 6;
-  int64 cl_id = 7;            // Optional: specify existing CL ID to upload a new patchset
+  int64 cl_id = 7;            // Optional: existing CL ID to update with a new patchset
 }
 
 message ShelveCLResponse {
-  int64 cl_id = 1;            // Assigned or updated Changelist ID
+  int64 cl_id = 1;
 }
 ```
 
 ### `SubmitCL`
-Atomically transitions a changelist to `submitted` status in a serialized PostgreSQL transaction. If parent CL lags behind trunk head, performs automated 3-way Merkle tree merge. Automatically cascades rebases across stacked child changelists.
+
+Atomically commits an approved changelist to the linear trunk inside a serialized PostgreSQL transaction (`pg_advisory_xact_lock`) and cascades rebases to stacked child CLs.
 
 ```protobuf
 message SubmitCLRequest {
-  int64 cl_id = 1;            // Changelist ID to submit
+  int64 cl_id = 1;
   bool force = 2;             // Bypass non-blocking presubmit warnings
 }
 
 message SubmitCLResponse {
   int64 cl_id = 1;
-  int64 committed_at_unix = 2; // Timestamp of trunk submission
-  repeated int64 rebased_children = 3; // Child CLs automatically re-parented onto trunk
+  int64 committed_at_unix = 2;
+  repeated int64 rebased_children = 3;
 }
 ```
 
 ### `SyncWorkspace`
-Reconciles client workspace metadata with upstream parent or trunk movements.
+
+Reconciles a workspace's base tree with the latest trunk head or parent CL revision.
 
 ```protobuf
 message SyncWorkspaceRequest {
   string workspace_id = 1;
-  int64 cl_id = 2;            // Active changelist ID or 0 for base CL
+  int64 cl_id = 2;
 }
 
 message SyncWorkspaceResponse {
   string workspace_id = 1;
   int64 cl_id = 2;
   int64 parent_cl = 3;
-  bytes root_tree_hash = 4;   // New base Merkle root tree
+  bytes root_tree_hash = 4;
   bytes parent_root_tree_hash = 5;
-  bool needs_rebase = 6;      // True if merge conflicts exist
+  bool needs_rebase = 6;
   string rebase_conflict_details = 7;
   int32 patchset_number = 8;
 }
@@ -185,14 +187,13 @@ message SyncWorkspaceResponse {
 
 ---
 
-## 6. Standard RPC Error Codes
+## 6. gRPC Status Codes
 
-| Status Code | Trigger Condition | Recommended Client Action |
+| Status Code | Trigger Condition | Client Action |
 | :--- | :--- | :--- |
-| `OK` (0) | Success | Proceed. |
-| `InvalidArgument` (3) | Missing `cl_id`, empty description, or corrupt hash | Validate inputs before making RPC. |
-| `NotFound` (5) | Target CL, blob hash, or workspace does not exist | Verify CL ID or workspace registration. |
-| `FailedPrecondition` (9) | Submission blocked by required approvals, failing check runs, or merge conflict | Run `niebla sync` or collect required code reviews. |
-| `Unauthenticated` (16) | Missing or invalid bearer token | Set `NIEBLA_TOKEN` or authenticate with `niebla login`. |
-| `PermissionDenied` (7) | Attempting to shelve/submit without subtree ownership rights | Obtain sign-off in `OWNERS.toml`. |
-
+| `OK` (`0`) | Request succeeded. | Proceed. |
+| `InvalidArgument` (`3`) | Malformed SHA-256 hash, missing `cl_id`, or empty description. | Check request arguments. |
+| `NotFound` (`5`) | Requested CL, workspace, or CAS blob hash does not exist. | Verify the CL ID or upload missing blobs first. |
+| `PermissionDenied` (`7`) | Caller lacks required `OWNERS.toml` permissions. | Request approval from a subtree owner. |
+| `FailedPrecondition` (`9`) | Submit blocked by missing approvals, unresolved threads, failing CI, or conflict. | Run `niebla sync` or resolve open review gates. |
+| `Unauthenticated` (`16`) | Missing or invalid bearer token. | Set `NIEBLA_TOKEN` or `core.auth_token`. |

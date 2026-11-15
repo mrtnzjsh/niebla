@@ -1,59 +1,55 @@
 ---
-title: "Deploying over Tailscale & WireGuard"
-description: Accessing niebla-server and Cotejo securely across your private tailnet with zero port forwarding, WireGuard encryption, and automatic Tailscale WhoIs identity resolution.
+title: "Tailscale Private Mesh"
+description: Access niebla-server and Cotejo across a private Tailscale WireGuard mesh with zero public port forwarding and automatic Tailscale WhoIs authentication.
 sidebar:
-  order: 6
-  label: Tailscale & Private Mesh Networks
+  order: 2
 ---
 
-By combining Niebla with **Tailscale**, you can access your remote repository server (`niebla-server` on port 50051) and code review interface (`cotejo` on port 8080) from any developer laptop, MacBook, or mobile workstation without opening public firewall ports or managing complex VPN gateways.
+Running Niebla over **Tailscale** lets you connect to a remote `niebla-server` (port `50051`) and `cotejo` (port `8080`) from any workstation on your tailnet without opening public firewall ports.
 
-Cotejo natively integrates with Tailscale's local daemon API: when configured with `[critique.auth] mode = "tailscale"`, Cotejo queries `/run/tailscale/tailscaled.sock` using Tailscale WhoIs to authenticate users automatically based on their verified WireGuard peer connection.
+When configured with `[critique.auth] mode = "tailscale"`, Cotejo queries the local `tailscaled` [Unix domain socket](https://en.wikipedia.org/wiki/Unix_domain_socket) (`/run/tailscale/tailscaled.sock`) using **Tailscale WhoIs** to identify users automatically from their verified [WireGuard](https://en.wikipedia.org/wiki/WireGuard) peer connection—requiring no login screens or passwords.
 
 ```mermaid
 flowchart LR
-    subgraph Laptop["Developer Laptop / MacBook"]
-        CLI["niebla CLI<br/>(MagicDNS: <code>niebla-server:50051</code>)"]
-        Browser["Local Browser<br/>(<code>http://niebla-server:8080</code>)"]
+    subgraph Laptop["Developer Workstation"]
+        CLI["niebla CLI<br/>(<code>monorepo-box:50051</code>)"]
+        Browser["Browser<br/>(<code>http://monorepo-box:8080</code>)"]
     end
 
-    subgraph Tailnet["Encrypted Tailscale Mesh (WireGuard 100.x.y.z)"]
-        Peer["Peer-to-Peer WireGuard Tunnel"]
+    subgraph Tailnet["Tailscale Mesh (WireGuard 100.x.y.z)"]
+        Peer["Encrypted Peer Tunnel"]
     end
 
-    subgraph Host["Remote Workstation / Dedicated Server"]
-        Tailscaled["tailscaled Daemon<br/>(WhoIs Unix Socket)"]
-        Server["niebla-server Daemon<br/>(gRPC :50051)"]
-        Cotejo["Cotejo Review UI<br/>(HTTP :8080)"]
-        Cotejo -->|"WhoIs Peer Query"| Tailscaled
-        Server --> Cotejo
+    subgraph Host["Remote Niebla Server"]
+        Tailscaled["tailscaled Daemon<br/>(WhoIs Socket)"]
+        Server["niebla-server (:50051)"]
+        Cotejo["Cotejo UI (:8080)"]
+        Cotejo -->|"WhoIs Query"| Tailscaled
+        Cotejo --> Server
     end
 
-    Laptop -->|"End-to-End Encrypted"| Tailnet --> Host
+    Laptop --> Tailnet --> Host
 ```
 
 ---
 
-## 1. Configure the Remote Host
+## 1. Configure the Remote Server Host
 
-On the machine hosting `niebla-server` and `cotejo` (e.g., your home server, office workstation, or dedicated build machine), install and authenticate Tailscale:
+Authenticate the server host on your tailnet and note its MagicDNS hostname (for example, `monorepo-box`):
 
 ```bash
-sudo tailscale up --ssh
+sudo tailscale up
 ```
-
-Note your machine's **MagicDNS name** (for example, `monorepo-box.tailnet1234.ts.net` or simply `monorepo-box`).
 
 ### Server Configuration (`~/.config/niebla/config.toml`)
 
-Configure the services to bind to all interfaces (`0.0.0.0`) so they are accessible over the Tailscale interface (`tailscale0`):
+Bind `niebla-server` and `cotejo` to `0.0.0.0` (or specifically to the host's `100.x.y.z` Tailscale IP) and set Cotejo's authentication mode to `tailscale`:
 
 ```toml
-# ~/.config/niebla/config.toml
 version = 1
 
 [core]
-server_addr = "0.0.0.0:50051"
+server_addr = "127.0.0.1:50051"
 default_workspace = "default"
 
 [server]
@@ -69,53 +65,33 @@ port = 8080
 proxy_port = 7331
 
 [critique.auth]
-# Native Tailscale WhoIs identity integration
 mode = "tailscale"
-# Fallback username if connection originates from non-tailnet loopback
 default_user = "$USER"
 ```
 
-### Granting Tailscale Socket Permissions
+### Grant Socket Permissions
 
-Cotejo queries `/run/tailscale/tailscaled.sock` to identify incoming peer connections. Ensure the user running `cotejo` has read/write permissions to the socket:
+Ensure the OS user running `cotejo` can read `/run/tailscale/tailscaled.sock`:
 
 ```bash
-# Verify socket exists
 ls -l /run/tailscale/tailscaled.sock
-
-# Add your user to the tailscale group if applicable
 sudo usermod -aG tailscale $USER
 ```
 
-Start the services:
-
-```bash
-niebla-server &
-cotejo &
-```
+Start `niebla-server` and `cotejo` (see [Local & Workstation Setup](/niebla/recipes/local-setup/#running-the-local-services)).
 
 ---
 
-## 2. Connect from Your Developer Laptop
+## 2. Configure the Client Workstation
 
-On your laptop (macOS or Linux), join the same Tailnet:
-
-```bash
-tailscale up
-```
-
-### Client Configuration (`~/.config/niebla/config.toml`)
-
-Create a client configuration pointing to the host's MagicDNS name:
+Join the same tailnet on your laptop or workstation and point `~/.config/niebla/config.toml` to the server's MagicDNS name:
 
 ```toml
-# ~/.config/niebla/config.toml
 version = 1
 
 [core]
-# Use the Tailscale MagicDNS name or 100.x.y.z IP
 server_addr = "monorepo-box:50051"
-default_workspace = "feature-laptop"
+default_workspace = "default"
 
 [fs]
 mount_base = "$HOME/Developer/workspaces"
@@ -127,50 +103,18 @@ Verify connectivity:
 ```console
 $ niebla workspace list
 ✓ Connected to monorepo-box:50051
-Active Workspaces: (0)
 ```
+
+When you open `http://monorepo-box:8080` in your browser, Cotejo resolves your Tailscale identity automatically via WhoIs.
 
 ---
 
-## 3. Developing and Reviewing over Tailnet
+## 3. Automatic HTTPS with Tailscale Serve
 
-### Creating a Workspace
-Create a local materialized workspace on your laptop:
-
-```console
-$ niebla workspace create my-feature --no-fuse
-✓ Materialized workspace 'my-feature' in 92ms
-  Location: /Users/developer/Developer/workspaces/my-feature
-```
-
-### Reviewing in Cotejo with Automatic Tailscale Auth
-When you shelve a changelist:
-
-```console
-$ niebla shelve -m "Refactor telemetry pipeline"
-✓ Shelved Patchset 1 for CL #84
-  Review: http://monorepo-box:8080/cl/84
-```
-
-Open `http://monorepo-box:8080/cl/84` in your browser. 
-
-Cotejo immediately identifies you by your verified Tailscale account name (e.g., `alice@example.com` or `alice`) via Tailscale WhoIs—without requiring any passwords, bearer tokens, or login screens!
-
----
-
-## 4. HTTPS & Custom Domains via Tailscale Serve
-
-If you want automatic Let's Encrypt TLS certificates and HTTPS on port 443 for Cotejo without managing certificates manually, use **Tailscale Serve**:
-
-On the server host:
+To expose Cotejo over HTTPS (port `443`) with automatic Let's Encrypt certificates on your tailnet domain, run **Tailscale Serve** on the server host:
 
 ```bash
-# Forward incoming HTTPS on port 443 of your MagicDNS name to local Cotejo on 8080
 sudo tailscale serve --bg 8080
 ```
 
-Now you can access Cotejo securely at:
-
-```
-https://monorepo-box.tailnet1234.ts.net/
-```
+Cotejo is then available at `https://monorepo-box.<tailnet-name>.ts.net/`.

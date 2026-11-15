@@ -1,74 +1,57 @@
 ---
-title: "Fully Local All-in-One Instance"
-description: Complete walkthrough for running niebla-server, PostgreSQL, CAS blob storage, Cotejo review UI, and the CLI on a single workstation or laptop.
+title: "Local & Workstation Setup"
+description: Configure Niebla as a local all-in-one instance on a single machine or as a remote client workstation on Linux and macOS.
 sidebar:
   order: 1
-  label: Fully Local All-in-One Setup
 ---
 
-Running Niebla in a fully local, all-in-one configuration is the fastest way to evaluate the toolchain, develop features offline, or set up a self-contained single-developer workstation.
+You can run the entire Niebla stack (`niebla-server`, PostgreSQL, [CAS](https://en.wikipedia.org/wiki/Content-addressable_storage) storage, Cotejo, and the `niebla` CLI) on a single workstation, or configure a laptop as a lightweight client connected to a remote `niebla-server`.
 
-In this topology, every subsystem—the central gRPC daemon (`niebla-server`), the metadata database (PostgreSQL), the Content-Addressable Storage (CAS) directory, the Cotejo code review web interface (`cotejo`), and developer virtual workspaces—executes on a single physical host.
+---
+
+## 1. Local All-in-One Setup (Single Machine)
+
+In an all-in-one setup, every component runs on `127.0.0.1` with zero external network dependencies.
 
 ```mermaid
 flowchart TD
-    subgraph Host["Local Workstation / Laptop (Single Host)"]
-        CLI["niebla CLI<br/>(Developer Terminal)"]
-        FUSE["Workspace Mount<br/><code>~/niebla/workspaces/</code><br/>(FUSE / Direct)"]
-        Server["niebla-server Daemon<br/>(gRPC :50051)"]
-        Cotejo["Cotejo Web Review<br/>(HTTP :8080)"]
-        PG[("PostgreSQL<br/>(Auto-Spawned or Local)")]
+    subgraph Host["Local Workstation (Single Host)"]
+        CLI["niebla CLI"]
+        FUSE["Workspace Mount<br/><code>~/niebla/workspaces/</code>"]
+        Server["niebla-server<br/>(gRPC :50051)"]
+        Cotejo["Cotejo Web UI<br/>(HTTP :8080)"]
+        PG[("PostgreSQL")]
         CAS[("CAS Blob Store<br/><code>~/.cache/niebla/blobs</code>")]
 
-        CLI -->|"1. Merkle RPCs"| Server
-        CLI -->|"2. CoW Virtual FS"| FUSE
-        Cotejo -->|"3. Read/Review CLs"| Server
-        Server -->|"4. Transactions & CLs"| PG
-        Server -->|"5. Chunk Storage"| CAS
+        CLI -->|"gRPC"| Server
+        CLI -->|"CoW Scratch"| FUSE
+        Cotejo -->|"gRPC"| Server
+        Server --> PG
+        Server --> CAS
         FUSE -.->|"On-Demand Blobs"| CAS
     end
 ```
 
----
+### Configuration (`~/.config/niebla/config.toml`)
 
-## 1. Prerequisites
-
-Before starting, ensure your local environment satisfies:
-
-- **Operating System:** Linux (Kernel $\ge 5.10$ for FUSE / `io_uring`) or macOS (using `--no-fuse` direct materialization).
-- **PostgreSQL:** Version 14+ installed locally (or Docker if using containerized database).
-- **FUSE:** `fuse3` package installed on Linux (e.g., `sudo apt install fuse3` or `pkgs.fuse3` on NixOS).
-
----
-
-## 2. Minimal Local Configuration
-
-Niebla's auto-initialization generates baseline defaults out of the box, but creating an explicit `~/.config/niebla/config.toml` gives you complete control over local paths and ports.
-
-Run `niebla config init` or write the following skeleton:
+Run `niebla config init` or create `~/.config/niebla/config.toml`:
 
 ```toml
-# ~/.config/niebla/config.toml
 version = 1
 
 [core]
-# Local loopback address for gRPC
 server_addr = "127.0.0.1:50051"
 default_workspace = "default"
 
 [server]
 host = "127.0.0.1"
 port = 50051
-# Connect via local PostgreSQL socket or standard TCP port
 db_url = "postgres:///niebla?host=/run/postgresql"
-# Automatically launch local PostgreSQL if not running
 auto_db = true
-# Local CAS blob root path
 blob_path = "$HOME/.cache/niebla/blobs"
 cache_size = 10000
 
 [fs]
-# Directory where virtual workspaces are mounted
 mount_base = "$HOME/niebla/workspaces"
 cache_dir = "$HOME/.cache/niebla/blobs"
 
@@ -76,9 +59,7 @@ cache_dir = "$HOME/.cache/niebla/blobs"
 host = "127.0.0.1"
 port = 8080
 proxy_port = 7331
-# Automatically defaults to your active OS user
 default_reviewer = "$USER"
-# In local mode, zero approvals are required so you can submit your own CLs
 required_approvals = 0
 allow_submit_with_unresolved_comments = false
 
@@ -91,50 +72,30 @@ preset = "catppuccin-mocha"
 syntax_style = "catppuccin-mocha"
 ```
 
-Verify your configuration with the fast-fail validator:
+Validate your configuration:
 
 ```console
 $ niebla config validate
 ✓ Configuration is valid (/home/developer/.config/niebla/config.toml)
 ```
 
----
+### Running the Local Services
 
-## 3. Starting the Local Services
-
-You can launch `niebla-server` and `cotejo` either as background terminal processes or as systemd user services.
-
-### Option A: Interactive Foreground (Development Mode)
+#### Option A: Interactive Foreground
 
 Open two terminal tabs:
 
-**Terminal 1 — Repository Daemon:**
 ```bash
+# Terminal 1: Repository daemon
 niebla-server --config ~/.config/niebla/config.toml
-```
-*Output:*
-```
-21:40:00 [INFO] niebla-server starting on 127.0.0.1:50051
-21:40:00 [INFO] PostgreSQL connection established: niebla
-21:40:00 [INFO] CAS blob storage initialized at /home/developer/.cache/niebla/blobs
-21:40:00 [INFO] gRPC server listening on 127.0.0.1:50051
-```
 
-**Terminal 2 — Cotejo Web Review:**
-```bash
+# Terminal 2: Cotejo review UI
 cotejo --config ~/.config/niebla/config.toml
 ```
-*Output:*
-```
-21:40:05 [INFO] cotejo listening on http://127.0.0.1:8080 (theme: catppuccin-mocha)
-21:40:05 [INFO] connected to niebla-server at 127.0.0.1:50051
-```
 
----
+#### Option B: Persistent `systemd` User Services
 
-### Option B: Systemd User Services (Persistent Background)
-
-For a persistent workstation setup that survives reboots, configure systemd user services:
+To keep `niebla-server` and `cotejo` running across reboots on Linux:
 
 **`~/.config/systemd/user/niebla-server.service`:**
 ```ini
@@ -173,75 +134,45 @@ systemctl --user daemon-reload
 systemctl --user enable --now niebla-server cotejo
 ```
 
-Check status:
-
-```bash
-systemctl --user status niebla-server cotejo
-```
+Once running, follow the [Quickstart Walkthrough](/niebla/getting-started/quickstart/) to create your first workspace, shelve a changelist, and submit it to trunk.
 
 ---
 
-## 4. End-to-End Developer Workflow
+## 2. Remote Client Workstation Setup (Linux & macOS)
 
-With services running, test the full local development lifecycle:
+When connecting a developer laptop to a shared or remote `niebla-server`, the workstation only needs the `niebla` CLI (plus `nieblafs` if using [FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace) mounts on Linux). You do not need to run PostgreSQL, `niebla-server`, or `cotejo` locally.
 
-### Step 1: Create a Workspace
-```console
-$ niebla workspace create feature-search
-✓ Workspace feature-search created in 12ms (base CL: #0)
-  Mounted at: /home/developer/niebla/workspaces/feature-search
+### Client Configuration (`~/.config/niebla/config.toml`)
+
+Point `server_addr` to the remote server and omit the `[server]` and `[critique]` blocks:
+
+```toml
+version = 1
+
+[core]
+server_addr = "niebla.internal.example.com:50051"
+default_workspace = "main-dev"
+
+# Optional: TLS and bearer token authentication for remote gRPC
+tls_cert = "$HOME/.config/niebla/certs/ca.crt"
+auth_token_env = "NIEBLA_AUTH_TOKEN"
+
+[fs]
+mount_base = "$HOME/Developer/workspaces"
+cache_dir = "$HOME/.cache/niebla/blobs"
 ```
 
-### Step 2: Make Code Edits
+If your server requires bearer token authentication, export `NIEBLA_AUTH_TOKEN` in your shell profile (`~/.zshrc` or `~/.bashrc`):
+
 ```bash
-cd ~/niebla/workspaces/feature-search
-mkdir -p internal/search
-cat <<'EOF' > internal/search/search.go
-package search
-
-func Find(query string) []string {
-    return []string{"result-1", "result-2"}
-}
-EOF
+export NIEBLA_AUTH_TOKEN="niebla_pat_9f8e7d6c5b4a3f2e1d0c"
 ```
 
-### Step 3: Inspect Scratch Overlay
-```console
-$ niebla status
-Workspace: feature-search
-Base CL:   #0 (Trunk)
+### Linux vs. macOS Workspaces
 
-Changes (CoW Scratch):
-  A  internal/search/search.go
-```
-
-### Step 4: Shelve a Changelist
-```console
-$ niebla shelve -m "Add internal search package"
-✓ Shelved Patchset 1 for CL #101
-  Review: http://127.0.0.1:8080/cl/101
-```
-
-### Step 5: Review & Submit
-1. Open [`http://127.0.0.1:8080/cl/101`](http://127.0.0.1:8080/cl/101) in your browser.
-2. Inspect the syntax-highlighted diff.
-3. Because `required_approvals = 0` in local mode, you can submit immediately from your terminal:
-
-```console
-$ niebla submit
-✓ CL #101 committed to trunk monotonically (Commit Hash: 8f4a1c72)
-  Workspace synced with trunk.
-```
-
----
-
-## 5. Cleaning Up Workspaces
-
-When your feature is merged, safely unmount and remove the scratch workspace:
-
-```console
-$ cd ~
-$ niebla workspace delete feature-search
-✓ Workspace feature-search unmounted and deleted.
-```
-
+* **Linux Workstations (FUSE or Direct):**
+  * **FUSE Mount (default):** `niebla workspace create my-feature` mounts a [copy-on-write](https://en.wikipedia.org/wiki/Copy-on-write) virtual workspace in `< 50ms` and streams file blobs on demand into `~/.cache/niebla/blobs`.
+  * **Direct Materialization:** Pass `--no-fuse` (`niebla workspace create my-feature --no-fuse`) if running inside an unprivileged container or if you prefer standard local files.
+* **macOS Workstations (`--no-fuse`):**
+  * Because `nieblafs` targets the Linux FUSE kernel interface, macOS clients use direct materialization (`niebla workspace create my-feature --no-fuse` or `--path ./dir` to restrict to a subtree).
+  * See [Direct Materialization (`--no-fuse`)](/niebla/workflows/direct-materialization/) for details on scoped checkouts and local blob caching.

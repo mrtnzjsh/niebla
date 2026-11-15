@@ -1,149 +1,89 @@
 ---
-title: System Architecture & Technology Stack
-description: Low-level architectural breakdown of Niebla's multi-tiered monorepo toolchain, RPC protocols, persistence layers, and review engine.
+title: System Architecture
+description: Overview of Niebla's four core binaries, RPC protocols, storage layers, and local-only network boundaries.
 ---
 
-Niebla is a server-authoritative, virtualized monorepo version control and code review toolchain. It is inspired by the design principles of Google's internal developer infrastructure: **Piper** (central monorepo repository daemon), **CitC** (*Client in the Cloud*, virtual FUSE-based workspaces), and **Critique** (patchset-oriented web code review).
-
-This document outlines the system topology, technology choices, IPC/RPC protocols, data storage engines, and end-to-end transaction lifecycles that govern the Niebla ecosystem.
+Niebla separates local workspace operations from canonical repository storage. Workstations never download full repository histories; instead, they mount lightweight workspaces and communicate with a central server over [gRPC](https://en.wikipedia.org/wiki/GRPC).
 
 ---
 
-## 1. System Topology & Data Flow
+## 1. Component Overview
 
-Niebla separates filesystem mutation from canonical storage. Workstations never download entire repository packfiles or perform local graph traversals. Instead, workstations run lightweight virtual filesystem mounts, communicating with a central daemon over high-throughput gRPC.
+Niebla consists of four statically compiled Go binaries:
 
 ```mermaid
 flowchart TD
-    subgraph Client["DEVELOPER WORKSTATION"]
-        direction TB
-        subgraph CLI["niebla CLI (Cobra POSIX Client)"]
-            C1["Workspace Lifecycle (create, sync, destroy)"]
-            C2["Change Inspection (status, diff against base CL)"]
-            C3["Shelving & Submissions (shelve, submit)"]
-        end
+    subgraph Client["Developer Workstation"]
+        CLI["<b>niebla CLI</b><br/>Workspace lifecycle, status, diff, shelve, submit"]
+        FUSE["<b>nieblafs Daemon</b><br/>FUSE VFS (/dev/fuse), LRU metadata cache, CoW scratch"]
+        CASLocal[("<b>Local CAS Cache</b><br/>~/.cache/niebla/blobs")]
 
-        subgraph FUSE["nieblafs (Virtual FUSE Daemon)"]
-            F1["Kernel VFS (/dev/fuse) ◄── POSIX Syscalls"]
-            F2["In-Memory Metadata LRU Cache"]
-            F3["Copy-on-Write Scratch Layer (~/.niebla/workspaces/)"]
-        end
+        CLI --> FUSE
+        FUSE --> CASLocal
     end
 
-    subgraph Server["NIEBLA BACKEND SERVER"]
-        direction TB
-        subgraph NS["niebla-server (Central Repository Daemon)"]
-            S1["gRPC Service Interface (niebla.v1 Protobuf)"]
-            S2["PostgreSQL 16+ via pgx/v5 & sqlc"]
-            S3["Content-Addressable Storage (pkg/cas)"]
-        end
+    subgraph Server["Repository Server"]
+        NS["<b>niebla-server (:50051)</b><br/>gRPC API, Merkle tree engine, cascade rebaser"]
+        PG[("<b>PostgreSQL 16+</b><br/>CLs, patchsets, trees, comments")]
+        CASRemote[("<b>Central CAS Store</b><br/>SHA-256 sharded blobs")]
 
-        subgraph Cotejo["cotejo (Web Code Review Server :8080)"]
-            W1["Type-Safe HTML Components (templ)"]
-            W2["Real-Time SSE Event Pipeline"]
-            W3["Intra-Line Chroma Syntax Diff Engine"]
-            W4["AI Review Hints & Patchsets"]
-        end
+        NS --> PG
+        NS --> CASRemote
     end
 
-    Client -->|"gRPC over HTTP/2 (niebla.v1)<br/>Unary Metadata + Streaming Blobs"| Server
+    subgraph Review["Code Review Web UI"]
+        Cotejo["<b>cotejo (:8080)</b><br/>Templ SSR views, intra-line diffs, SSE stream"]
+    end
+
+    CLI -->|"gRPC (niebla.v1)"| NS
+    FUSE -.->|"64KB Blob Streaming"| NS
+    Cotejo -->|"SQL &amp; CAS Reads"| PG
+    Cotejo -->|"Blob Diffs"| CASRemote
 ```
+
+| Binary | Role | Key Responsibilities |
+| :--- | :--- | :--- |
+| `niebla` | Developer CLI | Creates workspaces, calculates $O(\text{changed})$ status and diffs against base [Merkle trees](https://en.wikipedia.org/wiki/Merkle_tree), shelves patchsets, and submits CLs to trunk. See [CLI Command Reference](/niebla/reference/cli/). |
+| `nieblafs` | Virtual Filesystem Daemon | Mounts workspaces via Linux `/dev/fuse` ([FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace)), serves directory trees from memory, streams file blobs on demand, and redirects writes to a [Copy-on-Write (CoW)](https://en.wikipedia.org/wiki/Copy-on-write) scratch folder. See [NieblaFS Internals](/niebla/architecture/fuse-internals/). |
+| `niebla-server` | Central Repository Daemon | Authoritative gRPC service (`:50051`) managing [Content-Addressable Storage (CAS)](https://en.wikipedia.org/wiki/Content-addressable_storage), PostgreSQL metadata, linear trunk revisions, and automated cascade rebases. See [Repository Server](/niebla/components/server/). |
+| `cotejo` | Web Code Review Server | Web interface (`:8080`) for reviewing patchsets, intra-line word diffs, threaded comments, attention sets, and one-click code suggestions. See [Cotejo Overview](/niebla/cotejo/overview/). |
 
 ---
 
-## 2. Technology Stack Breakdown
+## 2. Technology Stack
 
-Each component within Niebla is built with modern, statically typed, and dependency-conscious technologies chosen for high concurrency, zero-runtime GC overhead where possible, and strict POSIX/VFS compliance.
-
-### Core Language & Runtime
-* **Go 1.26**: The entire toolchain (`niebla-server`, `nieblafs`, `niebla`, and `cotejo`) is written in Go. Go was selected for its native CSP concurrency primitives (`goroutines`, `channels`), first-class POSIX system call support (`golang.org/x/sys`), and robust cross-platform networking stack.
-* **Hermetic Packaging via Nix**: Builds are managed declaratively using [`flake.nix`](https://github.com/mrtnzjsh/niebla/blob/main/niebla/flake.nix). Toolchain binaries compile with zero external dynamic runtime library requirements on Linux and macOS.
-
-### Virtual Filesystem (VFS) Layer
-* **`bazil.org/fuse`**: A pure-Go FUSE library communicating directly with the Linux kernel `/dev/fuse` interface.
-* **Kernel Cache Coordination**: Implements `fs.FS`, `fs.Node`, `fs.NodeStringLookuper`, `fs.HandleReadDirAller`, `fs.HandleReader`, and `fs.HandleWriter`. Virtual directory lookups and attributes (`getattr`, `readdir`) are served from local memory, while file bodies are streamed on-demand.
-* **In-Memory Caching (`hashicorp/golang-lru/v2`)**: Thread-safe Least Recently Used (LRU) cache storing directory manifests, inode mappings, and hot CAS blob chunks.
-
-### Inter-Process Communication & RPC Protocol
-* **gRPC & Protocol Buffers (`niebla.v1`)**: All network communications between CLI clients, FUSE daemons, and `niebla-server` use HTTP/2 gRPC with Protobuf v3 definitions (`pkg/proto/v1/niebla.proto`).
-* **Streaming Chunks**: Large file operations avoid in-memory buffering. Blob transfers use bidirectional or server-streaming RPCs (`stream BlobChunk`) with fixed `64KB` buffers (`DefaultChunkSize = 64 * 1024`).
-* **Connection Pooling & Resiliency**: Client channels support automated backoff retry, keepalive pings, and transient failure recovery (`pkg/resilience`).
-
-### Persistence & Relational Metadata
-* **PostgreSQL 16+**: Canonical storage for monorepo history, changelists, patchset revisions, comments, approvals, and attention sets.
-* **`jackc/pgx/v5` & `puddle/v2`**: High-performance PostgreSQL driver using binary format protocol and concurrent connection pooling.
-* **Compile-Time Type Safety (`sqlc`)**: All SQL queries (`internal/db/queries/*.sql`) are compiled into type-safe Go structs and transaction methods (`internal/db/sqlc/`), eliminating ORM overhead and runtime reflection errors.
-* **Concurrency Locking (`pg_advisory_xact_lock`)**: Submit operations serialize trunk revision assignments using database transaction-scoped advisory locks, guaranteeing strictly monotonic revision IDs without race conditions.
-
-### Content-Addressable Storage (CAS)
-* **Two-Level Prefix Fanout**: Blobs are addressed strictly by their cryptographic SHA-256 digest. File storage paths are partitioned using the first 4 characters of the hex string:
-  ```text
-  ${STORAGE_PATH}/ab/cd/abcdef0123456789...
-  ```
-  This prevents filesystem inode exhaustion in flat directories when storing millions of objects.
-* **Atomic Writes via Temporary Buffers**: Uploads stream to a staging directory (`${STORAGE_PATH}/.tmp/<uuid>`). Upon SHA-256 verification, the file is atomically renamed into its final partitioned location.
-* **Transparent Compression**: Compresses text and source code assets on disk using `klauspost/compress/zstd`.
-
-### Code Review Engine (Cotejo)
-* **Compiled HTML Templates (`a-h/templ`)**: Server-side rendered (SSR) templates compiled ahead-of-time into Go code. Provides zero-runtime template parsing, extreme rendering speeds, and compile-time type checking of all UI props.
-* **Intra-Line Syntax Diffing (`alecthomas/chroma/v2` & `sergi/go-diff`)**: Performs syntax tokenization and character/word-level diff analysis to render Critique-style side-by-side and unified diffs.
-* **Real-Time Reactivity (Server-Sent Events)**: Clients establish a lightweight HTTP event stream (`/events`). When reviews, inline comments, or AI suggestions are posted, DOM updates are pushed instantly without requiring heavyweight WebSocket protocols or full-page reloads.
-
-### Configuration & Tooling
-* **Strict TOML Engine (`pelletier/go-toml/v2`)**: Fast-fail configuration parsing for `~/.config/niebla/config.toml`, `.niebla/OWNERS.toml`, `.niebla/hooks.toml`, and `.niebla/agents.toml`.
-* **Cobra CLI (`spf13/cobra`)**: Standard POSIX CLI interface with shell auto-completion and `--json` machine-readable output.
-* **Integration Testing (`testcontainers/testcontainers-go`)**: Unit and functional tests spin up ephemeral, production-identical PostgreSQL containers inside Docker/Podman for hermetic test execution.
+* **Language & Packaging:** Written in Go 1.26 (`CGO_ENABLED=0`) and packaged declaratively with [Nix](https://en.wikipedia.org/wiki/Nix_(package_manager)) (`flake.nix`).
+* **Virtual Filesystem:** `bazil.org/fuse` for `/dev/fuse` communication and `hashicorp/golang-lru/v2` for in-memory [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) directory and [inode](https://en.wikipedia.org/wiki/Inode) caching.
+* **RPC & Streaming:** HTTP/2 [gRPC](https://en.wikipedia.org/wiki/GRPC) with [Protocol Buffers](https://en.wikipedia.org/wiki/Protocol_Buffers) v3 (`niebla.v1`). File transfers stream in fixed 64 KB chunks (`stream BlobChunk`) without buffering entire files in RAM.
+* **Database:** PostgreSQL 16+ accessed via `jackc/pgx/v5` and compile-time type-safe SQL generated by `sqlc`. Trunk commits serialize using transaction-scoped advisory locks (`pg_advisory_xact_lock`).
+* **Content-Addressable Storage (CAS):** Blobs are stored by [SHA-256](https://en.wikipedia.org/wiki/SHA-2) hash using a two-level directory fanout (`ab/cd/<sha256>`) and compressed with [Zstandard (`zstd`)](https://en.wikipedia.org/wiki/Zstandard).
+* **Web Review UI:** Server-side HTML templates compiled ahead of time with `a-h/templ`, syntax-highlighted intra-line diffs via `alecthomas/chroma/v2` and `sergi/go-diff`, and real-time browser updates over [Server-Sent Events (SSE)](https://en.wikipedia.org/wiki/Server-sent_events).
+* **Configuration:** Validated [TOML](https://en.wikipedia.org/wiki/TOML) files (`pelletier/go-toml/v2`) under `~/.config/niebla/` for host settings and `.niebla/` for in-tree governance.
 
 ---
 
-## 3. End-to-End Data Lifecycle
+## 3. End-to-End Request Flow
 
-To understand how Niebla's components operate together, consider the lifecycle of an edit made by a developer:
-
-```
-[Developer File Edit]
-        │
-        ▼
-1. VFS Write: Kernel routes syscalls to /dev/fuse.
-   nieblafs intercepts write() -> Promotes file to Copy-on-Write (CoW) scratch layer:
-   ~/.niebla/workspaces/<ws>/scratch/src/main.go
-        │
-        ▼
-2. Inspection: Developer runs `niebla status`.
-   niebla CLI scans the local CoW scratch layer, compares file hashes against
-   the base changelist Merkle tree (cached from niebla-server), and reports modifications.
-        │
-        ▼
-3. Shelving: Developer runs `niebla shelve -m "feat: updated auth handler"`.
-   a. niebla CLI streams new/modified scratch blobs to niebla-server via UploadBlob gRPC.
-   b. Server writes blobs to CAS: ab/cd/<sha256>.
-   c. CLI computes new Merkle tree root hash and calls ShelveCL.
-   d. PostgreSQL records new patchset (cl_patchsets), generates CL ID (e.g. CL 104),
-      and records pending state.
-        │
-        ▼
-4. Code Review: Reviewers open Cotejo at http://<server-host>:8080/cl/104.
-   a. Cotejo retrieves base tree hash and patchset tree hash from PostgreSQL.
-   b. Diffs are generated on-the-fly by streaming blob pairs from CAS and highlighting
-      via Chroma v2.
-   c. Reviewer posts inline comment with code suggestion.
-   d. Server stores comment in cl_comments and broadcasts update via SSE.
-        │
-        ▼
-5. Trunk Submission: Author runs `niebla submit --cl 104`.
-   a. niebla-server acquires pg_advisory_xact_lock(1) to serialize trunk submission.
-   b. Verifies all mandatory OWNERS.toml approvals and passing CI check runs.
-   c. Advances trunk_revision_seq and marks CL status as 'submitted'.
-   d. Cascade Rebase Engine: Server queries all active stacked child CLs whose parent_cl = 104,
-      computes automated 3-way Merkle tree rebases, and notifies authors of clean merges or conflicts.
-```
+1. **Edit (`nieblafs`):** When you edit a file inside a mounted workspace, `nieblafs` intercepts the write call and copies the file into your local scratch directory (`~/.niebla/workspaces/<ws>/scratch/`).
+2. **Inspect (`niebla status` / `diff`):** The CLI scans only the local scratch directory, comparing modified files and `.wh.*` deletion markers against the base changelist's Merkle tree.
+3. **Shelve (`niebla shelve`):** The CLI streams modified scratch files to `niebla-server` via `UploadBlob`, builds a new Merkle root hash, and calls `ShelveCL` to record a new changelist or patchset in PostgreSQL.
+4. **Review (`cotejo`):** Reviewers open the changelist URL in Cotejo, inspect side-by-side or inter-patchset diffs, leave inline comments, and approve (`LGTM`).
+5. **Submit (`niebla submit`):** `niebla-server` acquires `pg_advisory_xact_lock`, verifies `OWNERS.toml` approvals, resolved comments, and green CI runs, advances the trunk revision counter, and automatically rebases any child changelists stacked on top.
 
 ---
 
-## 4. Next Steps & Related Deep Dives
+## 4. Network & Privacy Boundaries
 
-* [The FUSE Virtual Filesystem (`nieblafs`) Internals](/niebla/architecture/fuse-internals/): Low-level documentation on kernel inode management, whiteout files, and streaming fetchers.
-* [`niebla-server` Technical Manual](/niebla/components/server/): Database schema, CAS engine, and cascade rebasing engine.
-* [Security & Authentication Architecture](/niebla/reference/security-auth/): Comprehensive guide to bearer tokens, TLS 1.3, Cotejo identity, CI credentials, and zero-trust mesh setups.
-* [`niebla` CLI Reference](/niebla/reference/cli/): Complete command reference, flags, and configuration resolution order.
-* [Cotejo Review UI Architecture](/niebla/cotejo/overview/): Critique-inspired interface, attention sets, and real-time SSE stream.
+Niebla is self-hosted open-source software (MIT License) with **zero telemetry**:
+* None of the four binaries phone home, collect usage analytics, or contact external servers on their own.
+* All workspace traffic flows strictly between your workstation (`niebla` / `nieblafs`) and your own `niebla-server`.
+* Outbound network connections from `niebla-server` or `cotejo` occur only if you explicitly configure webhooks (`[events]`), external CI runners (`[ci]`), remote backup targets (`[resilience]`), or an LLM API (`[critique.ai]`).
+
+---
+
+## Component Deep Dives
+
+* **[NieblaFS (Virtual Filesystem)](/niebla/architecture/fuse-internals/):** Kernel VFS integration, lazy blob streaming, CoW scratch overlays, and `nieblafs` flags.
+* **[CAS & Merkle Trees](/niebla/components/cas-storage/):** SHA-256 blob sharding, atomic writes, and 3-way Merkle tree merges.
+* **[Repository Server (`niebla-server`)](/niebla/components/server/):** Database schema, trunk serialization locks, and cascade rebasing.
+* **[Security & Authentication](/niebla/reference/security-auth/):** Bearer tokens, TLS 1.3, proxy headers, and webhook signatures.

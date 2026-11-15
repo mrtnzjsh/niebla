@@ -60,31 +60,63 @@ export default defineConfig({
       sidebar: [
         {
           label: 'Getting Started',
-          autogenerate: { directory: 'getting-started' },
+          items: [
+            { label: 'Overview & Philosophy', slug: 'getting-started/philosophy' },
+            { label: 'Installation & Setup', slug: 'getting-started/installation' },
+            { label: 'Quickstart Walkthrough', slug: 'getting-started/quickstart' },
+          ],
         },
         {
-          label: 'Architecture & Internals',
-          autogenerate: { directory: 'architecture' },
-        },
-        {
-          label: 'Component Manuals',
-          autogenerate: { directory: 'components' },
+          label: 'Design & Components',
+          items: [
+            { label: 'System Architecture', slug: 'architecture/tech-stack' },
+            { label: 'NieblaFS (Virtual Filesystem)', slug: 'architecture/fuse-internals' },
+            { label: 'CAS & Merkle Trees', slug: 'components/cas-storage' },
+            { label: 'Repository Server', slug: 'components/server' },
+          ],
         },
         {
           label: 'Workflows',
-          autogenerate: { directory: 'workflows' },
+          items: [
+            { label: 'Workspaces & Storage', slug: 'workflows/workspaces' },
+            { label: 'Development Lifecycle', slug: 'workflows/development-lifecycle' },
+            { label: 'Direct Materialization (--no-fuse)', slug: 'workflows/direct-materialization' },
+            { label: 'IDE Setup', slug: 'workflows/ide-setup' },
+            { label: 'In-Tree Governance (OWNERS.toml)', slug: 'workflows/in-tree-governance' },
+            { label: 'Offline Development', slug: 'workflows/offline-mode' },
+            { label: 'Troubleshooting', slug: 'workflows/troubleshooting' },
+          ],
         },
         {
-          label: 'Cotejo Review',
-          autogenerate: { directory: 'cotejo' },
+          label: 'Cotejo Code Review',
+          items: [
+            { label: 'Overview & Attention Sets', slug: 'cotejo/overview' },
+            { label: 'Review Lifecycle & Diffs', slug: 'cotejo/review-workflows' },
+            { label: 'AI Hints & Suggestions', slug: 'cotejo/ai-assistance' },
+            { label: 'Authentication & Theming', slug: 'cotejo/deployment-auth' },
+          ],
         },
         {
-          label: 'Reference & Schemas',
-          autogenerate: { directory: 'reference' },
+          label: 'How-To Guides',
+          items: [
+            { label: 'Local & Workstation Setup', slug: 'recipes/local-setup' },
+            { label: 'Tailscale Private Mesh', slug: 'recipes/tailscale' },
+            { label: 'Production & Cloud Deployments', slug: 'recipes/cloud-deployments' },
+            { label: 'ZFS Backups & Disaster Recovery', slug: 'recipes/disaster-recovery' },
+            { label: 'Logging & Observability', slug: 'recipes/logging-observability' },
+          ],
         },
         {
-          label: 'Recipes & How-Tos',
-          autogenerate: { directory: 'recipes' },
+          label: 'Reference',
+          items: [
+            { label: 'CLI Command Reference', slug: 'reference/cli' },
+            { label: 'Configuration Schema', slug: 'reference/configuration' },
+            { label: 'AI Agent Skills', slug: 'reference/skills' },
+            { label: 'gRPC Wire Protocol', slug: 'reference/grpc-api' },
+            { label: 'Cotejo HTTP & REST API', slug: 'reference/cotejo-api' },
+            { label: 'CloudEvents & Webhooks', slug: 'reference/events' },
+            { label: 'Security & Authentication', slug: 'reference/security-auth' },
+          ],
         },
       ],
     }),

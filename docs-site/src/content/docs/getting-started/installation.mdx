@@ -1,6 +1,6 @@
 ---
-title: Installation & Setup Matrix
-description: Multi-platform installation guides for pre-built GitHub releases, source builds across Linux distros, macOS, and NixOS.
+title: Installation & Setup
+description: Install Niebla v0.1.0 on NixOS, Linux, and macOS from pre-built releases or source.
 tableOfContents: false
 sidebar:
   order: 2
@@ -9,69 +9,50 @@ sidebar:
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-Niebla provides multiple installation options depending on your operating system, package manager, and development role:
+Niebla compiles into four self-contained Go binaries with zero external runtime dependencies:
+* `niebla` — Developer CLI for managing workspaces, inspecting diffs, shelving CLs, and submitting to [trunk](https://en.wikipedia.org/wiki/Trunk-based_development).
+* `nieblafs` — [FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace) virtual filesystem daemon for Linux workstations.
+* `niebla-server` — Central [gRPC](https://en.wikipedia.org/wiki/GRPC) repository server and [CAS](https://en.wikipedia.org/wiki/Content-addressable_storage) coordinator.
+* `cotejo` — Web code review server.
 
-- **Pre-built Binaries**: Download statically compiled binaries directly from the GitHub Releases tab.
-- **Build from Source**: Compile natively using Go and Make across Debian/Ubuntu, Fedora/RHEL, Arch, Alpine, and macOS.
-- **macOS Workstations**: Comprehensive client setup via Homebrew, source builds, direct binaries, or Nix-Darwin with direct file materialization (`--no-fuse`).
-- **NixOS & Flakes**: Declarative system modules with automated service supervision and isolated PostgreSQL.
-
----
+Select your platform below to install Niebla `v0.1.0`:
 
 <Tabs>
-  <TabItem label="macOS (Darwin)">
-    macOS developers typically run the `niebla` client to connect to a remote `niebla-server` daemon (such as `<server-host>:50051`). Because macOS does not include an in-kernel FUSE driver by default, the client operates in high-performance **direct materialization mode (`--no-fuse`)**.
+  <TabItem label="NixOS & Home Manager">
+    On NixOS, the repository flake provides a declarative system module (`services.niebla`) that provisions `niebla-server`, `cotejo`, and an isolated PostgreSQL instance automatically.
 
-    #### Option A: Pre-built Binary (GitHub Releases)
-    Download and install the pre-compiled binary for Apple Silicon (`arm64`) or Intel (`amd64`):
-
-    ```bash
-    # Set target release version and CPU architecture
-    VERSION="<version>" # e.g. v0.1.0
-    ARCH="arm64"        # "arm64" (M1-M4) or "amd64" (Intel)
-
-    # Download release archive
-    curl -sSL -O "https://github.com/<owner>/<repo>/releases/download/${VERSION}/niebla_${VERSION}_darwin_${ARCH}.tar.gz"
-    tar -xzf "niebla_${VERSION}_darwin_${ARCH}.tar.gz"
-
-    # Install to PATH
-    sudo install -m 755 niebla /usr/local/bin/
-    # Or for Apple Silicon Homebrew PATH:
-    # install -m 755 niebla /opt/homebrew/bin/
-    ```
-
-    #### Option B: Compile from Source (Standard Go)
-    Build the client directly using Go and standard Apple command line tools:
-
-    ```bash
-    # 1. Install prerequisites via Homebrew (if not already installed)
-    brew install go make git
-
-    # 2. Clone the repository
-    git clone https://github.com/<owner>/<repo>.git
-    cd niebla/niebla
-
-    # 3. Compile the niebla client binary
-    mkdir -p bin
-    go build -o bin/niebla ./cmd/niebla
-
-    # 4. Install into your PATH
-    sudo install -m 755 bin/niebla /usr/local/bin/
-    ```
-
-    #### Option C: Homebrew Tap
-    If using the official Homebrew tap:
-
-    ```bash
-    brew tap <owner>/tap
-    brew install niebla
-    ```
-
-    #### Option D: Declarative Nix (nix-darwin / Home Manager)
-    For workstations managed declaratively with Nix:
+    #### 1. Add the Flake Input
+    Add `niebla` to your `flake.nix`:
 
     ```nix
-    # home.nix or configuration.nix
+    inputs.niebla = {
+      url = "github:mrtnzjsh/niebla";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    ```
+
+    #### 2. Enable the NixOS Service (Server + Client)
+    ```nix
+    imports = [ inputs.niebla.nixosModules.default ];
+
+    services.niebla = {
+      enable = true;
+      postgres.enable = true; # Isolated PostgreSQL instance on port 5433
+      server.enable = true;   # Repository gRPC daemon on port 50051
+      cotejo.enable = true;   # Code review web UI on port 8080
+      client.enable = true;   # Installs niebla & nieblafs in system PATH
+    };
+    ```
+
+    Apply the configuration:
+    ```bash
+    sudo nixos-rebuild switch --flake .
+    ```
+
+    #### Client-Only Home Manager Module (Linux / nix-darwin)
+    If you only need the `niebla` client and AI agent skills on a workstation:
+
+    ```nix
     imports = [ inputs.niebla.homeManagerModules.default ];
 
     programs.niebla = {
@@ -79,171 +60,108 @@ Niebla provides multiple installation options depending on your operating system
       enableSkills = true;
     };
     ```
-
-    #### Client Configuration (`default_mode = "no-fuse"`)
-    To configure your macOS client to always connect to your central server and default to `--no-fuse` without typing the flag on every workspace invocation, add the following to `~/.config/niebla/config.toml`:
-
-    ```toml
-    # ~/.config/niebla/config.toml
-    server = "<server-host>:50051"
-    default_mode = "no-fuse"
-    ```
-
-    With this setting, creating workspaces is as simple as:
-
-    ```bash
-    niebla workspace create my-feature
-    cd ~/.niebla/workspaces/my-feature
-    ```
   </TabItem>
 
-  <TabItem label="GitHub Releases (Linux)">
-    Pre-compiled release archives are published for Linux (`x86_64`, `aarch64`).
+  <TabItem label="Linux (Pre-built Release)">
+    Pre-compiled release archives are available for Linux (`amd64` and `arm64`).
 
-    #### 1. Download Release Tarball & Checksums
-    Replace `<owner>`, `<repo>`, and `<version>` with your repository coordinates:
-
+    #### 1. Download & Verify the Archive
     ```bash
-    # Set target release version and system architecture
-    VERSION="<version>" # e.g. v0.1.0
-    ARCH="amd64"        # amd64 or arm64
-    OS="linux"          # linux
+    VERSION="v0.1.0"
+    ARCH="amd64" # "amd64" or "arm64"
 
-    # Download release tarball and SHA-256 checksums
-    curl -sSL -O "https://github.com/<owner>/<repo>/releases/download/${VERSION}/niebla_${VERSION}_${OS}_${ARCH}.tar.gz"
-    curl -sSL -O "https://github.com/<owner>/<repo>/releases/download/${VERSION}/checksums.txt"
+    curl -sSL -O "https://github.com/mrtnzjsh/niebla/releases/download/${VERSION}/niebla_${VERSION}_linux_${ARCH}.tar.gz"
+    curl -sSL -O "https://github.com/mrtnzjsh/niebla/releases/download/${VERSION}/checksums.txt"
 
-    # Verify cryptographic integrity
     sha256sum --check --ignore-missing checksums.txt
     ```
 
-    #### 2. Extract and Install Binaries
-    Extract the archive and move the binaries to a system-wide PATH directory:
-
+    #### 2. Install Binaries to `PATH`
     ```bash
-    tar -xzf "niebla_${VERSION}_${OS}_${ARCH}.tar.gz"
-
-    # System-wide installation
-    sudo install -m 755 niebla /usr/local/bin/
-    sudo install -m 755 nieblafs /usr/local/bin/
-    sudo install -m 755 niebla-server /usr/local/bin/
-    sudo install -m 755 cotejo /usr/local/bin/
+    tar -xzf "niebla_${VERSION}_linux_${ARCH}.tar.gz"
+    sudo install -m 755 niebla nieblafs niebla-server cotejo /usr/local/bin/
     ```
 
-    For non-root user installations, install into `~/.local/bin/`:
-
-    ```bash
-    mkdir -p ~/.local/bin
-    install -m 755 niebla nieblafs niebla-server cotejo ~/.local/bin/
-    ```
-
-    #### 3. Verify Installation
-    ```bash
-    niebla --version
-    nieblafs --version
-    niebla-server --version
-    cotejo --version
-    ```
+    For a non-root install, copy the binaries to `~/.local/bin/` instead.
   </TabItem>
 
-  <TabItem label="Build from Source (Linux)">
-    Building from source allows power users and contributors to run bleeding-edge Niebla binaries across any Linux distribution.
+  <TabItem label="Linux (Build from Source)">
+    Building from source requires Go 1.26+ and `fuse3` for virtual workspace mounts.
 
-    #### 1. Install System Dependencies
-    Compiling `nieblafs` requires the FUSE user-space development headers (`fuse3` or `libfuse`):
+    #### 1. Install Dependencies
+    * **Debian / Ubuntu:**
+      ```bash
+      sudo apt update && sudo apt install -y git make golang-go fuse3 libfuse3-dev pkg-config
+      ```
+    * **Fedora / RHEL:**
+      ```bash
+      sudo dnf install -y git make golang fuse3 fuse3-devel pkgconf-pkg-config
+      ```
+    * **Arch Linux:**
+      ```bash
+      sudo pacman -S --needed git make go fuse3 pkgconf
+      ```
+    * **Alpine Linux:**
+      ```bash
+      apk add git make go fuse3-dev build-base
+      ```
 
-    **Ubuntu / Debian / Pop!_OS**:
+    #### 2. Clone & Build
     ```bash
-    sudo apt update
-    sudo apt install -y git make golang-go fuse3 libfuse3-dev pkg-config
+    git clone https://github.com/mrtnzjsh/niebla.git
+    cd niebla
+    CGO_ENABLED=0 go build -o bin/niebla ./cmd/niebla
+    CGO_ENABLED=0 go build -o bin/nieblafs ./cmd/nieblafs
+    CGO_ENABLED=0 go build -o bin/niebla-server ./cmd/niebla-server
+    CGO_ENABLED=0 go build -o bin/cotejo ./cmd/cotejo
+
+    sudo install -m 755 bin/niebla bin/nieblafs bin/niebla-server bin/cotejo /usr/local/bin/
     ```
 
-    **Fedora / RHEL / Rocky Linux**:
+    #### 3. Enable Non-Root FUSE Mounts
+    Ensure `/etc/fuse.conf` allows user mounts:
     ```bash
-    sudo dnf install -y git make golang fuse3 fuse3-devel pkgconf-pkg-config
-    ```
-
-    **Arch Linux / Manjaro**:
-    ```bash
-    sudo pacman -S --needed git make go fuse3 pkgconf
-    ```
-
-    **Alpine Linux**:
-    ```bash
-    apk add git make go fuse3-dev build-base
-    ```
-
-    #### 2. Clone the Repository
-    ```bash
-    git clone https://github.com/<owner>/<repo>.git
-    cd niebla/niebla
-    ```
-
-    #### 3. Compile Binaries
-    Run `make build` to generate all four core binaries into `bin/`:
-
-    ```bash
-    make build
-    ```
-
-    If you only need the developer CLI without the web review server or backend daemons:
-    ```bash
-    mkdir -p bin
-    go build -o bin/niebla ./cmd/niebla
-    go build -o bin/nieblafs ./cmd/nieblafs
-    ```
-
-    #### 4. Install Binaries to System PATH
-    ```bash
-    sudo install -m 755 bin/niebla /usr/local/bin/
-    sudo install -m 755 bin/nieblafs /usr/local/bin/
-    sudo install -m 755 bin/niebla-server /usr/local/bin/
-    sudo install -m 755 bin/cotejo /usr/local/bin/
-    ```
-
-    #### 5. Configure User-Space FUSE Permissions
-    To allow `nieblafs` to expose virtual workspace mounts across non-root user sessions, ensure `/dev/fuse` is accessible and `user_allow_other` is enabled:
-
-    ```bash
-    # Ensure current user is in the fuse group (Debian/Ubuntu)
-    sudo usermod -aG fuse "$USER"
-
-    # Enable user_allow_other in /etc/fuse.conf
+    sudo usermod -aG fuse "$USER" 2>/dev/null || true
     sudo sed -i 's/#user_allow_other/user_allow_other/' /etc/fuse.conf || echo "user_allow_other" | sudo tee -a /etc/fuse.conf
     ```
   </TabItem>
 
-  <TabItem label="NixOS (Flake Module)">
-    On NixOS systems, Niebla provides fully managed systemd service isolation, PostgreSQL management, and automated CAS path generation.
+  <TabItem label="macOS (Darwin)">
+    macOS workstations run the `niebla` CLI in [Direct Materialization Mode (`--no-fuse`)](/niebla/workflows/direct-materialization/), which requires no kernel extensions (`macFUSE` is not needed).
 
-    #### 1. Add Niebla Flake Input
-    Add the `niebla` input to your system `flake.nix`:
-
-    ```nix
-    inputs.niebla = {
-      url = "github:<owner>/<repo>";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    ```
-
-    #### 2. Configure System Services
-    Import the NixOS module and enable the desired service profiles:
-
-    ```nix
-    imports = [ inputs.niebla.nixosModules.default ];
-
-    services.niebla = {
-      enable = true;
-      postgres.enable = true; # Dedicated PostgreSQL cluster on port 5433
-      server.enable = true;   # gRPC central daemon on port 50051
-      cotejo.enable = true;   # Cotejo code review web server on port 8080
-      client.enable = true;   # Installs niebla & nieblafs in system profile
-    };
-    ```
-
-    #### 3. Rebuild System
+    #### Option A: Pre-built Release Binary
     ```bash
-    sudo nixos-rebuild switch --flake .
+    VERSION="v0.1.0"
+    ARCH="arm64" # "arm64" (Apple Silicon) or "amd64" (Intel)
+
+    curl -sSL -O "https://github.com/mrtnzjsh/niebla/releases/download/${VERSION}/niebla_${VERSION}_darwin_${ARCH}.tar.gz"
+    tar -xzf "niebla_${VERSION}_darwin_${ARCH}.tar.gz"
+    sudo install -m 755 niebla /usr/local/bin/
+    ```
+
+    #### Option B: Build from Source
+    ```bash
+    brew install go git
+    git clone https://github.com/mrtnzjsh/niebla.git
+    cd niebla
+    CGO_ENABLED=0 go build -o /usr/local/bin/niebla ./cmd/niebla
+    ```
+
+    #### Configure Default `--no-fuse` Mode
+    Export `NIEBLA_NO_FUSE=true` in `~/.zshrc` (or pass `--no-fuse` when creating workspaces) and point `[core]` in `~/.config/niebla/config.toml` to your server:
+    ```toml
+    version = 1
+
+    [core]
+    server_addr = "127.0.0.1:50051" # Or your remote server address
     ```
   </TabItem>
 </Tabs>
+
+---
+
+## Next Steps
+
+* **[Quickstart Walkthrough](/niebla/getting-started/quickstart/):** Create your first workspace, shelve a changelist, and submit it to trunk.
+* **[Local & Workstation Setup](/niebla/recipes/local-setup/):** Run a standalone local server with PostgreSQL or connect a laptop client to a remote server.
+* **[Configuration Schema](/niebla/reference/configuration/):** Full reference for `~/.config/niebla/config.toml`.

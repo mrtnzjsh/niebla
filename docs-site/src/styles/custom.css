@@ -434,47 +434,69 @@ html[data-theme='light'] .expressive-code {
    Main Pane Prioritization & Responsive Content Sizing
    ========================================================================== */
 :root {
-	--sl-content-width: 45rem;
-	--sl-content-width-expanded: 75rem;
+	--sl-content-width: 52rem;
+	--sl-content-width-expanded: 76rem;
 }
 
 @media (min-width: 85rem) {
 	:root {
-		--sl-content-width: 48rem;
+		--sl-content-width: 56rem;
 	}
 }
 
 @media (min-width: 95rem) {
 	:root {
-		--sl-content-width: 52rem;
+		--sl-content-width: 60rem;
 	}
 }
 
 @media (min-width: 105rem) {
 	:root {
-		--sl-content-width: 58rem;
+		--sl-content-width: 64rem;
 	}
 }
 
 @media (min-width: 120rem) {
 	:root {
-		--sl-content-width: 64rem;
+		--sl-content-width: 70rem;
 	}
 }
 
 /* Ensure Main Pane never overflows flex boundaries or overlaps sidebars */
 .main-pane {
 	min-width: 0 !important;
+	max-width: 100% !important;
+	overflow-x: hidden !important;
 	overflow-wrap: break-word;
 }
 
 .content-panel {
 	min-width: 0 !important;
 	max-width: 100% !important;
+	box-sizing: border-box !important;
 }
 
-.sl-container {
+.main-pane .sl-container {
 	min-width: 0 !important;
+	width: 100% !important;
+	max-width: min(100%, var(--sl-content-width)) !important;
+	box-sizing: border-box !important;
+}
+
+.sl-markdown-content {
+	min-width: 0 !important;
+	width: 100% !important;
+	max-width: 100% !important;
+	box-sizing: border-box !important;
+}
+
+.niebla-table-wrap {
+	width: 100% !important;
+	max-width: 100% !important;
+	overflow-x: auto !important;
+	-webkit-overflow-scrolling: touch;
+	margin: 1.25rem 0 1.75rem 0 !important;
+	box-sizing: border-box !important;
 }
 
 /* ==========================================================================
@@ -502,16 +524,16 @@ html[data-nav-collapsed="true"] .main-frame {
 /* Center pane expands to occupy reclaimed space when left nav is collapsed
    (Scoped strictly to .main-pane so the Table of Contents container is never affected) */
 html[data-nav-collapsed="true"] .main-pane .sl-container {
-	max-width: var(--sl-content-width-expanded, 75rem) !important;
+	max-width: min(100%, var(--sl-content-width-expanded, 76rem)) !important;
 	margin-inline: auto !important;
 }
 
 @media (min-width: 72rem) {
 	/* Fixed Width, Strictly Contained Right Sidebar on Desktop */
 	html:not([data-toc-collapsed="true"]) .right-sidebar-container {
-		width: 18.75rem !important;
-		min-width: 18.75rem !important;
-		max-width: 18.75rem !important;
+		width: 16.5rem !important;
+		min-width: 16.5rem !important;
+		max-width: 16.5rem !important;
 		flex-shrink: 0 !important;
 	}
 
@@ -520,22 +542,23 @@ html[data-nav-collapsed="true"] .main-pane .sl-container {
 		top: 0 !important;
 		right: 0 !important;
 		left: auto !important;
-		width: 18.75rem !important;
-		min-width: 18.75rem !important;
-		max-width: 18.75rem !important;
+		z-index: var(--sl-z-index-toc, 4) !important;
+		width: 16.5rem !important;
+		min-width: 16.5rem !important;
+		max-width: 16.5rem !important;
 		height: 100vh !important;
 		overflow-y: auto !important;
 		overflow-x: hidden !important;
 		box-sizing: border-box !important;
 		border-inline-start: 1px solid var(--sl-color-hairline) !important;
 		padding-top: var(--sl-nav-height) !important;
-		--sl-sidebar-width: 18.75rem !important;
+		--sl-sidebar-width: 16.5rem !important;
 	}
 
 	/* Main pane takes the exact remaining width */
 	html:not([data-toc-collapsed="true"]) .main-pane {
-		width: calc(100% - 18.75rem) !important;
-		max-width: calc(100% - 18.75rem) !important;
+		width: calc(100% - 16.5rem) !important;
+		max-width: calc(100% - 16.5rem) !important;
 		--sl-content-margin-inline: auto !important;
 	}
 }
@@ -604,7 +627,7 @@ html[data-toc-collapsed="true"] .main-pane {
 }
 
 html[data-toc-collapsed="true"] .main-pane .sl-container {
-	max-width: var(--sl-content-width-expanded, 75rem) !important;
+	max-width: min(100%, var(--sl-content-width-expanded, 76rem)) !important;
 	margin-inline: auto !important;
 }
 
@@ -616,7 +639,7 @@ html[data-nav-collapsed="true"][data-toc-collapsed="true"] .main-pane {
 }
 
 html[data-nav-collapsed="true"][data-toc-collapsed="true"] .main-pane .sl-container {
-	max-width: var(--sl-content-width-expanded, 82rem) !important;
+	max-width: min(100%, var(--sl-content-width-expanded, 82rem)) !important;
 	margin-inline: auto !important;
 }
 
@@ -630,18 +653,15 @@ html[data-nav-collapsed="true"][data-toc-collapsed="true"] .main-pane .sl-contai
 	table-layout: auto !important;
 	border-collapse: separate !important;
 	border-spacing: 0 !important;
-	margin: 1.5rem 0 2rem 0 !important;
+	margin: 1.25rem 0 1.75rem 0 !important;
 	border: 1px solid var(--sl-color-hairline) !important;
 	border-radius: 0.625rem !important;
-	font-size: 0.8125rem !important;
+	font-size: 0.84rem !important;
+	box-sizing: border-box !important;
 }
 
-@media (max-width: 50rem) {
-	.sl-markdown-content table {
-		display: block !important;
-		overflow-x: auto !important;
-		-webkit-overflow-scrolling: touch;
-	}
+.niebla-table-wrap > table {
+	margin: 0 !important;
 }
 
 html[data-theme='dark'] .sl-markdown-content table {
@@ -663,18 +683,21 @@ html[data-theme='light'] .sl-markdown-content table {
 	font-size: 0.75rem !important;
 	text-transform: uppercase !important;
 	letter-spacing: 0.04em !important;
-	padding: 0.45rem 0.75rem !important;
+	padding: 0.5rem 0.65rem !important;
 	border-bottom: 1px solid var(--sl-color-hairline) !important;
-	overflow-wrap: break-word !important;
+	white-space: normal !important;
+	overflow-wrap: normal !important;
+	word-break: keep-all !important;
 }
 
 .sl-markdown-content td {
-	padding: 0.45rem 0.75rem !important;
+	padding: 0.5rem 0.65rem !important;
 	border-bottom: 1px solid rgba(241, 245, 249, 0.08) !important;
 	vertical-align: top !important;
-	line-height: 1.42 !important;
-	font-size: 0.8125rem !important;
+	line-height: 1.48 !important;
+	font-size: 0.84rem !important;
 	overflow-wrap: break-word !important;
+	word-break: normal !important;
 }
 
 .sl-markdown-content tr:last-child td {
@@ -685,13 +708,28 @@ html[data-theme='light'] .sl-markdown-content table {
 	background: rgba(45, 212, 191, 0.04) !important;
 }
 
+/* Keep CLI flags and option names in the first column on a single unbroken line */
 .sl-markdown-content table td:first-child {
 	font-weight: 600 !important;
 }
 
-.sl-markdown-content table td code {
-	font-size: 0.78rem !important;
-	padding: 0.1rem 0.3rem !important;
+.sl-markdown-content table td:first-child code,
+.sl-markdown-content li > code,
+.sl-markdown-content li > strong > code,
+.sl-markdown-content p > code {
+	font-size: 0.8125rem !important;
+	padding: 0.12rem 0.35rem !important;
+	white-space: nowrap !important;
+	word-break: keep-all !important;
+}
+
+/* Allow long URIs, paths, and expressions in secondary table columns to wrap cleanly inside the cell */
+.sl-markdown-content table td:not(:first-child) code {
+	font-size: 0.8125rem !important;
+	padding: 0.12rem 0.35rem !important;
+	white-space: normal !important;
+	overflow-wrap: anywhere !important;
+	word-break: normal !important;
 }
 
 /* ==========================================================================

@@ -1,150 +1,81 @@
 ---
-title: "Cotejo Overview & Philosophy"
-description: Architecture, Google Critique review model, attention sets, inbox segregation, and per-reviewer file tracking in Cotejo.
+title: Overview & Attention Sets
+description: How Cotejo replaces pull-request commit soup with immutable patchsets, attention sets, and per-reviewer file progress tracking.
 sidebar:
   order: 1
-  label: Overview & Philosophy
+  label: Overview & Attention Sets
 ---
 
-**Cotejo** is Niebla's native, web-based code review interface, inspired by Google's internal **Critique** review platform. It is engineered from the ground up to solve the friction, ambiguity, and merge-skew inherent in distributed Git pull-request workflows at monorepo scale.
+**Cotejo** (*pronounced* **koh-TEH-hoh**, [IPA](https://en.wikipedia.org/wiki/Help:IPA/Spanish): `[koˈte.xo]`, port `8080`) is Niebla's web code review interface. Instead of reviewing Git branches full of fixup and merge commits, Cotejo organizes code review around immutable **Patchsets** and an explicit **Attention Set**.
 
-Operating on port `8080` (with live-reload proxy on port `7331` for development), Cotejo integrates directly with `niebla-server`, Content-Addressable Storage (CAS), and PostgreSQL.
+:::tip[What does "Cotejo" mean?]
+***Cotejo*** (from the Spanish verb *cotejar*) means a **"side-by-side comparison," "collation,"** or **"critical examination of two documents against each other."** In archival and legal Spanish, a *cotejo* is the act of comparing a revised draft against an original record to verify every change—matching how reviewers inspect side-by-side intra-line and inter-patchset diffs in Cotejo.
+:::
 
 ---
 
-## The Paradigm Shift: Patchsets vs. Pull Requests
+## 1. Patchsets vs. Pull Requests
 
-Most modern developer platforms treat code review as a series of Git branches and pull requests. In enterprise monorepos, this creates fundamental issues:
-
-| Git Pull Request Dilemma | The Cotejo / Critique Solution |
+| Pull Request Friction | Cotejo Patchset Model |
 | :--- | :--- |
-| **Commit Soup:** Fixup commits, merges, and rebases clutter history during review. | **Linear Patchset Stack:** Each review round is an immutable Merkle tree snapshot (**Patchset 1, Patchset 2, ...**). |
-| **Branch Clones & Merge Conflicts:** Merging a stale branch into trunk can break silently. | **Server-Side Rebase & Inter-Diffs:** Reviewers can diff any patchset against any other patchset to see *only* what changed since their last review. |
-| **Ambiguous Ownership:** Anyone can approve or merge if branch rules aren't granular. | **Declarative `OWNERS.toml` Gates:** Subtree owners retain explicit sign-off authority; submissions are blocked until required approvers sign off. |
-| **Unfocused Inboxes:** Human reviewers get flooded with automated bot alerts. | **Attention Sets & Inbox Segregation:** Automated bots are partitioned into a dedicated queue; attention sets clarify exactly who must act next. |
+| **Commit soup:** Fixup commits, merges, and force-pushes obscure what changed during review. | **Linear patchsets:** Each `niebla shelve` creates an immutable snapshot (**Patchset 1, Patchset 2, ...**). |
+| **Re-reading whole PRs:** Reviewers must scan the entire diff again after minor updates. | **Inter-patchset diffs:** Compare **Patchset 1 vs. Patchset 2** to inspect *only* the lines changed since your last review. |
+| **Ambiguous ownership:** Unclear who is authorized to approve specific directories. | **In-tree `OWNERS.toml` gates:** Subtree owners and approval quotas are evaluated automatically before submit. |
+| **Noisy inboxes:** Bot notifications bury human reviews. | **Attention sets & separate queues:** Automated bot CLs are separated into their own tab; attention sets show whose turn it is to act. |
 
 ```mermaid
-flowchart TD
-    subgraph GitModel["Traditional Git Pull Request"]
-        C1["Initial Commit"] --> C2["WIP Fixup 1"]
-        C2 --> C3["Rebase / Merge trunk"]
-        C3 --> C4["Address review comments"]
-        C4 --> C5["Squash and merge"]
-    end
-
-    subgraph CotejoModel["Niebla / Cotejo Patchset Model"]
-        P1["Patchset 1<br/><i>(Initial Shelf)</i>"]
-        P2["Patchset 2<br/><i>(Address Feedback)</i>"]
-        P3["Patchset 3<br/><i>(One-Click AI Fix)</i>"]
-        P1 -->|"Inter-Diff"| P2
-        P2 -->|"Inter-Diff"| P3
-        P3 -->|"Atomic Linear Merge"| Trunk["Committed Trunk Head"]
-    end
+flowchart LR
+    P1["Patchset 1<br/><i>(Initial Shelve)</i>"] -->|"Inter-Diff"| P2["Patchset 2<br/><i>(Address Feedback)</i>"]
+    P2 -->|"Inter-Diff"| P3["Patchset 3<br/><i>(Apply Suggestion)</i>"]
+    P3 -->|"niebla submit"| Trunk["Trunk Revision N"]
 ```
 
 ---
 
-## Core Architectural Foundations
+## 2. The Attention Set
 
-Cotejo is implemented as a compiled, high-performance Go web service using [`a-h/templ`](https://github.com/a-h/templ) for type-safe server-side rendering, [`alecthomas/chroma/v2`](https://github.com/alecthomas/chroma) for syntax highlighting, and Server-Sent Events (SSE) for real-time reactivity without WebSocket overhead.
-
-```mermaid
-flowchart TD
-    Browser["Browser Client<br/><i>(SSE + HTMX / Alpine)</i>"]
-
-    subgraph Cotejo["Cotejo Web Service (:8080)"]
-        direction TB
-        subgraph WebHandlers["HTTP Handlers (internal/web)"]
-            CL["cl.go (Changelist & Inbox)"]
-            CM["comments.go (Threads & Ranges)"]
-            AI["ai_hint.go (AI Suggestions)"]
-            CI["ci.go (Check Runs)"]
-        end
-
-        subgraph TemplViews["Compiled Views (internal/web/views)"]
-            V1["layout.templ"]
-            V2["cl_detail.templ"]
-            V3["diff_view.templ"]
-            V4["comment_box.templ"]
-        end
-
-        Engine["Intra-Line Word Diff Engine + SSE Dispatcher"]
-
-        WebHandlers --> TemplViews
-        WebHandlers --> Engine
-    end
-
-    subgraph Storage["niebla-server & Database"]
-        CAS[("CAS Blob Storage<br/><i>(~/.cache/niebla/blobs)</i>")]
-        DB[("PostgreSQL<br/><i>(cl_comments, cl_approvals, patchsets)</i>")]
-    end
-
-    Browser -->|"HTTP GET / POST & SSE (/events)"| Cotejo
-    Cotejo -->|"CAS Blobs & Merkle Trees"| CAS
-    Cotejo -->|"Metadata & Queries"| DB
-```
-
----
-
-## The Attention Set: Eliminating Review Deadlocks
-
-In typical code review systems, reviews stall because it is unclear whose court the ball is in. Cotejo adopts the **Attention Set state machine**:
+Code reviews often stall when it isn't obvious who needs to act next. Cotejo tracks an **Attention Set** on every changelist:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ReviewerTurn: Author shelves CL (niebla shelve)
-    ReviewerTurn --> AuthorTurn: Reviewer requests changes or posts comments
-    AuthorTurn --> ReviewerTurn: Author publishes Patchset N+1
-    ReviewerTurn --> Approved: Reviewer grants LGTM (Approved)
-    Approved --> [*]: Author submits to trunk (niebla submit)
+    [*] --> ReviewerTurn: Author runs niebla shelve
+    ReviewerTurn --> AuthorTurn: Reviewer publishes comments / requests changes
+    AuthorTurn --> ReviewerTurn: Author shelves Patchset N+1
+    ReviewerTurn --> Approved: Reviewer grants LGTM
+    Approved --> [*]: Author runs niebla submit
 ```
 
-1. **Author Shelves CL:** The author's turn is done; assigned reviewers and directory approvers enter the Attention Set.
-2. **Reviewer Posts Comments:** Once comments are published, the reviewer leaves the Attention Set and the author enters it.
-3. **Author Pushes Update:** When the author runs `niebla shelve` to upload Patchset 2, the Attention Set flips back to the reviewers.
-4. **Approval:** Once approved, the author regains attention to perform `niebla submit`.
-
-At any time, developers can look at their inbox and see only changelists where **their action is required**.
+1. **Shelve:** Assigned reviewers enter the Attention Set.
+2. **Comment / Request Changes:** When a reviewer publishes comments, the reviewer leaves the Attention Set and the author enters it.
+3. **New Patchset:** When the author shelves an updated patchset, attention returns to the reviewers.
+4. **Approval (`LGTM`):** Attention returns to the author to run `niebla submit`.
 
 ---
 
-## Review Inbox Segregation & Bot Protection
+## 3. Inbox Queues
 
-In large monorepos, automated tools (security scanners, accessibility checkers, linters, dependency bots) can quickly cause review fatigue. Cotejo solves this by partitioning the inbox into distinct queues:
+The Cotejo dashboard (`/cls`) separates changelists into focused queues so automated tooling never buries human reviews:
 
-* **My Review Queue (`/cls?tab=my-reviews`):**
-  High-priority queue containing changelists where the authenticated user (or one of their group aliases like `@auth-team`) is explicitly listed in the Attention Set.
-* **Out for Review (`/cls?tab=outgoing`):**
-  Pending changelists authored by you, showing current reviewer status, unresolved comment counts, and CI results.
-* **Agent / Automated (`/cls?tab=agents`):**
-  Automated background changes produced by review bots, dependency updaters, and scheduled CI workflows (matching `agent/*`, `bot/*`, `*[bot]`, `*@agent*`, `ci/*`). These changelists are badged with a distinct `🤖 Agent` tag and isolated from human notifications.
-* **Submitted / Trunk (`/cls?tab=submitted`):**
-  Recently merged changelists for audit and history tracking.
-* **All (`/cls?tab=all`):**
-  Global monorepo changelist stream with real-time status pills.
+* **My Review Queue (`/cls?tab=my-reviews`):** Changelists where you (or one of your `@group` aliases) are currently in the Attention Set.
+* **Out for Review (`/cls?tab=outgoing`):** Your open changelists, showing approval progress, unresolved comment counts, and CI status.
+* **Agent / Automated (`/cls?tab=agents`):** Changelists created by automated bots or CI jobs (matching `agent_author_patterns` such as `agent/*`, `bot/*`, `*[bot]`, `ci/*`).
+* **Submitted (`/cls?tab=submitted`):** Recently committed [trunk](https://en.wikipedia.org/wiki/Trunk-based_development) revisions.
+* **All (`/cls?tab=all`):** Complete changelist stream.
 
 ---
 
-## Per-Reviewer File Review Tracking
+## 4. Per-Reviewer File Tracking
 
-In changelists spanning 20 or 50 files, reviewers often lose track of which files they have already inspected. Cotejo tracks review progress on a **per-reviewer basis**:
+On multi-file changelists, Cotejo tracks which files each reviewer has inspected:
 
-1. **Automatic Status on View:**
-   Selecting and reading a file in the diff viewer automatically marks it as `reviewed` for your user account.
-2. **Strict Reviewer Isolation:**
-   File review records are keyed by `(cl_id, file_path, reviewer)`. When Alice marks a file reviewed, it remains `not reviewed` for Bob.
-3. **Visual Header Progress:**
-   The changelist header renders a live progress indicator:
-   ```text
-   Review Progress: 14 of 18 files reviewed by alice (77%)
-   ```
-4. **Instant HTMX Toggling:**
-   In the file list, clicking the status pill (`reviewed` with an emerald checkmark vs. `not reviewed` in muted slate) toggles status immediately via HTMX without reloading the page.
+* **Isolated per user:** Review status is keyed by `(cl_id, file_path, reviewer)`. When Alice marks a file `reviewed`, it remains `not reviewed` for Bob.
+* **Header progress bar:** Displays live progress (`Review Progress: 14 of 18 files reviewed by alice`).
+* **Quick toggle:** Click the `reviewed` badge next to any file (or press `m`) to toggle its state via [HTMX](https://en.wikipedia.org/wiki/Htmx) without reloading the page.
 
 ---
 
 ## Next Steps
 
-* **[The Code Review Lifecycle](/niebla/cotejo/review-workflows/):** In-depth guide to intra-line diffs, patchset comparisons, multi-draft commenting, and keyboard shortcuts.
-* **[AI Hints & Review Personas](/niebla/cotejo/ai-assistance/):** Configure AI code suggestion cards, automated review bots, and one-click patch application.
-* **[Deployment, Auth & Theming](/niebla/cotejo/deployment-auth/):** Production setup, Reverse-Proxy authentication with Tailscale, and Catppuccin themes.
+* **[Review Lifecycle & Diffs](/niebla/cotejo/review-workflows/):** Intra-line word diffs, inter-patchset comparisons, draft comments, and keyboard shortcuts.
+* **[AI Hints & Suggestions](/niebla/cotejo/ai-assistance/):** One-click code suggestions and opt-in LLM configuration.
+* **[Authentication & Theming](/niebla/cotejo/deployment-auth/):** Identity modes, [Server-Sent Events (SSE)](https://en.wikipedia.org/wiki/Server-sent_events), and color themes.
