@@ -107,10 +107,10 @@ jobs:
           fi
 
           echo "Syncing main branch to GitHub mirror..."
-          git push "https://x-access-token:${GH_RELEASE_TOKEN}@github.com/mrtnzjsh/niebla.git" main
+          git push "https://x-access-token:${GH_RELEASE_TOKEN}@github.com/mrtnzjsh/niebla.git" HEAD:refs/heads/main
 
           echo "Pushing release tag ${{ github.ref_name }} to GitHub mirror..."
-          git push "https://x-access-token:${GH_RELEASE_TOKEN}@github.com/mrtnzjsh/niebla.git" "${{ github.ref_name }}"
+          git push "https://x-access-token:${GH_RELEASE_TOKEN}@github.com/mrtnzjsh/niebla.git" "HEAD:refs/tags/${{ github.ref_name }}" --force
 
       - name: Publish GitHub Release & Upload Binary Assets
         env:

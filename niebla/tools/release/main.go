@@ -85,7 +85,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error creating HTTP request: %v\n", err)
 		os.Exit(1)
 	}
-	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
@@ -137,7 +137,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Failed to create upload request for %s: %v\n", filename, err)
 				continue
 			}
-			upReq.Header.Set("Authorization", "token "+token)
+			upReq.Header.Set("Authorization", "Bearer "+token)
 			upReq.Header.Set("Content-Type", "application/octet-stream")
 
 			upResp, err := client.Do(upReq)
