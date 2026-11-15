@@ -1,0 +1,124 @@
+name: Production Release & GitHub Replication
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Strictly triggers on official releases (e.g. v0.1.0), ignoring candidate tags (-rc*)
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Cross-Compile Binaries, Replicate Git & Publish Release
+    # Explicitly pins execution to nixdev (which advertises self-hosted:host).
+    # nixserv only advertises native:host and ubuntu-latest, so this job will NEVER run on nixserv.
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go Toolchain
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Extract Curated Changelog Notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "Extracting release notes for version $VERSION from CHANGELOG.md..."
+          
+          awk -v ver="$VERSION" '
+            BEGIN { capture=0 }
+            $0 ~ "^## \\[" ver "\\]" { capture=1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Warning: Version $VERSION not found in CHANGELOG.md. Using fallback release header."
+            echo "# Niebla $TAG" > RELEASE_NOTES.md
+            echo "See CHANGELOG.md for detailed release history." >> RELEASE_NOTES.md
+          fi
+
+          echo "--- Release Notes Preview ---"
+          cat RELEASE_NOTES.md
+
+      - name: Cross-Compile & Package Binary Archives
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          mkdir -p dist
+
+          echo "=== 1. Building Linux amd64 ==="
+          mkdir -p build/linux_amd64
+          go build -ldflags="-s -w" -o build/linux_amd64/niebla ./niebla/cmd/niebla
+          go build -ldflags="-s -w" -o build/linux_amd64/niebla-server ./niebla/cmd/niebla-server
+          go build -ldflags="-s -w" -o build/linux_amd64/nieblafs ./niebla/cmd/nieblafs
+          go build -ldflags="-s -w" -o build/linux_amd64/cotejo ./niebla/cmd/cotejo
+          tar -czvf "dist/niebla_${VERSION}_linux_amd64.tar.gz" -C build/linux_amd64 .
+
+          echo "=== 2. Building Linux arm64 ==="
+          mkdir -p build/linux_arm64
+          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/niebla ./niebla/cmd/niebla
+          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/niebla-server ./niebla/cmd/niebla-server
+          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/nieblafs ./niebla/cmd/nieblafs
+          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/cotejo ./niebla/cmd/cotejo
+          tar -czvf "dist/niebla_${VERSION}_linux_arm64.tar.gz" -C build/linux_arm64 .
+
+          echo "=== 3. Building macOS amd64 ==="
+          mkdir -p build/darwin_amd64
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/darwin_amd64/niebla ./niebla/cmd/niebla
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/darwin_amd64/niebla-server ./niebla/cmd/niebla-server
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/darwin_amd64/cotejo ./niebla/cmd/cotejo
+          tar -czvf "dist/niebla_${VERSION}_darwin_amd64.tar.gz" -C build/darwin_amd64 .
+
+          echo "=== 4. Building macOS arm64 (Apple Silicon) ==="
+          mkdir -p build/darwin_arm64
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/darwin_arm64/niebla ./niebla/cmd/niebla
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/darwin_arm64/niebla-server ./niebla/cmd/niebla-server
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/darwin_arm64/cotejo ./niebla/cmd/cotejo
+          tar -czvf "dist/niebla_${VERSION}_darwin_arm64.tar.gz" -C build/darwin_arm64 .
+
+          echo "=== 5. Generating SHA256 Checksums ==="
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS.txt)
+
+          echo "=== Package Artifacts Summary ==="
+          ls -lh dist/
+          cat dist/SHA256SUMS.txt
+
+      - name: Replicate Git History & Release Tag to GitHub
+        env:
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          if [ -z "$GH_RELEASE_TOKEN" ]; then
+            echo "Error: GH_RELEASE_TOKEN secret is not set in Forgejo repository settings."
+            exit 1
+          fi
+
+          echo "Syncing main branch to GitHub mirror..."
+          git push "https://x-access-token:${GH_RELEASE_TOKEN}@github.com/mrtnzjsh/niebla.git" main
+
+          echo "Pushing release tag ${{ github.ref_name }} to GitHub mirror..."
+          git push "https://x-access-token:${GH_RELEASE_TOKEN}@github.com/mrtnzjsh/niebla.git" "${{ github.ref_name }}"
+
+      - name: Publish GitHub Release & Upload Binary Assets
+        env:
+          CGO_ENABLED: '0'
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          cd niebla && go run ./tools/release \
+            -tag "${{ github.ref_name }}" \
+            -repo "mrtnzjsh/niebla" \
+            -notes "../RELEASE_NOTES.md" \
+            -dist "../dist"
+
