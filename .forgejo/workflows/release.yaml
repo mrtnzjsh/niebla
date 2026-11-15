@@ -57,36 +57,37 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
+          ROOT_DIR="$(pwd)"
           mkdir -p dist
 
           echo "=== 1. Building Linux amd64 ==="
           mkdir -p build/linux_amd64
-          go build -ldflags="-s -w" -o build/linux_amd64/niebla ./niebla/cmd/niebla
-          go build -ldflags="-s -w" -o build/linux_amd64/niebla-server ./niebla/cmd/niebla-server
-          go build -ldflags="-s -w" -o build/linux_amd64/nieblafs ./niebla/cmd/nieblafs
-          go build -ldflags="-s -w" -o build/linux_amd64/cotejo ./niebla/cmd/cotejo
+          go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_amd64/niebla" ./cmd/niebla
+          go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_amd64/niebla-server" ./cmd/niebla-server
+          go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_amd64/nieblafs" ./cmd/nieblafs
+          go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_amd64/cotejo" ./cmd/cotejo
           tar -czvf "dist/niebla_${VERSION}_linux_amd64.tar.gz" -C build/linux_amd64 .
 
           echo "=== 2. Building Linux arm64 ==="
           mkdir -p build/linux_arm64
-          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/niebla ./niebla/cmd/niebla
-          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/niebla-server ./niebla/cmd/niebla-server
-          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/nieblafs ./niebla/cmd/nieblafs
-          GOARCH=arm64 go build -ldflags="-s -w" -o build/linux_arm64/cotejo ./niebla/cmd/cotejo
+          GOARCH=arm64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_arm64/niebla" ./cmd/niebla
+          GOARCH=arm64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_arm64/niebla-server" ./cmd/niebla-server
+          GOARCH=arm64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_arm64/nieblafs" ./cmd/nieblafs
+          GOARCH=arm64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/linux_arm64/cotejo" ./cmd/cotejo
           tar -czvf "dist/niebla_${VERSION}_linux_arm64.tar.gz" -C build/linux_arm64 .
 
           echo "=== 3. Building macOS amd64 ==="
           mkdir -p build/darwin_amd64
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/darwin_amd64/niebla ./niebla/cmd/niebla
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/darwin_amd64/niebla-server ./niebla/cmd/niebla-server
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/darwin_amd64/cotejo ./niebla/cmd/cotejo
+          GOOS=darwin GOARCH=amd64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/darwin_amd64/niebla" ./cmd/niebla
+          GOOS=darwin GOARCH=amd64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/darwin_amd64/niebla-server" ./cmd/niebla-server
+          GOOS=darwin GOARCH=amd64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/darwin_amd64/cotejo" ./cmd/cotejo
           tar -czvf "dist/niebla_${VERSION}_darwin_amd64.tar.gz" -C build/darwin_amd64 .
 
           echo "=== 4. Building macOS arm64 (Apple Silicon) ==="
           mkdir -p build/darwin_arm64
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/darwin_arm64/niebla ./niebla/cmd/niebla
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/darwin_arm64/niebla-server ./niebla/cmd/niebla-server
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/darwin_arm64/cotejo ./niebla/cmd/cotejo
+          GOOS=darwin GOARCH=arm64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/darwin_arm64/niebla" ./cmd/niebla
+          GOOS=darwin GOARCH=arm64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/darwin_arm64/niebla-server" ./cmd/niebla-server
+          GOOS=darwin GOARCH=arm64 go -C niebla build -ldflags="-s -w" -o "$ROOT_DIR/build/darwin_arm64/cotejo" ./cmd/cotejo
           tar -czvf "dist/niebla_${VERSION}_darwin_arm64.tar.gz" -C build/darwin_arm64 .
 
           echo "=== 5. Generating SHA256 Checksums ==="
