@@ -163,7 +163,8 @@ func parseLine(line string) (rule, bool) {
 }
 
 func normalizePath(relPath string) string {
-	norm := filepath.ToSlash(relPath)
+	norm := strings.ReplaceAll(relPath, "\\", "/")
+	norm = filepath.ToSlash(norm)
 	norm = strings.TrimPrefix(norm, "./")
 	norm = strings.TrimPrefix(norm, "/")
 	norm = strings.TrimSuffix(norm, "/")

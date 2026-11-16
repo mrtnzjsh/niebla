@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 )
 
@@ -60,11 +61,43 @@ func FromProto(p *nieblav1.NodeEntry) Entry {
 	}
 }
 
-// SortEntries sorts entries in-place lexicographically by Name.
+// SortEntries sorts entries in-place lexicographically by Name after canonicalizing to Unicode NFC.
 func SortEntries(entries []Entry) {
+	for i := range entries {
+		entries[i].Name = norm.NFC.String(entries[i].Name)
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Name < entries[j].Name
 	})
+}
+
+// CaseCollision records two or more directory entries whose names collide under case-folding (APFS / NTFS).
+type CaseCollision struct {
+	CanonicalFold string
+	Names         []string
+}
+
+// DetectCaseCollisions returns any entries that collide on case-insensitive filesystems (APFS/NTFS).
+func DetectCaseCollisions(entries []Entry) []CaseCollision {
+	folded := make(map[string][]string)
+	for _, e := range entries {
+		key := strings.ToLower(norm.NFC.String(e.Name))
+		folded[key] = append(folded[key], e.Name)
+	}
+
+	var collisions []CaseCollision
+	for fold, names := range folded {
+		if len(names) > 1 {
+			collisions = append(collisions, CaseCollision{
+				CanonicalFold: fold,
+				Names:         names,
+			})
+		}
+	}
+	sort.Slice(collisions, func(i, j int) bool {
+		return collisions[i].CanonicalFold < collisions[j].CanonicalFold
+	})
+	return collisions
 }
 
 // ComputeTreeHash calculates the deterministic Merkle tree hash for a set of entries.
