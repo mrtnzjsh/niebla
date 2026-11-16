@@ -2,8 +2,6 @@
 
 All notable changes to Niebla are documented in this file, adhering to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
 ## [0.1.0] - 2026-11-15
 
 ### Added
@@ -59,4 +57,6 @@ All notable changes to Niebla are documented in this file, adhering to [Keep a C
 ### Fixed
 - **Cotejo Inbox Review Routing**: Corrected query assignment filter so unassigned reviewers only see changelists where they are explicitly assigned rather than all open changelists.
 - **Review Approval Verdict Parameter**: Added backwards-compatible form handler mapping `action=approve` to `verdict=approved` in `POST /cl/{id}/approval`.
+
+[0.1.0]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.1.0
 
