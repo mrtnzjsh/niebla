@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"bazil.org/fuse"
@@ -40,6 +41,8 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	}
 	a.Mtime = time.Now()
 	a.Mode = 0644
+	a.Uid = uint32(os.Geteuid())
+	a.Gid = uint32(os.Getegid())
 	if f.mode != 0 {
 		a.Mode = os.FileMode(f.mode)
 	}
@@ -49,6 +52,10 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 			a.Size = uint64(fi.Size())
 			a.Mode = fi.Mode()
 			a.Mtime = fi.ModTime()
+			if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
+				a.Uid = stat.Uid
+				a.Gid = stat.Gid
+			}
 			return nil
 		}
 	}

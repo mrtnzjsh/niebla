@@ -115,7 +115,16 @@ func main() {
 			*mountPoint,
 			fuse.FSName("nieblafs"),
 			fuse.Subtype("nieblafs"),
+			fuse.AllowOther(),
 		)
+		if err != nil {
+			log.Printf("notice: mounting with AllowOther failed (%v); falling back to default mount", err)
+			c, err = fuse.Mount(
+				*mountPoint,
+				fuse.FSName("nieblafs"),
+				fuse.Subtype("nieblafs"),
+			)
+		}
 		if err != nil {
 			log.Printf("warning: FUSE mount failed on %s: %v", *mountPoint, err)
 		} else {

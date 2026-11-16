@@ -143,12 +143,18 @@ func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	}
 	a.Mode = os.ModeDir | 0755
 	a.Mtime = time.Now()
+	a.Uid = uint32(os.Geteuid())
+	a.Gid = uint32(os.Getegid())
 
 	if d.fs != nil && d.fs.ScratchDir != "" {
 		scratchDir := filepath.Join(d.fs.ScratchDir, d.path)
 		if fi, err := os.Stat(scratchDir); err == nil {
 			a.Mtime = fi.ModTime()
 			a.Mode = fi.Mode()
+			if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
+				a.Uid = stat.Uid
+				a.Gid = stat.Gid
+			}
 		}
 	}
 	return nil
