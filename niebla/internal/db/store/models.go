@@ -30,10 +30,12 @@ type Changelist struct {
 }
 
 type ClApproval struct {
-	ClID      int64              `json:"cl_id"`
-	Reviewer  string             `json:"reviewer"`
-	Verdict   string             `json:"verdict"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ClID           int64              `json:"cl_id"`
+	Reviewer       string             `json:"reviewer"`
+	Verdict        string             `json:"verdict"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	PatchsetNumber int32              `json:"patchset_number"`
+	Stale          bool               `json:"stale"`
 }
 
 type ClCheckRun struct {

@@ -39,7 +39,7 @@ type Querier interface {
 	InsertComment(ctx context.Context, arg InsertCommentParams) (ClComment, error)
 	InsertTree(ctx context.Context, arg InsertTreeParams) error
 	ListAllComments(ctx context.Context, clID int64) ([]ClComment, error)
-	ListApprovals(ctx context.Context, clID int64) ([]ClApproval, error)
+	ListApprovals(ctx context.Context, clID int64) ([]ListApprovalsRow, error)
 	ListCLs(ctx context.Context, limit int32) ([]Changelist, error)
 	ListCheckRunsForPatchset(ctx context.Context, arg ListCheckRunsForPatchsetParams) ([]ClCheckRun, error)
 	ListComments(ctx context.Context, arg ListCommentsParams) ([]ClComment, error)

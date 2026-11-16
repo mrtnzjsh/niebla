@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"niebla/assets"
 	"niebla/internal/config"
 	"niebla/internal/db"
 	internalevents "niebla/internal/events"
@@ -93,7 +94,7 @@ func main() {
 	portFlag := flag.Int("port", 0, "Port number for Cotejo web service (overrides config)")
 	dbURLFlag := flag.String("db-url", "", "PostgreSQL connection string (overrides config)")
 	blobPathFlag := flag.String("blob-path", "", "Path to CAS blob storage (overrides config)")
-	assetsDirFlag := flag.String("assets-dir", getEnv("COTEJO_ASSETS_DIR", "./assets"), "Path to assets directory")
+	assetsDirFlag := flag.String("assets-dir", getEnv("COTEJO_ASSETS_DIR", ""), "Path to assets directory override (defaults to embedded assets)")
 	flag.Parse()
 
 	cfg := loadCotejoConfig(*configFlag, *hostFlag, *dbURLFlag, *blobPathFlag, *portFlag)
@@ -109,7 +110,11 @@ func main() {
 	log.Printf("Default Reviewer    : %s", cfg.Critique.DefaultReviewer)
 	log.Printf("CAS blob path       : %s", cfg.Server.BlobPath)
 	log.Printf("PostgreSQL URL      : %s", cfg.Server.DBURL)
-	log.Printf("Assets directory    : %s", *assetsDirFlag)
+	if *assetsDirFlag != "" {
+		log.Printf("Assets source       : filesystem override (%s)", *assetsDirFlag)
+	} else {
+		log.Printf("Assets source       : self-contained binary (//go:embed)")
+	}
 
 	casStorage := initCASStorage(cfg.Server.BlobPath)
 
@@ -153,13 +158,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Static assets
-	staticDir := filepath.Join(*assetsDirFlag, "static")
-	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
-		// Try relative to current working directory
-		staticDir = "./assets/static"
-	}
-	fs := http.FileServer(http.Dir(staticDir))
-	mux.Handle("/static/", http.StripPrefix("/static/", fs))
+	mux.Handle("/static/", assets.Handler(*assetsDirFlag))
 
 	// Review routes
 	mux.HandleFunc("GET /{$}", clHandler.HandleIndex)

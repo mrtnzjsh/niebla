@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"niebla/assets"
 	"niebla/internal/config"
 	"niebla/internal/db"
 	"niebla/internal/groups"
@@ -1217,6 +1218,40 @@ func TestCLRebaseConflictAndStackBreadcrumbs(t *testing.T) {
 	// Verify Rebase Conflict button in place of normal Submit
 	if !strings.Contains(html, "Rebase Conflict") {
 		t.Errorf("expected 'Rebase Conflict' disabled button text in HTML")
+	}
+}
+
+func TestStaticAssetServingAndUIRendering(t *testing.T) {
+	assetHandler := assets.Handler("")
+
+	// 1. Verify GET /static/styles.css returns 200 OK, valid content-length, and text/css
+	reqCSS := httptest.NewRequest("GET", "/static/styles.css", nil)
+	recCSS := httptest.NewRecorder()
+	assetHandler.ServeHTTP(recCSS, reqCSS)
+
+	if recCSS.Code != http.StatusOK {
+		t.Fatalf("GET /static/styles.css status = %d, expected 200", recCSS.Code)
+	}
+	if ct := recCSS.Header().Get("Content-Type"); !strings.Contains(ct, "text/css") {
+		t.Errorf("GET /static/styles.css Content-Type = %q, expected text/css", ct)
+	}
+	if recCSS.Body.Len() == 0 {
+		t.Errorf("GET /static/styles.css body is empty")
+	}
+
+	// 2. Verify GET /static/htmx.min.js returns 200 OK, valid content-length, and application/javascript
+	reqJS := httptest.NewRequest("GET", "/static/htmx.min.js", nil)
+	recJS := httptest.NewRecorder()
+	assetHandler.ServeHTTP(recJS, reqJS)
+
+	if recJS.Code != http.StatusOK {
+		t.Fatalf("GET /static/htmx.min.js status = %d, expected 200", recJS.Code)
+	}
+	if ct := recJS.Header().Get("Content-Type"); !strings.Contains(ct, "application/javascript") {
+		t.Errorf("GET /static/htmx.min.js Content-Type = %q, expected application/javascript", ct)
+	}
+	if recJS.Body.Len() == 0 {
+		t.Errorf("GET /static/htmx.min.js body is empty")
 	}
 }
 

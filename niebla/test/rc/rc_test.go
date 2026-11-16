@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"niebla/assets"
 	"niebla/internal/config"
 	"niebla/internal/db"
 	"niebla/internal/groups"
@@ -153,6 +154,7 @@ func SetupRCCluster(t *testing.T) *RCTestCluster {
 	ciHandler := handlers.NewCIHandler(database)
 
 	mux := http.NewServeMux()
+	mux.Handle("/static/", assets.Handler(""))
 	mux.HandleFunc("GET /{$}", clHandler.HandleIndex)
 	mux.HandleFunc("GET /cls", clHandler.HandleIndex)
 	mux.HandleFunc("GET /cl/{id}", clHandler.HandleCLView)

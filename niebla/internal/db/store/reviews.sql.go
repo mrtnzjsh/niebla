@@ -113,15 +113,22 @@ WHERE cl_id = $1
 ORDER BY updated_at ASC
 `
 
-func (q *Queries) ListApprovals(ctx context.Context, clID int64) ([]ClApproval, error) {
+type ListApprovalsRow struct {
+	ClID      int64              `json:"cl_id"`
+	Reviewer  string             `json:"reviewer"`
+	Verdict   string             `json:"verdict"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListApprovals(ctx context.Context, clID int64) ([]ListApprovalsRow, error) {
 	rows, err := q.db.Query(ctx, listApprovals, clID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ClApproval{}
+	items := []ListApprovalsRow{}
 	for rows.Next() {
-		var i ClApproval
+		var i ListApprovalsRow
 		if err := rows.Scan(
 			&i.ClID,
 			&i.Reviewer,
