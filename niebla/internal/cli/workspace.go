@@ -75,9 +75,6 @@ func resolveWorkspaceMountDir(mountDir, name string) (string, error) {
 		return "", fmt.Errorf("failed to resolve absolute mount path: %w", err)
 	}
 
-	if err := os.MkdirAll(resolved, 0755); err != nil {
-		return "", fmt.Errorf("failed to create mount directory %s: %w", resolved, err)
-	}
 	return resolved, nil
 }
 
@@ -179,6 +176,9 @@ func executeWorkspaceCreate(
 	resolvedMountDir, err := resolveWorkspaceMountDir(mountDir, name)
 	if err != nil {
 		return err
+	}
+	if err := os.MkdirAll(resolvedMountDir, 0755); err != nil {
+		return fmt.Errorf("failed to create mount directory %s: %w", resolvedMountDir, err)
 	}
 
 	fsInfo, err := setupWorkspaceFS(
@@ -328,7 +328,20 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 
 			ws, err := mgr.Load(name)
 			if err != nil {
-				return err
+				if !force {
+					return err
+				}
+				// When force is true, metadata might be missing or out of sync.
+				// Infer default workspace paths to clean up orphaned mounts and directories.
+				mountDir, _ := resolveWorkspaceMountDir("", name)
+				scratchDir, _, _ := provisionWorkspaceDirs(name)
+				socketPath := filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
+				ws = &config.WorkspaceConfig{
+					Name:       name,
+					MountDir:   mountDir,
+					ScratchDir: scratchDir,
+					SocketPath: socketPath,
+				}
 			}
 
 			// Check for modifications if not forced
@@ -339,14 +352,23 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 				}
 			}
 
-			if isMountPoint(ws.MountDir) {
-				if err := unmountWorkspace(ws.MountDir); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unmounting %s failed: %v\n", ws.MountDir, err)
-				}
+			// If mount directory is not set, attempt resolution
+			if ws.MountDir == "" {
+				ws.MountDir, _ = resolveWorkspaceMountDir("", name)
 			}
 
+			// Terminate daemon process if running
 			if ws.PID > 0 && isProcessAlive(ws.PID) {
 				terminateProcess(ws.PID)
+			}
+
+			// Detach and unmount if mountpoint
+			if isMountPoint(ws.MountDir) || force {
+				if err := unmountWorkspace(ws.MountDir, force); err != nil {
+					if !force {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unmounting %s failed: %v\n", ws.MountDir, err)
+					}
+				}
 			}
 
 			if ws.SocketPath != "" {
@@ -357,9 +379,14 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 				parent := filepath.Dir(ws.ScratchDir)
 				_ = os.Remove(parent)
 			}
+			if ws.MountDir != "" {
+				_ = os.RemoveAll(ws.MountDir)
+			}
 
 			if err := mgr.Delete(name); err != nil {
-				return fmt.Errorf("failed to remove workspace metadata: %w", err)
+				if !force {
+					return fmt.Errorf("failed to remove workspace metadata: %w", err)
+				}
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Workspace %q deleted successfully.\n", name)
@@ -367,7 +394,7 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force deletion even with unshelved modifications")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force deletion even with unshelved modifications or missing metadata")
 
 	return cmd
 }
@@ -660,7 +687,14 @@ func terminateProcess(pid int) {
 }
 
 func isMountPoint(dir string) bool {
+	if dir == "" {
+		return false
+	}
 	cleanDir := filepath.Clean(dir)
+	if abs, err := filepath.Abs(cleanDir); err == nil {
+		cleanDir = abs
+	}
+
 	f, err := os.Open("/proc/mounts")
 	if err != nil {
 		// Fallback to checking via unix.Access
@@ -672,7 +706,11 @@ func isMountPoint(dir string) bool {
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) >= 2 {
-			if filepath.Clean(fields[1]) == cleanDir {
+			mountTarget := filepath.Clean(fields[1])
+			if absTarget, err := filepath.Abs(mountTarget); err == nil {
+				mountTarget = absTarget
+			}
+			if mountTarget == cleanDir {
 				return true
 			}
 		}
@@ -680,40 +718,57 @@ func isMountPoint(dir string) bool {
 	return false
 }
 
-func unmountWorkspace(mountDir string) error {
+func unmountWorkspace(mountDir string, force ...bool) error {
+	isForce := len(force) > 0 && force[0]
 	var lastErr string
 
 	// Try fusermount3 first
 	if fuserPath, err := exec.LookPath("fusermount3"); err == nil {
-		cmd := exec.Command(fuserPath, "-u", mountDir)
-		if out, err := cmd.CombinedOutput(); err == nil {
-			return nil
-		} else {
-			lastErr = strings.TrimSpace(string(out))
+		if !isForce {
+			cmd := exec.Command(fuserPath, "-u", mountDir)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				return nil
+			} else {
+				lastErr = strings.TrimSpace(string(out))
+			}
 		}
-		// Fallback to lazy unmount if busy
+		// Fallback to lazy unmount if busy, dangling, or force is requested
 		lazyCmd := exec.Command(fuserPath, "-u", "-z", mountDir)
-		if _, err := lazyCmd.CombinedOutput(); err == nil {
+		if out, err := lazyCmd.CombinedOutput(); err == nil {
 			return nil
+		} else if lastErr == "" {
+			lastErr = strings.TrimSpace(string(out))
 		}
 	}
 
 	// Try fusermount
 	if fuserPath, err := exec.LookPath("fusermount"); err == nil {
-		cmd := exec.Command(fuserPath, "-u", mountDir)
-		if out, err := cmd.CombinedOutput(); err == nil {
+		if !isForce {
+			cmd := exec.Command(fuserPath, "-u", mountDir)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				return nil
+			} else if lastErr == "" {
+				lastErr = strings.TrimSpace(string(out))
+			}
+		}
+		lazyCmd := exec.Command(fuserPath, "-u", "-z", mountDir)
+		if out, err := lazyCmd.CombinedOutput(); err == nil {
 			return nil
 		} else if lastErr == "" {
 			lastErr = strings.TrimSpace(string(out))
-		}
-		lazyCmd := exec.Command(fuserPath, "-u", "-z", mountDir)
-		if _, err := lazyCmd.CombinedOutput(); err == nil {
-			return nil
 		}
 	}
 
 	// Direct syscall unmount
 	if err := unix.Unmount(mountDir, 0); err == nil {
+		return nil
+	}
+
+	if err := unix.Unmount(mountDir, unix.MNT_DETACH); err == nil {
+		return nil
+	}
+
+	if err := unix.Unmount(mountDir, unix.MNT_FORCE|unix.MNT_DETACH); err == nil {
 		return nil
 	}
 

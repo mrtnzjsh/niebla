@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
@@ -167,5 +169,261 @@ func TestUnmountWorkspace_BusyMount_LazyFallback(t *testing.T) {
 	_ = mnt.Conn.Close()
 	<-mnt.Error
 	_ = os.Remove(mnt.Dir)
+}
+
+func TestWorkspaceDelete_Force_MissingMetadata(t *testing.T) {
+	tempDir := t.TempDir()
+	configDir := filepath.Join(tempDir, "workspaces")
+	_ = os.MkdirAll(configDir, 0755)
+
+	rootFlags := &RootFlags{
+		ConfigDir: configDir,
+	}
+
+	// 1. Without --force, deleting missing workspace returns error
+	delCmd := newWorkspaceDeleteCmd(rootFlags)
+	delCmd.SetArgs([]string{"missing-ws"})
+	if err := delCmd.Execute(); err == nil {
+		t.Fatalf("expected error deleting non-existent workspace without --force, got nil")
+	}
+
+	// 2. With --force, deleting missing workspace succeeds idempotently
+	delForceCmd := newWorkspaceDeleteCmd(rootFlags)
+	buf := new(bytes.Buffer)
+	delForceCmd.SetOut(buf)
+	delForceCmd.SetErr(buf)
+	delForceCmd.SetArgs([]string{"missing-ws", "--force"})
+	if err := delForceCmd.Execute(); err != nil {
+		t.Fatalf("expected delete --force to succeed on missing workspace, got: %v", err)
+	}
+	if !strings.Contains(buf.String(), "deleted successfully") {
+		t.Errorf("unexpected output: %s", buf.String())
+	}
+}
+
+func TestWorkspaceDelete_CleansMountDir(t *testing.T) {
+	tempDir := t.TempDir()
+	configDir := filepath.Join(tempDir, "workspaces")
+	_ = os.MkdirAll(configDir, 0755)
+
+	mgr, err := config.NewManager(configDir)
+	if err != nil {
+		t.Fatalf("failed to create manager: %v", err)
+	}
+
+	mountDir := filepath.Join(tempDir, "test-mount")
+	scratchDir := filepath.Join(tempDir, "test-scratch")
+	_ = os.MkdirAll(mountDir, 0755)
+	_ = os.MkdirAll(scratchDir, 0755)
+
+	wsConfig := &config.WorkspaceConfig{
+		WorkspaceID: "ws-clean-mount",
+		Name:        "clean-mount-ws",
+		BaseCL:      1,
+		MountDir:    mountDir,
+		ScratchDir:  scratchDir,
+	}
+	if err := mgr.Save(wsConfig); err != nil {
+		t.Fatalf("failed to save ws config: %v", err)
+	}
+
+	rootFlags := &RootFlags{
+		ConfigDir: configDir,
+	}
+
+	delCmd := newWorkspaceDeleteCmd(rootFlags)
+	buf := new(bytes.Buffer)
+	delCmd.SetOut(buf)
+	delCmd.SetArgs([]string{"clean-mount-ws"})
+
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	// Verify MountDir is completely removed from disk
+	if _, err := os.Stat(mountDir); !os.IsNotExist(err) {
+		t.Errorf("expected mountDir %s to be removed, but it still exists", mountDir)
+	}
+}
+
+func TestFuseMountHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_FUSE_HELPER") != "1" {
+		return
+	}
+	mountDir := os.Getenv("FUSE_HELPER_MOUNT_DIR")
+	if mountDir == "" {
+		os.Exit(1)
+	}
+	c, err := fuse.Mount(mountDir)
+	if err != nil {
+		os.Exit(2)
+	}
+	server := fusefs.New(c, nil)
+	_ = server.Serve(dummyFS{})
+	os.Exit(0)
+}
+
+func TestWorkspaceDelete_Force_DanglingFUSEMountRecovery(t *testing.T) {
+	if _, err := os.Stat("/dev/fuse"); os.IsNotExist(err) {
+		t.Skip("skipping test: /dev/fuse not found")
+	}
+
+	tempDir := t.TempDir()
+	mountDir := filepath.Join(tempDir, "dangling-mount")
+	if err := os.MkdirAll(mountDir, 0755); err != nil {
+		t.Fatalf("failed to create mount dir: %v", err)
+	}
+
+	// 1. Spawn separate helper process to hold FUSE mount
+	cmd := exec.Command(os.Args[0], "-test.run=TestFuseMountHelperProcess")
+	cmd.Env = append(os.Environ(), "GO_WANT_FUSE_HELPER=1", "FUSE_HELPER_MOUNT_DIR="+mountDir)
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start FUSE helper process: %v", err)
+	}
+
+	// Wait for mount to become active in /proc/mounts
+	deadline := time.Now().Add(3 * time.Second)
+	mounted := false
+	for time.Now().Before(deadline) {
+		if isMountPoint(mountDir) {
+			mounted = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !mounted {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Skip("FUSE mount helper did not mount in time (unprivileged or restricted environment)")
+	}
+
+	// 2. Abruptly kill the FUSE daemon process with SIGKILL to induce dangling mount state
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("failed to kill FUSE helper: %v", err)
+	}
+	_ = cmd.Wait()
+
+	// Verify that the mount point is dangling in /proc/mounts
+	if !isMountPoint(mountDir) {
+		t.Fatalf("expected %s to be listed in /proc/mounts as dangling mount", mountDir)
+	}
+
+	// 3. Register workspace config pointing to dangling mount
+	configDir := filepath.Join(tempDir, "workspaces")
+	_ = os.MkdirAll(configDir, 0755)
+	mgr, err := config.NewManager(configDir)
+	if err != nil {
+		t.Fatalf("failed to create manager: %v", err)
+	}
+
+	wsName := "dangling-ws"
+	wsConfig := &config.WorkspaceConfig{
+		WorkspaceID: "ws-dangling",
+		Name:        wsName,
+		BaseCL:      1,
+		MountDir:    mountDir,
+		ScratchDir:  filepath.Join(tempDir, "scratch"),
+	}
+	if err := mgr.Save(wsConfig); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	// 4. Run workspace delete --force
+	rootFlags := &RootFlags{
+		ConfigDir: configDir,
+	}
+	delCmd := newWorkspaceDeleteCmd(rootFlags)
+	buf := new(bytes.Buffer)
+	delCmd.SetOut(buf)
+	delCmd.SetArgs([]string{wsName, "--force"})
+
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("expected force delete to succeed on dangling mount, got: %v", err)
+	}
+
+	// 5. Verify cleanly detached and removed from disk
+	if isMountPoint(mountDir) {
+		t.Errorf("expected %s to be detached from /proc/mounts", mountDir)
+	}
+	if _, err := os.Stat(mountDir); !os.IsNotExist(err) {
+		t.Errorf("expected directory %s to be removed from disk, got err: %v", mountDir, err)
+	}
+}
+
+func TestWorkspaceDelete_Force_DanglingMount_And_MissingMetadata(t *testing.T) {
+	if _, err := os.Stat("/dev/fuse"); os.IsNotExist(err) {
+		t.Skip("skipping test: /dev/fuse not found")
+	}
+
+	tempDir := t.TempDir()
+	tempHome := filepath.Join(tempDir, "home")
+	_ = os.MkdirAll(tempHome, 0755)
+	t.Setenv("HOME", tempHome)
+
+	wsName := "orphan-dangling-ws"
+	targetMountDir := filepath.Join(tempHome, "niebla", "workspaces", wsName)
+	if err := os.MkdirAll(targetMountDir, 0755); err != nil {
+		t.Fatalf("failed to create target mount dir: %v", err)
+	}
+
+	// 1. Spawn separate helper process to hold FUSE mount at default inferred path
+	cmd := exec.Command(os.Args[0], "-test.run=TestFuseMountHelperProcess")
+	cmd.Env = append(os.Environ(), "GO_WANT_FUSE_HELPER=1", "FUSE_HELPER_MOUNT_DIR="+targetMountDir)
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start FUSE helper process: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	mounted := false
+	for time.Now().Before(deadline) {
+		if isMountPoint(targetMountDir) {
+			mounted = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !mounted {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Skip("FUSE mount helper did not mount in time (unprivileged or restricted environment)")
+	}
+
+	// 2. Abruptly kill the FUSE daemon process with SIGKILL
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("failed to kill helper: %v", err)
+	}
+	_ = cmd.Wait()
+
+	if !isMountPoint(targetMountDir) {
+		t.Fatalf("expected %s to be listed in /proc/mounts as dangling mount", targetMountDir)
+	}
+
+	// 3. Execute force delete with NO metadata JSON existing
+	configDir := filepath.Join(tempDir, "empty-configs")
+	_ = os.MkdirAll(configDir, 0755)
+	rootFlags := &RootFlags{
+		ConfigDir: configDir,
+	}
+
+	delCmd := newWorkspaceDeleteCmd(rootFlags)
+	buf := new(bytes.Buffer)
+	errBuf := new(bytes.Buffer)
+	delCmd.SetOut(buf)
+	delCmd.SetErr(errBuf)
+	delCmd.SetArgs([]string{wsName, "--force"})
+
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("expected force delete to succeed on orphaned dangling mount with missing metadata, got: %v", err)
+	}
+	t.Logf("stdout: %s", buf.String())
+	t.Logf("stderr: %s", errBuf.String())
+
+	// 4. Verify cleanly detached and removed from disk
+	if isMountPoint(targetMountDir) {
+		t.Errorf("expected %s to be detached from /proc/mounts", targetMountDir)
+	}
+	if _, err := os.Stat(targetMountDir); !os.IsNotExist(err) {
+		t.Errorf("expected directory %s to be removed from disk, but it still exists", targetMountDir)
+	}
 }
 
