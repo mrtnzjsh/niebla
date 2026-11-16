@@ -20,7 +20,8 @@ To make `--no-fuse` the default for all workspaces in your shell, set `export NI
 
 | Environment | Why `--no-fuse` Fits |
 | :--- | :--- |
-| **macOS Workstations** | Runs natively on macOS (`arm64` and `amd64`) without installing `macFUSE` kernel extensions or rebooting to lower system security settings. |
+| **Windows Workstations** | Runs natively via `niebla.exe` in PowerShell or Command Prompt without requiring third-party drivers or WSL. Backslashes (`\`) are normalized and NTFS case-folding collisions are safely intercepted. |
+| **macOS Workstations** | Runs natively on macOS (`arm64` and `amd64`) without installing `macFUSE` kernel extensions or lowering system security settings. Decomposed Unicode (NFD) is normalized to NFC. |
 | **Unprivileged CI Containers** | Standard Docker, Podman, and Kubernetes pods run without `--privileged` or `--device /dev/fuse`. |
 | **Heavy Full-Tree Builds** | Workloads that read nearly every file in the repository avoid userspace-to-kernel FUSE context switches. |
 
@@ -62,4 +63,5 @@ All standard commands (`niebla status`, `niebla diff`, `niebla shelve`, `niebla 
 | **Kernel Requirements** | Linux `/dev/fuse` (`fuse3`) | None (standard POSIX filesystem calls) |
 | **Container Support** | Requires `--device /dev/fuse` | Runs in any unprivileged container |
 | **macOS Support** | Requires third-party FUSE driver | **Native out of the box** |
+| **Windows Support** | Requires WinFsp / FUSE port | **Native out of the box (`niebla.exe`)** |
 | **Background Daemon** | Supervised `nieblafs` process | None (`PID: 0`) |

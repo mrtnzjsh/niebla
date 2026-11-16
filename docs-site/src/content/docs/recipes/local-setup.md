@@ -148,7 +148,7 @@ Once running, follow the [Quickstart Walkthrough](/niebla/getting-started/quicks
 
 ---
 
-## 2. Remote Client Workstation Setup (Linux & macOS)
+## 2. Remote Client Workstation Setup (Linux, macOS & Windows)
 
 When connecting a developer laptop to a shared or remote `niebla-server`, the workstation only needs the `niebla` CLI (plus `nieblafs` if using [FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace) mounts on Linux). You do not need to run PostgreSQL, `niebla-server`, or `cotejo` locally.
 
@@ -178,11 +178,13 @@ If your server requires bearer token authentication, export `NIEBLA_AUTH_TOKEN` 
 export NIEBLA_AUTH_TOKEN="niebla_pat_9f8e7d6c5b4a3f2e1d0c"
 ```
 
-### Linux vs. macOS Workspaces
+### Linux, macOS & Windows Workspaces
 
 * **Linux Workstations (FUSE or Direct):**
   * **FUSE Mount (default):** `niebla workspace create my-feature` mounts a [copy-on-write](https://en.wikipedia.org/wiki/Copy-on-write) virtual workspace in `< 50ms` and streams file blobs on demand into `~/.cache/niebla/blobs`.
   * **Direct Materialization:** Pass `--no-fuse` (`niebla workspace create my-feature --no-fuse`) if running inside an unprivileged container or if you prefer standard local files.
 * **macOS Workstations (`--no-fuse`):**
-  * Because `nieblafs` targets the Linux FUSE kernel interface, macOS clients use direct materialization (`niebla workspace create my-feature --no-fuse` or `--path ./dir` to restrict to a subtree).
-  * See [Direct Materialization (`--no-fuse`)](/niebla/workflows/direct-materialization/) for details on scoped checkouts and local blob caching.
+  * Runs via direct materialization (`niebla workspace create my-feature --no-fuse`). Normalizes decomposed Unicode (NFD) to Unicode NFC automatically.
+* **Windows Workstations (`--no-fuse`):**
+  * Runs natively via `niebla.exe` (`niebla workspace create my-feature --no-fuse`). Configured in `$HOME\.config\niebla\config.toml` (or `%USERPROFILE%\.config\niebla\config.toml`). Automatically normalizes Windows backslashes (`\`) and safely intercepts NTFS case-folding collisions.
+  * See [Installation & Setup](/niebla/getting-started/installation/) and [Direct Materialization (`--no-fuse`)](/niebla/workflows/direct-materialization/) for details.

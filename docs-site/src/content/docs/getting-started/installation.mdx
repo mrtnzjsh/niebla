@@ -1,6 +1,6 @@
 ---
 title: Installation & Setup
-description: Install Niebla v0.1.0 on NixOS, Linux, and macOS from pre-built releases or source.
+description: Install Niebla v0.1.0 on NixOS, Linux, macOS, and Windows from pre-built releases or source.
 tableOfContents: false
 sidebar:
   order: 2
@@ -9,8 +9,8 @@ sidebar:
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-Niebla compiles into four self-contained Go binaries with zero external runtime dependencies:
-* `niebla` — Developer CLI for managing workspaces, inspecting diffs, shelving CLs, and submitting to [trunk](https://en.wikipedia.org/wiki/Trunk-based_development).
+Niebla compiles into self-contained Go binaries with zero external runtime dependencies:
+* `niebla` — Cross-platform developer CLI for managing workspaces, inspecting diffs, shelving CLs, and submitting to [trunk](https://en.wikipedia.org/wiki/Trunk-based_development).
 * `nieblafs` — [FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace) virtual filesystem daemon for Linux workstations.
 * `niebla-server` — Central [gRPC](https://en.wikipedia.org/wiki/GRPC) repository server and [CAS](https://en.wikipedia.org/wiki/Content-addressable_storage) coordinator.
 * `cotejo` — Web code review server.
@@ -65,6 +65,20 @@ Select your platform below to install Niebla `v0.1.0`:
       enableSkills = true;
     };
     ```
+
+    #### Updating Niebla
+    Update the flake input lockfile and rebuild your system or Home Manager configuration:
+
+    ```bash
+    # Update flake input to the latest commit/release
+    nix flake update niebla
+
+    # Rebuild NixOS system
+    sudo nixos-rebuild switch --flake .
+
+    # Or rebuild Home Manager
+    home-manager switch --flake .
+    ```
   </TabItem>
 
   <TabItem label="Linux (Pre-built Release)">
@@ -94,6 +108,21 @@ Select your platform below to install Niebla `v0.1.0`:
     ```bash
     sudo usermod -aG fuse "$USER" 2>/dev/null || true
     sudo sed -i 's/#user_allow_other/user_allow_other/' /etc/fuse.conf || echo "user_allow_other" | sudo tee -a /etc/fuse.conf
+    ```
+
+    #### Updating Niebla
+    Download the newest release archive, unpack it, and overwrite the existing binaries:
+
+    ```bash
+    VERSION="v0.1.1" # Target release version
+    ARCH="amd64"    # "amd64" or "arm64"
+
+    curl -sSL -O "https://github.com/mrtnzjsh/niebla/releases/download/${VERSION}/niebla_${VERSION}_linux_${ARCH}.tar.gz"
+    tar -xzf "niebla_${VERSION}_linux_${ARCH}.tar.gz"
+    sudo install -m 755 niebla nieblafs niebla-server cotejo /usr/local/bin/
+    rm -f "niebla_${VERSION}_linux_${ARCH}.tar.gz"
+
+    niebla --version
     ```
   </TabItem>
 
@@ -136,6 +165,24 @@ Select your platform below to install Niebla `v0.1.0`:
     sudo usermod -aG fuse "$USER" 2>/dev/null || true
     sudo sed -i 's/#user_allow_other/user_allow_other/' /etc/fuse.conf || echo "user_allow_other" | sudo tee -a /etc/fuse.conf
     ```
+
+    #### Updating from Source
+    Pull the latest source updates and recompile:
+
+    ```bash
+    cd niebla
+    git fetch origin
+    git checkout main
+    git pull --ff-only
+
+    CGO_ENABLED=0 go build -o bin/niebla ./cmd/niebla
+    CGO_ENABLED=0 go build -o bin/nieblafs ./cmd/nieblafs
+    CGO_ENABLED=0 go build -o bin/niebla-server ./cmd/niebla-server
+    CGO_ENABLED=0 go build -o bin/cotejo ./cmd/cotejo
+
+    sudo install -m 755 bin/niebla bin/nieblafs bin/niebla-server bin/cotejo /usr/local/bin/
+    niebla --version
+    ```
   </TabItem>
 
   <TabItem label="macOS (Darwin)">
@@ -167,6 +214,103 @@ Select your platform below to install Niebla `v0.1.0`:
     [core]
     server_addr = "127.0.0.1:50051" # Or your remote server address
     ```
+
+    #### Updating Niebla
+    Download the newest macOS release tarball and replace the binary:
+
+    ```bash
+    VERSION="v0.1.1"
+    ARCH="arm64" # "arm64" (Apple Silicon) or "amd64" (Intel)
+
+    curl -sSL -O "https://github.com/mrtnzjsh/niebla/releases/download/${VERSION}/niebla_${VERSION}_darwin_${ARCH}.tar.gz"
+    tar -xzf "niebla_${VERSION}_darwin_${ARCH}.tar.gz"
+    sudo install -m 755 niebla /usr/local/bin/
+    rm -f "niebla_${VERSION}_darwin_${ARCH}.tar.gz"
+
+    niebla --version
+    ```
+  </TabItem>
+
+  <TabItem label="Windows (Native)">
+    Windows workstations run the standalone `niebla.exe` CLI in [Direct Materialization Mode (`--no-fuse`)](/niebla/workflows/direct-materialization/) under PowerShell or Command Prompt. FUSE is not required, and Windows path backslashes (`\`) are normalized automatically.
+
+    #### Option A: Pre-built Release Binary (PowerShell)
+
+    ##### 1. Download & Extract to User Bin
+    Install `niebla.exe` to a dedicated local directory (e.g. `$HOME\bin`):
+
+    ```powershell
+    $Version = "v0.1.0"
+    $InstallDir = "$HOME\bin"
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+
+    $ZipUrl = "https://github.com/mrtnzjsh/niebla/releases/download/$Version/niebla_${Version}_windows_amd64.zip"
+    $ZipPath = "$env:TEMP\niebla.zip"
+
+    Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipPath
+    Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
+    Remove-Item $ZipPath
+    ```
+
+    ##### 2. Add to User `PATH` (No `.exe` Required)
+    Add `$HOME\bin` permanently to your User `PATH` environment variable:
+
+    ```powershell
+    $CurrentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($CurrentPath -split ';' -notcontains $InstallDir) {
+        [Environment]::SetEnvironmentVariable("Path", "$CurrentPath;$InstallDir", "User")
+        $env:Path += ";$InstallDir"
+        Write-Host "✅ Added $InstallDir to User PATH." -ForegroundColor Green
+    }
+    ```
+
+    :::tip[Why `.exe` is not required]
+    Windows automatically evaluates executables against the built-in `%PATHEXT%` list (`.COM;.EXE;.BAT;.CMD`). Once `$HOME\bin` is on your `PATH`, you run commands simply as `niebla` in any terminal without typing `.exe`.
+    :::
+
+    ##### 3. Configure Default Server & `--no-fuse` Mode
+    Configure your remote `niebla-server` connection in `$HOME\.config\niebla\config.toml`:
+
+    ```powershell
+    $ConfigDir = "$HOME\.config\niebla"
+    New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
+    Set-Content -Path "$ConfigDir\config.toml" -Value @"
+    version = 1
+
+    [core]
+    server_addr = "10.0.0.50:50051" # Point to your central niebla-server address
+    no_fuse = true
+    "@
+    ```
+
+    #### Option B: Build from Source on Windows
+    Building from source requires Go 1.26+ and Git installed on Windows:
+
+    ```powershell
+    git clone https://github.com/mrtnzjsh/niebla.git
+    cd niebla
+    $env:CGO_ENABLED = "0"
+    go build -o "$HOME\bin\niebla.exe" ./cmd/niebla
+    ```
+
+    #### Updating Niebla on Windows
+    To update to a new release, download the latest archive and replace `niebla.exe` in your `$HOME\bin` directory:
+
+    ```powershell
+    $NewVersion = "v0.1.1" # Target release version
+    $ZipUrl = "https://github.com/mrtnzjsh/niebla/releases/download/$NewVersion/niebla_${NewVersion}_windows_amd64.zip"
+    $ZipPath = "$env:TEMP\niebla.zip"
+
+    Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipPath
+    Expand-Archive -Path $ZipPath -DestinationPath "$HOME\bin" -Force
+    Remove-Item $ZipPath
+
+    niebla --version
+    ```
+
+    :::note[File Locking During Updates]
+    If `niebla.exe` is currently locked because a terminal is running an active command, close active shells or stop background tasks before replacing the binary.
+    :::
   </TabItem>
 </Tabs>
 
@@ -176,4 +320,5 @@ Select your platform below to install Niebla `v0.1.0`:
 
 * **[Quickstart Walkthrough](/niebla/getting-started/quickstart/):** Create your first workspace, shelve a changelist, and submit it to trunk.
 * **[Local & Workstation Setup](/niebla/recipes/local-setup/):** Run a standalone local server with PostgreSQL or connect a laptop client to a remote server.
+* **[Direct Materialization Mode](/niebla/workflows/direct-materialization/):** Learn how `--no-fuse` works on Windows, macOS, and containers.
 * **[Configuration Schema](/niebla/reference/configuration/):** Full reference for `~/.config/niebla/config.toml`.
