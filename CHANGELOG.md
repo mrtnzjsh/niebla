@@ -2,6 +2,13 @@
 
 All notable changes to Niebla are documented in this file, adhering to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-11-15
+
+### Fixed
+- **Cotejo Embedded Static Assets**: Embedded Tailwind CSS stylesheet (`styles.css`) and HTMX runtime (`htmx.min.js`) directly into the compiled executable via Go `//go:embed`, resolving 404 errors when running as a systemd service (`cotejo.service`) or from working directories where `./assets/static` is absent.
+- **Cotejo Static Asset Routing**: Updated HTTP routing in `niebla/cmd/cotejo/main.go` to serve embedded assets by default, while retaining the `--assets-dir` CLI flag as an optional override for live frontend development.
+- **Test Suite Hardening**: Added unit test coverage for static asset serving and MIME type detection (`assets/assets_test.go` and `internal/web/handlers/handlers_test.go`), plus end-to-end HTML link and live HTTP asset verification in the release candidate suite (`test/rc/cotejo_lifecycle_test.go`).
+
 ## [0.1.0] - 2026-11-15
 
 ### Added
@@ -58,5 +65,6 @@ All notable changes to Niebla are documented in this file, adhering to [Keep a C
 - **Cotejo Inbox Review Routing**: Corrected query assignment filter so unassigned reviewers only see changelists where they are explicitly assigned rather than all open changelists.
 - **Review Approval Verdict Parameter**: Added backwards-compatible form handler mapping `action=approve` to `verdict=approved` in `POST /cl/{id}/approval`.
 
+[0.1.1]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.1.0
 

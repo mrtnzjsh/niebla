@@ -23,7 +23,7 @@
 
         fusePkg = pkgs.buildGoModule {
           pname = "nieblafs";
-          version = "0.1.0";
+          version = "0.1.1";
           src = ./niebla;
           subPackages = [ "cmd/nieblafs" ];
           inherit vendorHash;
@@ -31,7 +31,7 @@
 
         serverPkg = pkgs.buildGoModule {
           pname = "niebla-server";
-          version = "0.1.0";
+          version = "0.1.1";
           src = ./niebla;
           subPackages = [ "cmd/niebla-server" ];
           inherit vendorHash;
@@ -44,7 +44,7 @@
 
         cotejoPkg = pkgs.buildGoModule {
           pname = "cotejo";
-          version = "0.1.0";
+          version = "0.1.1";
           src = ./niebla;
           subPackages = [ "cmd/cotejo" ];
           inherit vendorHash;
@@ -52,7 +52,7 @@
 
         cliPkg = pkgs.buildGoModule {
           pname = "niebla";
-          version = "0.1.0";
+          version = "0.1.1";
           src = ./niebla;
           subPackages = [ "cmd/niebla" ];
           inherit vendorHash;
@@ -65,7 +65,7 @@
         };
 
         allPkg = pkgs.symlinkJoin {
-          name = "niebla-suite-0.1.0";
+          name = "niebla-suite-0.1.1";
           paths = [ cliPkg serverPkg fusePkg cotejoPkg ];
         };
 
