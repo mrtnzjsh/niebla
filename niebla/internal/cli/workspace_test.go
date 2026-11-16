@@ -2,11 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"bazil.org/fuse"
+	fusefs "bazil.org/fuse/fs"
+	"bazil.org/fuse/fs/fstestutil"
 	"niebla/internal/cli/config"
 )
 
@@ -91,5 +95,77 @@ func TestWorkspaceMountUnmountCmd(t *testing.T) {
 	if !strings.Contains(delBuf.String(), "deleted successfully") {
 		t.Errorf("unexpected output: %s", delBuf.String())
 	}
+}
+
+type dummyFS struct{}
+
+func (dummyFS) Root() (fusefs.Node, error) {
+	return dummyDir{}, nil
+}
+
+type dummyDir struct{}
+
+func (dummyDir) Attr(ctx context.Context, a *fuse.Attr) error {
+	a.Mode = os.ModeDir | 0755
+	return nil
+}
+
+func TestUnmountWorkspace_FailureMode_PreservesError(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Non-existent path
+	nonExistent := filepath.Join(tempDir, "does-not-exist")
+	err := unmountWorkspace(nonExistent)
+	if err == nil {
+		t.Fatalf("expected error unmounting non-existent path, got nil")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+		t.Errorf("error was masked as 'operation not permitted', expected fusermount error: %v", err)
+	}
+
+	// 2. Unmounted regular directory
+	regularDir := filepath.Join(tempDir, "empty-dir")
+	if err := os.Mkdir(regularDir, 0755); err != nil {
+		t.Fatalf("failed to mkdir: %v", err)
+	}
+	err = unmountWorkspace(regularDir)
+	if err == nil {
+		t.Fatalf("expected error unmounting regular directory, got nil")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+		t.Errorf("error was masked as 'operation not permitted', expected fusermount error: %v", err)
+	}
+}
+
+func TestUnmountWorkspace_BusyMount_LazyFallback(t *testing.T) {
+	if _, err := os.Stat("/dev/fuse"); os.IsNotExist(err) {
+		t.Skip("skipping test: /dev/fuse not found")
+	}
+
+	mnt, err := fstestutil.MountedT(t, dummyFS{}, nil)
+	if err != nil {
+		t.Skipf("skipping live FUSE mount test: %v", err)
+	}
+
+	// Open directory handle inside mount point to simulate a process (e.g. IDE or bash) holding cwd
+	f, err := os.Open(mnt.Dir)
+	if err != nil {
+		_ = mnt.Conn.Close()
+		t.Fatalf("failed to open mounted dir: %v", err)
+	}
+
+	// unmountWorkspace should detect busy on standard -u and succeed via lazy fallback (-u -z)
+	if err := unmountWorkspace(mnt.Dir); err != nil {
+		_ = f.Close()
+		_ = mnt.Conn.Close()
+		t.Fatalf("expected unmountWorkspace to succeed via lazy fallback, got: %v", err)
+	}
+
+	// Close open file handle
+	_ = f.Close()
+	// Close connection and clean up mount dir (without calling mnt.Close() which retries standard unmount)
+	_ = mnt.Conn.Close()
+	<-mnt.Error
+	_ = os.Remove(mnt.Dir)
 }
 

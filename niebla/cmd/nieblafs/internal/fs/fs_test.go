@@ -548,3 +548,51 @@ func TestFS_Dir_Rename(t *testing.T) {
 	}
 	_ = node
 }
+
+func TestFS_Dir_And_File_Attr_UidGid(t *testing.T) {
+	tmpDir := t.TempDir()
+	scratchDir := filepath.Join(tmpDir, "scratch")
+	cacheDir := filepath.Join(tmpDir, "cache")
+	_ = os.MkdirAll(scratchDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0755)
+
+	fsInstance := NewFS(scratchDir, cacheDir, nil)
+	rootNode, err := fsInstance.Root()
+	if err != nil {
+		t.Fatalf("Root failed: %v", err)
+	}
+	root := rootNode.(*Dir)
+
+	// 1. Root Dir Attr should mirror caller EUID and EGID
+	var dirAttr fuse.Attr
+	if err := root.Attr(context.Background(), &dirAttr); err != nil {
+		t.Fatalf("root.Attr failed: %v", err)
+	}
+	expectedUID := uint32(os.Geteuid())
+	expectedGID := uint32(os.Getegid())
+	if dirAttr.Uid != expectedUID {
+		t.Errorf("expected dirAttr.Uid == %d, got %d", expectedUID, dirAttr.Uid)
+	}
+	if dirAttr.Gid != expectedGID {
+		t.Errorf("expected dirAttr.Gid == %d, got %d", expectedGID, dirAttr.Gid)
+	}
+
+	// 2. Created File Attr should mirror caller EUID and EGID
+	createReq := &fuse.CreateRequest{Name: "attr_test.txt", Mode: 0644}
+	node, _, err := root.Create(context.Background(), createReq, &fuse.CreateResponse{})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	fileNode := node.(*File)
+
+	var fileAttr fuse.Attr
+	if err := fileNode.Attr(context.Background(), &fileAttr); err != nil {
+		t.Fatalf("fileNode.Attr failed: %v", err)
+	}
+	if fileAttr.Uid != expectedUID {
+		t.Errorf("expected fileAttr.Uid == %d, got %d", expectedUID, fileAttr.Uid)
+	}
+	if fileAttr.Gid != expectedGID {
+		t.Errorf("expected fileAttr.Gid == %d, got %d", expectedGID, fileAttr.Gid)
+	}
+}
