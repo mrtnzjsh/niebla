@@ -16,6 +16,8 @@ jobs:
     name: Multi-Region Concurrency & Cotejo UI Verification
     runs-on: self-hosted
     timeout-minutes: 40
+    outputs:
+      macos_available: ${{ steps.probe-macos.outputs.macos_available }}
 
     steps:
       - name: Checkout Source Code
@@ -33,6 +35,14 @@ jobs:
         run: |
           docker info || podman info
 
+      - name: Run Cross-OS In-Code Interoperability Suite
+        run: |
+          cd niebla && go test -v ./test/interop/...
+
+      - name: Verify Windows KVM Hardware Acceleration & Cross-Compilation
+        run: |
+          ./niebla/scripts/test_windows_container.sh check
+
       - name: Run Release Candidate Integration Suite
         env:
           CGO_ENABLED: '0'
@@ -40,8 +50,51 @@ jobs:
         run: |
           cd niebla && go test -v -tags=rc -timeout=35m ./test/rc/...
 
+      - name: Probe macOS Apple Silicon Runner Availability
+        id: probe-macos
+        run: |
+          MACOS_AVAILABLE="false"
+          if tailscale status 2>/dev/null | grep -iE 'macOS|darwin' | grep -v 'offline' | grep -q .; then
+            echo "Discovered online macOS device in Tailscale network."
+            MACOS_AVAILABLE="true"
+          fi
+          if [ "$MACOS_AVAILABLE" = "true" ]; then
+            echo "macos_available=true" >> "$GITHUB_OUTPUT"
+            echo "✅ macOS test target detected. Scheduling macos-darwin-verification."
+          else
+            echo "macos_available=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ M1 MacBook Air (macOS) runner is currently offline or unregistered. Logging missing and proceeding without blocking RC pipeline."
+          fi
+
       - name: Report Status
         if: always()
         run: |
           echo "RC verification completed with exit status: $?"
 
+  macos-darwin-verification:
+    name: Native macOS Apple Silicon APFS & Remote CL Verification
+    needs: rc-verification
+    if: ${{ needs.rc-verification.outputs.macos_available == 'true' }}
+    runs-on: [self-hosted, macos]
+    continue-on-error: true
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Execute Native macOS Remote Test Suite
+        run: |
+          ./niebla/scripts/test_macos_remote.sh 100.64.225.27:50051
+
+      - name: Report macOS Status
+        if: always()
+        run: |
+          echo "macOS verification completed with exit status: $?"

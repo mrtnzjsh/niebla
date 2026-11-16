@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 )
 
 // CheckStatus represents the outcome of an individual pre-flight verification check.
@@ -187,10 +186,7 @@ func CheckFusermount(explicitPath string) CheckItem {
 	}
 
 	isSetuid := (foundInfo.Mode() & os.ModeSetuid) != 0
-	isRootOwned := false
-	if stat, ok := foundInfo.Sys().(*syscall.Stat_t); ok {
-		isRootOwned = (stat.Uid == 0)
-	}
+	isRootOwned := isFileRootOwned(foundInfo)
 
 	if !isSetuid || !isRootOwned {
 		return CheckItem{
