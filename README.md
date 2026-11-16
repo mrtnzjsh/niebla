@@ -77,8 +77,17 @@ flowchart TD
 ### 1. Virtual Workspaces (`niebla workspace`)
 Never clone gigabytes of packfiles or juggle stashes. Each feature, bugfix, or experiment receives its own lightweight workspace:
 * **FUSE Mode (Default):** Virtual mount point backed by `nieblafs`. Full POSIX mutation support (`mkdir`, `touch`, file creation, `rm`, `mv`) routing changes seamlessly to a local Copy-on-Write (CoW) scratch overlay while virtualizing clean files. Storage on creation is virtually zero (< 100 KB).
-* **Direct Materialization (`--no-fuse`):** Optimized for Docker containers, Kubernetes pods, CI runners, and macOS environments where `/dev/fuse` is unavailable. Uses parallel streaming and hardlinks for fast checkouts.
+* **Direct Materialization (`--no-fuse`):** Optimized for Windows (native `niebla.exe`), macOS (Apple Silicon & Intel APFS), Docker containers, Kubernetes pods, CI runners, and environments where `/dev/fuse` is unavailable. Uses parallel streaming and local caching for fast checkouts with automatic backslash and Unicode NFC normalization.
 * **Mount Management:** Cleanly attach, detach, or recover workspace mounts with `niebla workspace mount` and `unmount`.
+
+### Cross-Platform Client Matrix
+
+| Operating System | Supported Mode | Executable | Workspace Creation Command | Client Capabilities & Semantics |
+| :--- | :--- | :--- | :--- | :--- |
+| **Linux (NixOS, Ubuntu, RHEL)** | FUSE (Default) & `--no-fuse` | `niebla`, `nieblafs` | `niebla workspace create <name>` | Zero-clone FUSE virtual mount backed by local CoW scratch overlay. |
+| **macOS (Darwin ARM64 / M-Series & Intel)** | Direct (`--no-fuse`) | `niebla` | `niebla workspace create <name> --no-fuse --server <addr>` | Direct APFS materialization. Decomposed Unicode (NFD) automatically normalized to NFC. |
+| **Windows (10, 11, Server x64)** | Direct (`--no-fuse`) | `niebla.exe` | `niebla.exe workspace create <name> --no-fuse --server <addr>` | Standalone Windows binary (cmd/PowerShell). Backslashes normalized; NTFS case collisions safely intercepted. |
+| **Windows WSL2** | FUSE & `--no-fuse` | `niebla`, `nieblafs` | `niebla workspace create <name>` | Full Linux capabilities within WSL2 environment. |
 
 ### 2. Instant Change Tracking & Shelving
 * **Fast Status:** Only modified files, newly added files, or whiteout deletion markers (`.wh.*`) occupy disk space in scratch. `niebla status` and `niebla diff` run instantaneously regardless of total monorepo size.
