@@ -61,7 +61,7 @@ Changes:
   [D]  pkg/legacy/auth.go
 ```
 
-* **Ignore Rules (`.nieblaignore`):** Add build output directories (`target/`, `node_modules/`, `dist/`, `.direnv/`) to `.nieblaignore` at the repository root. When scanning scratch, `niebla` skips matching directories immediately via `filepath.SkipDir`. Built-in excludes are strictly limited to temporary daemon runtime sockets (`nieblafs.sock`, `*.sock`); version-controlled dot-directories such as `.niebla/` (housing `OWNERS.toml`, `agents.toml`, and hooks) are fully tracked and shelved by default unless explicitly excluded in `.nieblaignore`.
+* **Ignore Rules (`.nieblaignore`):** Add build output directories (`target/`, `node_modules/`, `dist/`, `.direnv/`) to `.nieblaignore` at the repository root (see [Authoring `.nieblaignore` & IDE Highlighting](/niebla/workflows/ide-setup/#7-authoring-nieblaignore-for-monorepos)). When scanning scratch, `niebla` skips matching directories immediately via `filepath.SkipDir`. Built-in excludes are strictly limited to temporary daemon runtime sockets (`nieblafs.sock`, `*.sock`); version-controlled dot-directories such as `.niebla/` (housing `OWNERS.toml`, `agents.toml`, and hooks) are fully tracked and shelved by default unless explicitly excluded in `.nieblaignore`.
 * **Diffing (`niebla diff`):** Run `niebla diff` (or `niebla diff path/to/file.go`) to view syntax-highlighted unified diffs comparing your scratch files against the base changelist blobs.
 
 ---

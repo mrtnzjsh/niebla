@@ -42,7 +42,7 @@ As you work, disk space grows only for files you touch or read:
 2. **Read Unmodified Files:** Cached once in `~/.cache/niebla/blobs/` and shared across every workspace on your machine.
 3. **Modified or Added Files:** Stored in `~/.niebla/workspaces/<name>/scratch/`.
 4. **Deleted Files:** Represented by a 0-byte `.wh.<filename>` marker in scratch.
-5. **Build Outputs (`target/`, `node_modules/`):** Written to scratch and ignored by version control via `.nieblaignore`.
+5. **Build Outputs (`target/`, `node_modules/`):** Written to scratch and ignored by version control via `.nieblaignore` (see [Authoring `.nieblaignore` for Monorepos](/niebla/workflows/ide-setup/#7-authoring-nieblaignore-for-monorepos)).
 
 To reclaim space from older cached blobs that are no longer referenced by active workspaces, run `niebla cas gc` (see [Troubleshooting: CAS Cache Pruning](/niebla/workflows/troubleshooting/#4-local-cas-cache-management--pruning)).
 
