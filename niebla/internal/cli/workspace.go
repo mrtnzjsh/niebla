@@ -681,10 +681,19 @@ func isMountPoint(dir string) bool {
 }
 
 func unmountWorkspace(mountDir string) error {
+	var lastErr string
+
 	// Try fusermount3 first
 	if fuserPath, err := exec.LookPath("fusermount3"); err == nil {
 		cmd := exec.Command(fuserPath, "-u", mountDir)
-		if _, err := cmd.CombinedOutput(); err == nil {
+		if out, err := cmd.CombinedOutput(); err == nil {
+			return nil
+		} else {
+			lastErr = strings.TrimSpace(string(out))
+		}
+		// Fallback to lazy unmount if busy
+		lazyCmd := exec.Command(fuserPath, "-u", "-z", mountDir)
+		if _, err := lazyCmd.CombinedOutput(); err == nil {
 			return nil
 		}
 	}
@@ -692,7 +701,13 @@ func unmountWorkspace(mountDir string) error {
 	// Try fusermount
 	if fuserPath, err := exec.LookPath("fusermount"); err == nil {
 		cmd := exec.Command(fuserPath, "-u", mountDir)
-		if _, err := cmd.CombinedOutput(); err == nil {
+		if out, err := cmd.CombinedOutput(); err == nil {
+			return nil
+		} else if lastErr == "" {
+			lastErr = strings.TrimSpace(string(out))
+		}
+		lazyCmd := exec.Command(fuserPath, "-u", "-z", mountDir)
+		if _, err := lazyCmd.CombinedOutput(); err == nil {
 			return nil
 		}
 	}
@@ -702,7 +717,14 @@ func unmountWorkspace(mountDir string) error {
 		return nil
 	}
 
-	return unix.Unmount(mountDir, unix.MNT_FORCE)
+	if err := unix.Unmount(mountDir, unix.MNT_FORCE); err == nil {
+		return nil
+	}
+
+	if lastErr != "" {
+		return fmt.Errorf("%s", lastErr)
+	}
+	return fmt.Errorf("operation not permitted")
 }
 
 func checkWorkspaceStatus(ws *config.WorkspaceConfig) string {
