@@ -9,8 +9,10 @@ sidebar:
 In Niebla, repository policies—including code ownership, required approvals, automated review agents, and presubmit hooks—are versioned directly in the repository under `.niebla/` and per-directory `OWNERS.toml` files rather than external web settings.
 
 Because these files live inside the [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree):
+* **First-Class Version-Controlled Directory:** The `.niebla/` directory is tracked by default. Edits to `.niebla/OWNERS.toml`, `.niebla/agents.toml`, `.niebla/hooks.toml`, and `.niebla/prompts/*.md` appear in `niebla status` as `[A]` (added) or `[M]` (modified) and are shelved into changelists like any application code.
 * **Changes to policy are reviewed like code:** Updating an owner rule, linter script, or AI prompt goes through a standard Changelist (CL) in Cotejo.
 * **No surprise breakages on open CLs:** Every changelist is evaluated against the rules present at its base CL revision.
+* **Selective Ignore:** If developers maintain local, untracked development settings inside `.niebla/`, they can selectively ignore them using `.nieblaignore` (for example, `.niebla/local.json`). Only runtime daemon socket files (`nieblafs.sock`, `*.sock`) are excluded automatically.
 
 ---
 

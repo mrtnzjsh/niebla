@@ -40,11 +40,17 @@ trailing_space\
 		isDir   bool
 		want    bool
 	}{
-		// Built-in .niebla directory rules
-		{name: "root .niebla dir", relPath: ".niebla", isDir: true, want: true},
-		{name: "file inside .niebla", relPath: ".niebla/config.json", isDir: false, want: true},
-		{name: "nested .niebla dir", relPath: "sub/.niebla/state", isDir: false, want: true},
+		// Version-controlled .niebla directory rules (NOT ignored by default)
+		{name: "root .niebla dir is tracked", relPath: ".niebla", isDir: true, want: false},
+		{name: "file inside .niebla is tracked", relPath: ".niebla/OWNERS.toml", isDir: false, want: false},
+		{name: "agents.toml inside .niebla is tracked", relPath: ".niebla/agents.toml", isDir: false, want: false},
+		{name: "hooks.toml inside .niebla is tracked", relPath: ".niebla/hooks.toml", isDir: false, want: false},
+		{name: "prompts inside .niebla is tracked", relPath: ".niebla/prompts/security.md", isDir: false, want: false},
 		{name: ".nieblaignore itself is not ignored", relPath: ".nieblaignore", isDir: false, want: false},
+
+		// Built-in daemon runtime socket rules
+		{name: "nieblafs.sock is ignored", relPath: "nieblafs.sock", isDir: false, want: true},
+		{name: "nested socket file is ignored", relPath: "sub/daemon.sock", isDir: false, want: true},
 
 		// Directory-only rule: node_modules/
 		{name: "root node_modules dir", relPath: "node_modules", isDir: true, want: true},
@@ -104,8 +110,11 @@ func TestLoadFile_MissingAndPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile on missing file returned error: %v", err)
 	}
-	if !m.Match(".niebla/state", false) {
-		t.Errorf("expected built-in .niebla ignore on missing file")
+	if m.Match(".niebla/OWNERS.toml", false) {
+		t.Errorf("expected .niebla/OWNERS.toml to NOT be ignored on missing file")
+	}
+	if !m.Match("nieblafs.sock", false) {
+		t.Errorf("expected nieblafs.sock to be ignored as built-in runtime socket")
 	}
 	if !m.Match("node_modules/pkg/index.js", false) {
 		t.Errorf("expected node_modules to be ignored by default")
@@ -118,6 +127,9 @@ func TestLoadFile_MissingAndPresent(t *testing.T) {
 	}
 	if !m.Match(".DS_Store", false) {
 		t.Errorf("expected .DS_Store to be ignored by default")
+	}
+	if !m.Match(".env.local", false) {
+		t.Errorf("expected .env.local to be ignored by default")
 	}
 	if m.Match("main.go", false) {
 		t.Errorf("expected main.go not to be ignored")
@@ -149,5 +161,43 @@ func TestLoadFile_MissingAndPresent(t *testing.T) {
 	}
 	if m2.Match("node_modules/special", false) {
 		t.Errorf("expected negated node_modules/special not to be ignored")
+	}
+}
+
+func TestPatternMatcher_DotNieblaGovernance(t *testing.T) {
+	m := NewDefaultMatcher()
+
+	// Assert required Issue #4 governance paths are not ignored
+	if m.Match(".niebla", true) {
+		t.Errorf("expected .niebla directory not to be ignored")
+	}
+	if m.Match(".niebla/OWNERS.toml", false) {
+		t.Errorf("expected .niebla/OWNERS.toml not to be ignored")
+	}
+	if m.Match(".niebla/agents.toml", false) {
+		t.Errorf("expected .niebla/agents.toml not to be ignored")
+	}
+	if m.Match(".niebla/hooks.toml", false) {
+		t.Errorf("expected .niebla/hooks.toml not to be ignored")
+	}
+	if m.Match(".niebla/prompts/security.md", false) {
+		t.Errorf("expected .niebla/prompts/security.md not to be ignored")
+	}
+
+	// Sockets should be ignored
+	if !m.Match("nieblafs.sock", false) {
+		t.Errorf("expected nieblafs.sock to be ignored")
+	}
+	if !m.Match("nested/service.sock", false) {
+		t.Errorf("expected nested/service.sock to be ignored")
+	}
+
+	// Verify selective ignore inside .niebla works via custom rules
+	customMatcher := NewDefaultMatcher(".niebla/local-cache/")
+	if !customMatcher.Match(".niebla/local-cache/temp.json", false) {
+		t.Errorf("expected .niebla/local-cache/temp.json to be ignored when explicitly in rules")
+	}
+	if customMatcher.Match(".niebla/OWNERS.toml", false) {
+		t.Errorf("expected .niebla/OWNERS.toml to remain tracked")
 	}
 }

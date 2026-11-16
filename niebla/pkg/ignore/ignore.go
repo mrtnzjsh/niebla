@@ -14,7 +14,7 @@ type Matcher interface {
 	Match(relPath string, isDir bool) bool
 }
 
-// NoopMatcher never ignores anything except built-in .niebla metadata.
+// NoopMatcher never ignores anything except temporary daemon runtime artifacts (e.g. sockets).
 type NoopMatcher struct{}
 
 // Match implements Matcher.
@@ -174,14 +174,9 @@ func isBuiltinIgnored(normPath string) bool {
 	if normPath == "" || normPath == "." {
 		return false
 	}
-	if normPath == ".niebla" || strings.HasPrefix(normPath, ".niebla/") {
+	base := path.Base(normPath)
+	if base == "nieblafs.sock" || strings.HasSuffix(base, ".sock") {
 		return true
-	}
-	parts := strings.Split(normPath, "/")
-	for _, part := range parts {
-		if part == ".niebla" {
-			return true
-		}
 	}
 	return false
 }

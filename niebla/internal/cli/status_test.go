@@ -148,6 +148,7 @@ func TestScanScratchChanges_NieblaIgnoreFiltering(t *testing.T) {
 # Ignore build and dependency directories
 node_modules/
 build/
+.niebla/
 *.o
 *.log
 !important.log
@@ -240,5 +241,70 @@ func mustWriteFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+}
+
+func TestScanScratchChanges_TracksDotNieblaGovernance(t *testing.T) {
+	tempDir := t.TempDir()
+	scratchDir := filepath.Join(tempDir, "scratch")
+	if err := os.MkdirAll(scratchDir, 0755); err != nil {
+		t.Fatalf("failed to create scratch dir: %v", err)
+	}
+
+	// 1. Create governance files inside .niebla directory
+	ownersContent := `approvers = ["alice", "bob"]
+required_approvals = 1
+`
+	mustWriteFile(t, filepath.Join(scratchDir, ".niebla", "OWNERS.toml"), ownersContent)
+
+	agentsContent := `[[agents]]
+name = "sec-scanner"
+cmd = "sec-scanner.sh"
+`
+	mustWriteFile(t, filepath.Join(scratchDir, ".niebla", "agents.toml"), agentsContent)
+
+	hooksContent := `[[hooks]]
+name = "no-raw-sql"
+`
+	mustWriteFile(t, filepath.Join(scratchDir, ".niebla", "hooks.toml"), hooksContent)
+
+	promptContent := `# Security Review Persona
+Look for SQL injections.
+`
+	mustWriteFile(t, filepath.Join(scratchDir, ".niebla", "prompts", "security.md"), promptContent)
+
+	// Also create a daemon socket file (should be ignored)
+	mustWriteFile(t, filepath.Join(scratchDir, "nieblafs.sock"), "")
+
+	// Base tree is empty
+	mockFetch := func(h []byte) ([]tree.Entry, error) {
+		return []tree.Entry{}, nil
+	}
+
+	changes, err := ScanScratchChanges(scratchDir, nil, mockFetch)
+	if err != nil {
+		t.Fatalf("ScanScratchChanges failed: %v", err)
+	}
+
+	changeTypes := make(map[string]ChangeType)
+	for _, c := range changes {
+		changeTypes[c.Path] = c.Type
+	}
+
+	expectedTracked := []string{
+		".niebla/OWNERS.toml",
+		".niebla/agents.toml",
+		".niebla/hooks.toml",
+		".niebla/prompts/security.md",
+	}
+
+	for _, p := range expectedTracked {
+		if changeTypes[p] != ChangeAdded {
+			t.Errorf("expected %s to have ChangeAdded ([A]), got %v (all: %+v)", p, changeTypes[p], changeTypes)
+		}
+	}
+
+	if _, hasSocket := changeTypes["nieblafs.sock"]; hasSocket {
+		t.Errorf("nieblafs.sock should have been ignored by built-in matcher, but was returned in changes")
 	}
 }
