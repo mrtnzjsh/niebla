@@ -153,6 +153,10 @@ nieblafs --mount <dir> --scratch <dir> --server <host:port> [flags]
 | `--socket <path>` | *(Optional)* | [UNIX domain socket](https://en.wikipedia.org/wiki/Unix_domain_socket) (`nieblafs.sock`) used by `niebla` for health checks and `niebla sync` re-anchoring. |
 | `--debug` | `false` | Enables verbose FUSE operation logging to stderr. |
 
+### Inode Ownership & Mount Options (`allow_other`)
+* **UID/GID Attribution:** When synthesizing file and directory attributes (`Attr`), `nieblafs` dynamically reports the caller process's effective UID and GID (`os.Geteuid()` / `os.Getegid()`) or the actual scratch file ownership stat. This ensures the user is recognized by the Linux VFS as the owner, allowing full read-write permissions and preventing shell prompt engines (like Starship) from showing false read-only indicators (`🔒`).
+* **Multi-User & Root Access (`fuse.AllowOther`):** By default, the Linux kernel restricts FUSE mounts strictly to the mounting process UID. `nieblafs` mounts with `fuse.AllowOther()` (falling back gracefully if disallowed by local security policy), allowing `sudo`, background build runners, and container runtimes to inspect workspace mount points when `user_allow_other` is enabled in `/etc/fuse.conf`.
+
 ### Unmounting & Recovery
 To detach a workspace cleanly without deleting scratch edits, run `niebla workspace unmount <name>` (or `fusermount3 -u <mount-path>`). If a daemon process crashes and leaves a stale mount point, see the [Troubleshooting Guide](/niebla/workflows/troubleshooting/#1-fuse-virtual-filesystem-failures).
 

@@ -17,6 +17,9 @@ This guide covers quick diagnostic commands and recovery steps for common worksp
 | **Transport endpoint is not connected** | `ps aux \| grep nieblafs` | `fusermount3 -u -z <mount>` then `niebla workspace mount <name>` |
 | **Device or resource busy on unmount** | `fuser -v -m <mount>` | Close shells/IDEs in `<mount>` or run `fuser -k -m <mount>` |
 | **Control socket connection refused** | `ls -l ~/.niebla/workspaces/<name>/nieblafs.sock` | `rm -f ~/.niebla/workspaces/<name>/nieblafs.sock` then `niebla workspace mount <name>` |
+| **Lock icon (`🔒`) in shell prompt** | `ls -ld <mount>` | `nieblafs` assigns caller UID/GID (v0.1.2+); check directory write permissions |
+| **`sudo ls: Permission denied`** | `cat /etc/fuse.conf` | Enable `user_allow_other` in `/etc/fuse.conf` (`programs.fuse.userAllowOther = true`) |
+| **`ls` returns empty directory** | `ls -la <mount>` | Plain `ls` hides dotfiles (`.niebla`, `.vscode`); run `ls -la` |
 | **Submit lock timeout** | Query `pg_locks WHERE locktype = 'advisory'` | `SELECT pg_terminate_backend(<pid>);` |
 | **Local CAS cache disk full** | `niebla cas gc --dry-run` | `niebla cas gc --grace-period 24h` |
 
@@ -53,6 +56,30 @@ niebla workspace unmount my-feature
 * **File Operations:** File creation via `touch`, `cp`, or IDEs (`fs.NodeCreater`), in-place writes (`fs.HandleWriter`), and deletions (`rm` via `fs.NodeRemover`).
 * **Renames:** Moving files or directories (`mv` via `fs.NodeRenamer`) within the workspace overlay.
 * **Storage Location:** All added or modified files reside in `~/.niebla/workspaces/<name>/scratch/`. Deleting base tree files creates `.wh.<name>` whiteout markers in scratch without mutating CAS storage.
+
+### Shell Prompt Shows Lock Icon (`🔒`) in Workspace Mount
+If shell prompt engines (such as Starship or Powerlevel10k) display a lock icon (`🔒`) when navigating into a workspace mount (`~/niebla/workspaces/<name>🔒`), the prompt engine detected that the current working directory is not writable by your user.
+* **Cause:** FUSE inode attributes (`Dir.Attr` / `File.Attr`) previously defaulted UID/GID to 0 (`root:root`). Under standard `0755` directory permissions, write access was only granted to the owner (`root`), triggering a false read-only warning in shell prompt engines.
+* **Resolution:** Upgraded in Niebla v0.1.2+. `nieblafs` now dynamically assigns the caller's effective UID and GID (`matatan:users`) or the underlying scratch directory stat, ensuring shell prompts and IDEs recognize full owner write privileges.
+
+### `sudo ls: Permission denied` Inside Mount
+Attempting to run `sudo ls <mount>` or inspecting the mount as another user returns `ls: cannot open directory '.': Permission denied`:
+* **Cause:** By default, Linux FUSE mounts operate in private isolation, disallowing all other users—including `root`—from accessing the mount point unless `allow_other` is enabled.
+* **Resolution:** Ensure `/etc/fuse.conf` contains `user_allow_other` (configured automatically on NixOS via `programs.fuse.userAllowOther = true;`). `nieblafs` mounts with `fuse.AllowOther()` to permit `sudo`, debuggers, and container runtimes to access the mount.
+
+### `ls` Returns Empty Directory Despite IDE Creating Files
+After creating files such as `.niebla/OWNERS.toml` or `.vscode/settings.json`, running `ls` from the terminal displays an empty directory:
+* **Cause:** Standard Linux `ls` hides all dotfiles and dot-directories by default.
+* **Resolution:** Run `ls -la` to display all entries including `.niebla` and `.vscode`. Standard non-hidden files (such as `main.go` or `README.md`) will appear in regular `ls`.
+
+### `niebla workspace diff` vs `niebla diff`
+If `niebla workspace diff` produces no output or an error:
+* **Explanation:** `niebla workspace` subcommands exclusively manage workspace lifecycles (`create`, `list`, `delete`, `mount`, `unmount`).
+* **Resolution:** To view unified diffs of local scratch edits against the base Merkle tree, run the top-level command:
+  ```bash
+  niebla diff [path]
+  ```
+  Or run `niebla status` to view a summary of modified `[M]`, added `[A]`, or deleted `[D]` files.
 
 ---
 
