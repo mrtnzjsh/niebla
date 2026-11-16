@@ -1331,4 +1331,46 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 	font-size: 0.75rem !important;
 }
 
+/* ==========================================================================
+   Starlight Tabs: Single-Line Baseline Alignment & No Staggered Borders
+   ========================================================================== */
+.tablist-wrapper {
+	overflow-x: auto !important;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin;
+}
+
+.tablist-wrapper [role='tablist'] {
+	display: flex !important;
+	flex-wrap: nowrap !important;
+	align-items: stretch !important;
+	border-bottom: 2px solid var(--sl-color-gray-5) !important;
+	padding: 0 !important;
+	margin: 0 !important;
+}
+
+.tablist-wrapper .tab {
+	display: flex !important;
+	flex-shrink: 0 !important;
+	margin-bottom: -2px !important;
+}
+
+.tablist-wrapper .tab > [role='tab'] {
+	display: inline-flex !important;
+	align-items: center !important;
+	white-space: nowrap !important;
+	height: 100% !important;
+	padding: 0.625rem 1.125rem !important;
+	border-bottom: 2px solid transparent !important;
+	color: var(--sl-color-gray-3);
+	text-decoration: none !important;
+}
+
+.tablist-wrapper .tab > [role='tab'][aria-selected='true'] {
+	border-bottom-color: var(--sl-color-accent-high, #38BDF8) !important;
+	color: var(--sl-color-white) !important;
+	font-weight: 600 !important;
+}
+
+
 
