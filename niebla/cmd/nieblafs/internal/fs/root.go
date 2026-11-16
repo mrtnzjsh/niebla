@@ -3,8 +3,10 @@ package fs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -127,6 +129,10 @@ var (
 	_ fs.Node               = (*Dir)(nil)
 	_ fs.NodeStringLookuper = (*Dir)(nil)
 	_ fs.HandleReadDirAller = (*Dir)(nil)
+	_ fs.NodeMkdirer        = (*Dir)(nil)
+	_ fs.NodeCreater        = (*Dir)(nil)
+	_ fs.NodeRemover        = (*Dir)(nil)
+	_ fs.NodeRenamer        = (*Dir)(nil)
 )
 
 // Attr populates directory attributes.
@@ -162,6 +168,12 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	}
 
 	if d.fs != nil && d.fs.ScratchDir != "" {
+		// Check for overlayfs whiteout marker first
+		whiteoutPath := filepath.Join(d.fs.ScratchDir, d.path, ".wh."+name)
+		if _, err := os.Lstat(whiteoutPath); err == nil {
+			return nil, syscall.ENOENT
+		}
+
 		scratchPath := filepath.Join(d.fs.ScratchDir, relPath)
 		if fi, err := os.Lstat(scratchPath); err == nil {
 			if d.fs.Cache != nil {
@@ -223,19 +235,27 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 // ReadDirAll streams all directory entries combining CoW scratch and metadata cache.
 func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	seen := make(map[string]bool)
+	whiteouts := make(map[string]bool)
 	var entries []fuse.Dirent
 
 	if d.fs != nil && d.fs.ScratchDir != "" {
 		scratchDir := filepath.Join(d.fs.ScratchDir, d.path)
 		if des, err := os.ReadDir(scratchDir); err == nil {
 			for _, de := range des {
-				seen[de.Name()] = true
+				name := de.Name()
+				if strings.HasPrefix(name, ".wh.") {
+					orig := strings.TrimPrefix(name, ".wh.")
+					whiteouts[orig] = true
+					seen[orig] = true
+					continue
+				}
+				seen[name] = true
 				direntType := fuse.DT_File
 				if de.IsDir() {
 					direntType = fuse.DT_Dir
 				}
 				entries = append(entries, fuse.Dirent{
-					Name: de.Name(),
+					Name: name,
 					Type: direntType,
 				})
 			}
@@ -250,7 +270,7 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 		cachedMetas := d.fs.Cache.ListDir(d.path)
 		for _, meta := range cachedMetas {
 			entryName := filepath.Base(meta.Name)
-			if seen[entryName] {
+			if seen[entryName] || whiteouts[entryName] {
 				continue
 			}
 			seen[entryName] = true
@@ -266,6 +286,295 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	}
 
 	return entries, nil
+}
+
+// Mkdir creates a directory in the local CoW scratch overlay.
+func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
+	if d.fs == nil || d.fs.ScratchDir == "" {
+		return nil, syscall.EROFS
+	}
+
+	var relPath string
+	if d.path == "" {
+		relPath = req.Name
+	} else {
+		relPath = filepath.Join(d.path, req.Name)
+	}
+
+	scratchPath := filepath.Join(d.fs.ScratchDir, relPath)
+	whiteoutPath := filepath.Join(d.fs.ScratchDir, d.path, ".wh."+req.Name)
+
+	if err := os.MkdirAll(filepath.Dir(scratchPath), 0755); err != nil {
+		return nil, err
+	}
+
+	mode := req.Mode
+	if mode == 0 {
+		mode = 0755
+	}
+	if err := os.Mkdir(scratchPath, mode); err != nil {
+		return nil, err
+	}
+
+	_ = os.Remove(whiteoutPath)
+
+	if d.fs.Cache != nil {
+		d.fs.Cache.ClearNegative(relPath)
+	}
+
+	return &Dir{
+		fs:    d.fs,
+		path:  relPath,
+		inode: hashPathToInode(relPath),
+	}, nil
+}
+
+// Create creates and opens a new file in the local CoW scratch overlay.
+func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+	if d.fs == nil || d.fs.ScratchDir == "" {
+		return nil, nil, syscall.EROFS
+	}
+
+	var relPath string
+	if d.path == "" {
+		relPath = req.Name
+	} else {
+		relPath = filepath.Join(d.path, req.Name)
+	}
+
+	scratchPath := filepath.Join(d.fs.ScratchDir, relPath)
+	whiteoutPath := filepath.Join(d.fs.ScratchDir, d.path, ".wh."+req.Name)
+
+	if err := os.MkdirAll(filepath.Dir(scratchPath), 0755); err != nil {
+		return nil, nil, err
+	}
+
+	mode := req.Mode
+	if mode == 0 {
+		mode = 0644
+	}
+
+	f, err := os.OpenFile(scratchPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
+	if err != nil {
+		return nil, nil, err
+	}
+	_ = f.Close()
+
+	_ = os.Remove(whiteoutPath)
+
+	if d.fs.Cache != nil {
+		d.fs.Cache.ClearNegative(relPath)
+	}
+
+	node := &File{
+		fs:          d.fs,
+		path:        relPath,
+		Name:        req.Name,
+		scratchPath: scratchPath,
+		isScratch:   true,
+		size:        0,
+		mode:        uint32(mode),
+		inode:       hashPathToInode(relPath),
+	}
+
+	_ = node.Attr(ctx, &resp.Attr)
+
+	return node, node, nil
+}
+
+// Remove removes a file or directory from the directory, writing a whiteout marker if backed by base CAS.
+func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	if d.fs == nil || d.fs.ScratchDir == "" {
+		return syscall.EROFS
+	}
+
+	var relPath string
+	if d.path == "" {
+		relPath = req.Name
+	} else {
+		relPath = filepath.Join(d.path, req.Name)
+	}
+
+	if d.fs != nil {
+		_ = d.fs.EnsureDirectoryLoaded(ctx, d.path)
+	}
+
+	scratchPath := filepath.Join(d.fs.ScratchDir, relPath)
+	whiteoutPath := filepath.Join(d.fs.ScratchDir, d.path, ".wh."+req.Name)
+
+	scratchInfo, scratchErr := os.Lstat(scratchPath)
+	scratchExists := scratchErr == nil
+
+	var inBase bool
+	if d.fs.Cache != nil {
+		_, inBase = d.fs.Cache.Get(relPath)
+	}
+
+	if !scratchExists && !inBase {
+		return syscall.ENOENT
+	}
+
+	if req.Dir {
+		if scratchExists {
+			if !scratchInfo.IsDir() {
+				return syscall.ENOTDIR
+			}
+			if err := os.Remove(scratchPath); err != nil {
+				return err
+			}
+		}
+		if inBase {
+			if d.fs.Cache != nil {
+				_ = d.fs.EnsureDirectoryLoaded(ctx, relPath)
+				children := d.fs.Cache.ListDir(relPath)
+				if len(children) > 0 {
+					return syscall.ENOTEMPTY
+				}
+			}
+			if err := os.MkdirAll(filepath.Dir(whiteoutPath), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(whiteoutPath, nil, 0644); err != nil {
+				return err
+			}
+		}
+	} else {
+		if scratchExists {
+			if scratchInfo.IsDir() {
+				return syscall.EISDIR
+			}
+			if err := os.Remove(scratchPath); err != nil {
+				return err
+			}
+		}
+		if inBase {
+			if err := os.MkdirAll(filepath.Dir(whiteoutPath), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(whiteoutPath, nil, 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	if d.fs.Cache != nil {
+		d.fs.Cache.Invalidate(relPath)
+		d.fs.Cache.SetNegative(relPath, 5*time.Second)
+	}
+
+	return nil
+}
+
+// Rename moves or renames a file or directory within the workspace overlay.
+func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
+	targetDir, ok := newDir.(*Dir)
+	if !ok {
+		return syscall.EINVAL
+	}
+
+	if d.fs == nil || d.fs.ScratchDir == "" {
+		return syscall.EROFS
+	}
+
+	if d.fs != nil {
+		_ = d.fs.EnsureDirectoryLoaded(ctx, d.path)
+		_ = d.fs.EnsureDirectoryLoaded(ctx, targetDir.path)
+	}
+
+	var oldRelPath string
+	if d.path == "" {
+		oldRelPath = req.OldName
+	} else {
+		oldRelPath = filepath.Join(d.path, req.OldName)
+	}
+
+	var newRelPath string
+	if targetDir.path == "" {
+		newRelPath = req.NewName
+	} else {
+		newRelPath = filepath.Join(targetDir.path, req.NewName)
+	}
+
+	oldScratchPath := filepath.Join(d.fs.ScratchDir, oldRelPath)
+	newScratchPath := filepath.Join(d.fs.ScratchDir, newRelPath)
+
+	oldWhiteoutPath := filepath.Join(d.fs.ScratchDir, d.path, ".wh."+req.OldName)
+	newWhiteoutPath := filepath.Join(d.fs.ScratchDir, targetDir.path, ".wh."+req.NewName)
+
+	if _, err := os.Lstat(oldWhiteoutPath); err == nil {
+		return syscall.ENOENT
+	}
+
+	oldScratchInfo, oldScratchErr := os.Lstat(oldScratchPath)
+	oldScratchExists := oldScratchErr == nil
+
+	var oldInBase bool
+	var oldMeta metadata.Metadata
+	if d.fs.Cache != nil {
+		oldMeta, oldInBase = d.fs.Cache.Get(oldRelPath)
+	}
+
+	if !oldScratchExists && !oldInBase {
+		return syscall.ENOENT
+	}
+
+	if err := os.MkdirAll(filepath.Dir(newScratchPath), 0755); err != nil {
+		return err
+	}
+
+	_ = os.Remove(newWhiteoutPath)
+
+	if oldScratchExists {
+		_ = oldScratchInfo
+		if err := os.Rename(oldScratchPath, newScratchPath); err != nil {
+			return err
+		}
+	} else if oldInBase {
+		if oldMeta.SubTreeHash != "" || (oldMeta.Mode&syscall.S_IFDIR != 0) {
+			if err := os.MkdirAll(newScratchPath, 0755); err != nil {
+				return err
+			}
+		} else {
+			blobPath := d.fs.ResolveBlobPath(oldMeta.BlobSHA256)
+			if (blobPath == "" || !fileExists(blobPath)) && d.fs.Fetcher != nil && oldMeta.BlobSHA256 != "" {
+				if cachedPath, err := d.fs.Fetcher.EnsureBlob(ctx, oldMeta.BlobSHA256); err == nil {
+					blobPath = cachedPath
+				}
+			}
+			mode := os.FileMode(0644)
+			if oldMeta.Mode != 0 {
+				mode = os.FileMode(oldMeta.Mode)
+			}
+			if blobPath != "" && fileExists(blobPath) {
+				if src, err := os.Open(blobPath); err == nil {
+					if dst, err := os.OpenFile(newScratchPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode); err == nil {
+						buf := make([]byte, 1024*1024)
+						_, _ = io.CopyBuffer(dst, src, buf)
+						_ = dst.Close()
+					}
+					_ = src.Close()
+				}
+			} else {
+				if err := os.WriteFile(newScratchPath, nil, mode); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	if oldInBase {
+		if err := os.MkdirAll(filepath.Dir(oldWhiteoutPath), 0755); err == nil {
+			_ = os.WriteFile(oldWhiteoutPath, nil, 0644)
+		}
+	}
+
+	if d.fs.Cache != nil {
+		d.fs.Cache.Invalidate(oldRelPath)
+		d.fs.Cache.SetNegative(oldRelPath, 5*time.Second)
+		d.fs.Cache.ClearNegative(newRelPath)
+	}
+
+	return nil
 }
 
 func hashPathToInode(path string) uint64 {

@@ -76,26 +76,67 @@ sequenceDiagram
 
 ---
 
-## 4. Writes & Whiteout Deletions
+## 4. Directory & File Mutations (CoW Scratch Overlay)
 
-### Copy-on-Write (CoW) Promotion
-When a process opens a base file for writing or truncation:
-1. `nieblafs` creates the parent directory path inside `~/.niebla/workspaces/<name>/scratch/`.
-2. It copies the base file into scratch before applying the modification.
-3. Subsequent reads and writes on that file route directly to the local scratch file.
+NieblaFS directory nodes implement full FUSE mutation interfaces (`fs.NodeMkdirer`, `fs.NodeCreater`, `fs.NodeRemover`, `fs.NodeRenamer`), directing all workspace changes to the local Copy-on-Write (CoW) scratch layer without modifying immutable base Merkle trees.
 
-### OverlayFS-Style Whiteout Markers
-Because the base Merkle tree is immutable, deleting a file (`rm path/to/file.go`) cannot remove the base blob. Instead, `nieblafs`:
-1. Removes any copy in the scratch directory.
-2. Creates an empty [whiteout marker](https://en.wikipedia.org/wiki/Union_mount) file:
-   ```text
-   ~/.niebla/workspaces/<name>/scratch/path/to/.wh.file.go
-   ```
-3. Suppresses `file.go` from directory listings (`ReadDirAll`) and returns `ENOENT` on `Lookup` calls.
+```mermaid
+flowchart TD
+    VFS["Kernel VFS Call"] --> Op{"Operation Type"}
+
+    Op -->|"mkdir"| Mkdir["Mkdir(relPath)<br/>os.Mkdir in scratch<br/>Clear negative cache"]
+    Op -->|"open/create"| Create["Create(relPath, mode)<br/>os.OpenFile(O_CREATE) in scratch<br/>Clear negative cache"]
+    Op -->|"rm / rmdir"| Remove{"Target Origin?"}
+    Op -->|"rename"| Rename["Rename(old, new)<br/>os.Rename in scratch<br/>Whiteout old if in base<br/>Invalidate &amp; update caches"]
+
+    Remove -->|"Scratch Added"| DelScratch["os.Remove(scratchPath)"]
+    Remove -->|"Base Merkle Tree"| Whiteout["Write .wh.&lt;name&gt; in scratch<br/>Set negative cache (5s)"]
+```
+
+### 1. Directory Creation (`Mkdir`)
+When `mkdir` is executed inside a virtual mount:
+1. `nieblafs` determines the relative path from the current directory node.
+2. It ensures parent directories exist in `~/.niebla/workspaces/<name>/scratch/`.
+3. It creates the physical directory with requested mode permissions in the scratch layer.
+4. Any prior whiteout marker (`.wh.<name>`) at that location is removed.
+5. In-memory negative metadata cache entries for the path are cleared so subsequent lookups succeed immediately.
+
+### 2. File Creation (`Create`)
+When editors, language servers, or shell commands create new files:
+1. `nieblafs` ensures parent directories exist in scratch.
+2. It initializes the file in scratch using `os.OpenFile(..., os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)`.
+3. Any prior whiteout marker is pruned.
+4. The path's negative lookup cache is cleared.
+5. It returns a `*File` node configured with `isScratch: true`, satisfying both `fs.Node` and `fs.Handle` for immediate streaming reads and writes.
+
+### 3. File & Directory Deletion (`Remove`)
+Deleting files or folders handles scratch edits and immutable base trees differently:
+* **Scratch-Only Entries (`ChangeAdded`):** The file or empty directory is physically deleted from the scratch directory with `os.Remove`.
+* **Base Merkle Entries (`ChangeDeleted`):** Because base blobs are immutable, `nieblafs` writes an [OverlayFS](https://en.wikipedia.org/wiki/OverlayFS)-compatible prefix whiteout marker:
+  ```text
+  ~/.niebla/workspaces/<name>/scratch/path/to/.wh.filename.go
+  ```
+  `Lookup` detects `.wh.*` and immediately returns `ENOENT` to prevent falling back to CAS blobs. `ReadDirAll` filters out whiteout files while suppressing the deleted entry from base directory listings.
+* **Negative Cache Eviction:** `Remove` invalidates any cached metadata and sets a negative lookup TTL (`5s`) to prevent redundant gRPC inquiries.
+
+### 4. File & Directory Renames (`Rename`)
+When moving or renaming entries within the mount:
+* If the file was created or modified in scratch, `nieblafs` moves the scratch path via `os.Rename`.
+* If the source existed only in the base tree, `nieblafs` promotes the content into scratch at the new destination path and writes a `.wh.<oldName>` marker at the source location.
+* Prior whiteout markers at the destination path are cleared.
+* Negative and positive metadata cache entries are invalidated and refreshed.
 
 ---
 
-## 5. `nieblafs` Daemon CLI Reference
+## 5. Copy-on-Write (CoW) File Promotion
+When a process opens an existing base file for modification:
+1. `nieblafs` creates the parent directory hierarchy in `~/.niebla/workspaces/<name>/scratch/`.
+2. It streams or copies the base blob into scratch before applying the write.
+3. Subsequent reads and writes route directly to the local scratch file.
+
+---
+
+## 6. `nieblafs` Daemon CLI Reference
 
 `nieblafs` is normally spawned and supervised automatically by `niebla workspace create` and `niebla workspace mount`, but it can also be invoked directly:
 

@@ -76,7 +76,7 @@ flowchart TD
 
 ### 1. Virtual Workspaces (`niebla workspace`)
 Never clone gigabytes of packfiles or juggle stashes. Each feature, bugfix, or experiment receives its own lightweight workspace:
-* **FUSE Mode (Default):** Virtual mount point backed by `nieblafs`. Storage on creation is virtually zero (< 100 KB).
+* **FUSE Mode (Default):** Virtual mount point backed by `nieblafs`. Full POSIX mutation support (`mkdir`, `touch`, file creation, `rm`, `mv`) routing changes seamlessly to a local Copy-on-Write (CoW) scratch overlay while virtualizing clean files. Storage on creation is virtually zero (< 100 KB).
 * **Direct Materialization (`--no-fuse`):** Optimized for Docker containers, Kubernetes pods, CI runners, and macOS environments where `/dev/fuse` is unavailable. Uses parallel streaming and hardlinks for fast checkouts.
 * **Mount Management:** Cleanly attach, detach, or recover workspace mounts with `niebla workspace mount` and `unmount`.
 

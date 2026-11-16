@@ -47,6 +47,13 @@ fuser -k -m ~/niebla/workspaces/my-feature
 niebla workspace unmount my-feature
 ```
 
+### Supported Filesystem Operations in FUSE Mounts
+`nieblafs` mounts implement standard POSIX file operations:
+* **Directory Operations:** `mkdir` (`fs.NodeMkdirer`), `rmdir` (`fs.NodeRemover`), and nested traversal.
+* **File Operations:** File creation via `touch`, `cp`, or IDEs (`fs.NodeCreater`), in-place writes (`fs.HandleWriter`), and deletions (`rm` via `fs.NodeRemover`).
+* **Renames:** Moving files or directories (`mv` via `fs.NodeRenamer`) within the workspace overlay.
+* **Storage Location:** All added or modified files reside in `~/.niebla/workspaces/<name>/scratch/`. Deleting base tree files creates `.wh.<name>` whiteout markers in scratch without mutating CAS storage.
+
 ---
 
 ## 2. Stale UNIX Control Socket (`nieblafs.sock`)
