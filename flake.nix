@@ -12,7 +12,7 @@
     flake-utils,
     ...
   }:
-    flake-utils.lib.eachDefaultSystem (
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (
       system: let
         pkgs = import nixpkgs {
           inherit system;
@@ -192,6 +192,44 @@ EOF
             echo "         -e POSTGRES_USER=niebla -e POSTGRES_PASSWORD=niebla -e POSTGRES_DB=niebla \\"
             echo "         postgres:16-alpine"
           fi
+
+          # 6. FUSE Pre-flight Readiness Check
+          echo ""
+          echo "=========================================================="
+          echo "   FUSE System Readiness Check (nieblafs)"
+          echo "=========================================================="
+          FUSE_READY=true
+          if [ -c /dev/fuse ]; then
+            echo "[✓] /dev/fuse character device is present."
+          else
+            echo "[✗] /dev/fuse is missing or inaccessible."
+            FUSE_READY=false
+          fi
+
+          if [ -x /run/wrappers/bin/fusermount3 ]; then
+            echo "[✓] NixOS setuid fusermount3 wrapper found: /run/wrappers/bin/fusermount3"
+          elif which fusermount3 >/dev/null 2>&1; then
+            echo "[✓] fusermount3 found in PATH: $(which fusermount3)"
+          else
+            echo "[✗] fusermount3 binary not found."
+            FUSE_READY=false
+          fi
+
+          if [ -f /etc/fuse.conf ] && grep -E '^\s*user_allow_other' /etc/fuse.conf >/dev/null 2>&1; then
+            echo "[✓] /etc/fuse.conf has 'user_allow_other' enabled."
+          else
+            echo "[!] /etc/fuse.conf does not enable 'user_allow_other'."
+            echo "    Hint: On NixOS, ensure 'services.niebla.enable = true;' (or 'programs.fuse.userAllowOther = true;')."
+            FUSE_READY=false
+          fi
+
+          if [ "$FUSE_READY" = "true" ]; then
+            echo "[✓] FUSE environment is ready for nieblafs virtual workspaces."
+          else
+            echo "[!] FUSE environment has missing components. Non-root mounting may fail."
+            echo "    Workspaces can still be used with direct materialization: 'niebla workspace create <name> --no-fuse'."
+          fi
+
           echo ""
           echo "[✓] Configuration path: $CONFIG_FILE"
           echo "[✓] Skills installed for: Antigravity, Claude Code, Agents, Cursor"
@@ -236,6 +274,50 @@ EOF
             echo "⚡ Niebla Development Environment Activated ⚡"
             echo "Available tools: $(go version) | $(psql --version 2>/dev/null || echo 'PostgreSQL 16') | templ"
           '';
+        };
+
+        checks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          fuseIntegration = pkgs.testers.runNixOSTest {
+            name = "niebla-fuse-integration";
+            nodes = {
+              server = { config, pkgs, ... }: {
+                imports = [ self.nixosModules.default ];
+                services.niebla = {
+                  enable = true;
+                  fuse.enable = true;
+                };
+                users.users.testuser = {
+                  isNormalUser = true;
+                  extraGroups = [ "wheel" ];
+                };
+              };
+              optout = { config, pkgs, ... }: {
+                imports = [ self.nixosModules.default ];
+                services.niebla = {
+                  enable = true;
+                  fuse.enable = false;
+                };
+              };
+            };
+
+            testScript = ''
+              start_all()
+
+              # 1. Verify default node has FUSE security wrapper and configuration
+              server.wait_for_unit("multi-user.target")
+              server.succeed("test -c /dev/fuse")
+              server.succeed("test -x /run/wrappers/bin/fusermount3")
+              server.succeed("test -u /run/wrappers/bin/fusermount3")
+              server.succeed("grep -E '^user_allow_other' /etc/fuse.conf")
+
+              # 2. Verify optout node does not have user_allow_other in /etc/fuse.conf
+              optout.wait_for_unit("multi-user.target")
+              optout.fail("test -f /etc/fuse.conf && grep -E '^user_allow_other' /etc/fuse.conf")
+
+              # 3. Test unprivileged user execution of fusermount3 wrapper
+              server.succeed("su - testuser -c '/run/wrappers/bin/fusermount3 --version'")
+            '';
+          };
         };
       }
     ) // {
@@ -374,9 +456,22 @@ EOF
                   description = "Deploy Niebla agent skills into system-wide and user agent directories.";
                 };
               };
+
+              fuse = {
+                enable = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Enable FUSE kernel integration, setuid fusermount3 wrapper, and /etc/fuse.conf (user_allow_other) for nieblafs virtual workspace mounting.";
+                };
+              };
             };
 
             config = lib.mkIf cfg.enable {
+              # Enable FUSE setuid wrapper and /etc/fuse.conf user_allow_other for nieblafs virtual workspaces
+              programs.fuse = lib.mkIf cfg.fuse.enable {
+                enable = true;
+                userAllowOther = true;
+              };
               users.users.niebla = {
                 isSystemUser = true;
                 group = "niebla";

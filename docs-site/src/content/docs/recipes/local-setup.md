@@ -72,12 +72,22 @@ preset = "catppuccin-mocha"
 syntax_style = "catppuccin-mocha"
 ```
 
-Validate your configuration:
+Validate your configuration and FUSE environment readiness:
 
 ```console
 $ niebla config validate
-✓ Configuration is valid (/home/developer/.config/niebla/config.toml)
+✓ Configuration is valid: /home/developer/.config/niebla/config.toml
+  • Server gRPC      : 127.0.0.1:50051
+  • Workspace root   : /home/developer/niebla/workspaces
+  • Critique web UI  : http://127.0.0.1:8080
+  • Critique theme   : catppuccin-mocha (syntax: catppuccin-mocha)
+  • Default reviewer : developer
+  • FUSE readiness   : ready (/dev/fuse, fusermount3 setuid root, user_allow_other)
 ```
+
+:::tip[FUSE Automation on NixOS]
+On NixOS, `services.niebla` automatically enables `programs.fuse.enable = true;` and `programs.fuse.userAllowOther = true;`, ensuring `/run/wrappers/bin/fusermount3` has the setuid root bit and `/etc/fuse.conf` allows unprivileged mounts out of the box.
+:::
 
 ### Running the Local Services
 

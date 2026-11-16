@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"niebla/internal/config"
+	"niebla/pkg/nieblafs/preflight"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -97,6 +98,14 @@ func newConfigValidateCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "  • Critique web UI  : http://%s:%d\n", cfg.Critique.Host, cfg.Critique.Port)
 			fmt.Fprintf(cmd.OutOrStdout(), "  • Critique theme   : %s (syntax: %s)\n", theme.Name, theme.SyntaxStyle)
 			fmt.Fprintf(cmd.OutOrStdout(), "  • Default reviewer : %s\n", cfg.Critique.DefaultReviewer)
+			fuseReport := preflight.VerifyFUSEReadiness()
+			fuseStatus := "ready (/dev/fuse, fusermount3 setuid root, user_allow_other)"
+			if !fuseReport.Ready {
+				fuseStatus = "unavailable (missing /dev/fuse or fusermount3)"
+			} else if len(fuseReport.Warnings) > 0 {
+				fuseStatus = "warnings detected (check permissions or /etc/fuse.conf)"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "  • FUSE readiness   : %s\n", fuseStatus)
 			return nil
 		},
 	}

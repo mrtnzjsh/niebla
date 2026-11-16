@@ -20,6 +20,7 @@ import (
 	toolchaincfg "niebla/internal/config"
 	"niebla/pkg/materialize"
 	"niebla/pkg/nieblafs/control"
+	"niebla/pkg/nieblafs/preflight"
 	nieblav1 "niebla/pkg/proto/nieblav1"
 
 	"github.com/spf13/cobra"
@@ -108,7 +109,7 @@ func setupWorkspaceFS(
 		}, nil
 	}
 
-	checkDevFuse()
+	checkFUSEEnvironment(cmd.ErrOrStderr())
 	socketPath := filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
 	var daemonPID int
 	nieblafsBin, err := findNieblafsBinary()
@@ -538,11 +539,10 @@ func provisionWorkspaceDirs(name string) (scratchDir, cacheDir string, err error
 	return scratchDir, cacheDir, nil
 }
 
-func checkDevFuse() {
-	if f, err := os.Open("/dev/fuse"); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: /dev/fuse is not accessible (%v). FUSE mounting may fail.\n", err)
-	} else {
-		_ = f.Close()
+func checkFUSEEnvironment(out io.Writer) {
+	rep := preflight.VerifyFUSEReadiness()
+	if !rep.Ready || len(rep.Warnings) > 0 {
+		fmt.Fprintf(out, "Warning: FUSE environment prerequisites not fully satisfied:\n%s      Hint: Use '--no-fuse' for direct directory materialization without FUSE.\n", preflight.FormatDiagnostics(rep))
 	}
 }
 

@@ -41,8 +41,13 @@ Select your platform below to install Niebla `v0.1.0`:
       server.enable = true;   # Repository gRPC daemon on port 50051
       cotejo.enable = true;   # Code review web UI on port 8080
       client.enable = true;   # Installs niebla & nieblafs in system PATH
+      fuse.enable = true;     # Automatically configures programs.fuse (enable = true & userAllowOther = true)
     };
     ```
+
+    :::note[Automated FUSE Security Wrappers]
+    On NixOS, mounting virtual workspaces requires the setuid wrapper (`/run/wrappers/bin/fusermount3`) and `/etc/fuse.conf`. When `services.niebla.enable = true`, `services.niebla.fuse.enable` defaults to `true`, automatically managing `programs.fuse.enable = true` and `programs.fuse.userAllowOther = true`. For headless server-only deployments without FUSE, set `services.niebla.fuse.enable = false;`.
+    :::
 
     Apply the configuration:
     ```bash
@@ -83,6 +88,13 @@ Select your platform below to install Niebla `v0.1.0`:
     ```
 
     For a non-root install, copy the binaries to `~/.local/bin/` instead.
+
+    #### 3. Enable Non-Root FUSE Mounts
+    Ensure `/etc/fuse.conf` allows unprivileged mounts:
+    ```bash
+    sudo usermod -aG fuse "$USER" 2>/dev/null || true
+    sudo sed -i 's/#user_allow_other/user_allow_other/' /etc/fuse.conf || echo "user_allow_other" | sudo tee -a /etc/fuse.conf
+    ```
   </TabItem>
 
   <TabItem label="Linux (Build from Source)">
