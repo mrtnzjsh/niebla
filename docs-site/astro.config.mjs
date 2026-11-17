@@ -79,6 +79,7 @@ export default defineConfig({
           label: 'Workflows',
           items: [
             { label: 'Workspaces & Storage', slug: 'workflows/workspaces' },
+            { label: 'Monorepo Layouts & Patterns', slug: 'workflows/monorepo-layouts' },
             { label: 'Development Lifecycle', slug: 'workflows/development-lifecycle' },
             { label: 'Direct Materialization (--no-fuse)', slug: 'workflows/direct-materialization' },
             { label: 'IDE Setup', slug: 'workflows/ide-setup' },
