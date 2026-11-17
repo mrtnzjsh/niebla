@@ -110,6 +110,9 @@ jobs:
     if: always()
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Teardown Dedicated Ephemeral Server & Database Cluster
         run: |
           ./niebla/scripts/ephemeral_test_cluster.sh stop
