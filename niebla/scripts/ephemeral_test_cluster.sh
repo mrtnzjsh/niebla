@@ -102,7 +102,7 @@ DOCKERFILE
 
     echo "Waiting for ephemeral niebla-server on port $PORT..."
     for i in {1..30}; do
-        if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
+        if (echo > /dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then
             echo "✅ Ephemeral niebla-server listening on port $PORT"
             return 0
         fi

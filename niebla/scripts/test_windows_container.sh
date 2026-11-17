@@ -155,7 +155,7 @@ POWERSHELL
 
 echo "=== [4/4] Launching KVM-Accelerated dockurr/windows Container with Pre-Warmed Disk ==="
 
-docker run --rm \
+docker run -d --rm \
     --name "$CONTAINER_NAME" \
     --device /dev/kvm \
     --cap-add NET_ADMIN \
@@ -165,3 +165,30 @@ docker run --rm \
     -v "$STORAGE_DIR":/storage \
     -v "$SHARED_DIR":/shared \
     dockurr/windows
+
+echo "Waiting for Windows VM to boot and complete test suite (timeout: 5m)..."
+MAX_WAIT=300
+ELAPSED=0
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+    if [ -f "$SHARED_DIR/test_result.txt" ]; then
+        RESULT=$(tr -d '\r\n ' < "$SHARED_DIR/test_result.txt")
+        echo ""
+        echo "=== Windows Test Execution Log ==="
+        cat "$SHARED_DIR/test_output.log" 2>/dev/null || true
+        echo "=================================="
+        if [ "$RESULT" = "PASS" ]; then
+            echo "✅ Windows 11 KVM Verification Suite PASSED!"
+            exit 0
+        else
+            echo "❌ Windows 11 KVM Verification Suite FAILED with status: $RESULT"
+            exit 1
+        fi
+    fi
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
+    echo "  [${ELAPSED}s / ${MAX_WAIT}s] Waiting for Windows VM test completion..."
+done
+
+echo "ERROR: Timed out after ${MAX_WAIT}s waiting for Windows tests to complete."
+docker logs "$CONTAINER_NAME" 2>/dev/null || true
+exit 1
