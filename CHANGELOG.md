@@ -2,6 +2,33 @@
 
 All notable changes to Niebla are documented in this file, adhering to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-17
+
+### Added
+- **Cross-Platform Client & Multi-OS Interoperability**:
+  - Native Windows client compilation (`niebla.exe`) with `%PATHEXT%` support, cross-platform path canonicalization, and `--no-fuse` direct materialization.
+  - Native Unicode NFC normalization (`golang.org/x/text/unicode/norm`) on Merkle tree calculation, preventing hash divergence between Linux (NFC) and macOS APFS (decomposed NFD).
+  - APFS and NTFS case-collision detection alerting users to case-folding conflicts before Merkle tree hashing.
+- **Cross-OS Release Candidate Automation**:
+  - Automated Forgejo Actions release candidate pipeline (`release-candidate.yaml`) supporting multi-platform verification.
+  - KVM hardware-accelerated Windows container harness (`scripts/test_windows_container.sh`) verifying Windows binary execution and NTFS file locking under `/dev/kvm`.
+  - Non-blocking Apple Silicon macOS verification runner integration (`scripts/test_macos_remote.sh`) with automated Tailscale device discovery.
+- **FUSE Virtual Filesystem Mutations & Write-Support**:
+  - Implemented full FUSE directory creation (`Mkdir`), file creation (`Create`), file writing, deletion, and truncation directing writes into the CoW scratch overlay.
+  - Auto-configuration of FUSE device permissions (`/dev/fuse`) and group membership during NixOS module installation.
+- **Documentation, Layouts & Roadmaps**:
+  - Comprehensive **Monorepo Layouts & Patterns Guide** covering horizontal (`services/`, `pkg/`, `proto/`), full-stack (`apps/`, `libs/`), and vertical domain architectures.
+  - Dedicated **IDE Setup & `.nieblaignore` Guide** with templates for Go, Rust, Node, Python, and C++.
+  - Complete native installation and upgrade guides for Linux, macOS, and Windows.
+  - Strategic engineering **ROADMAP.md** covering Security, Cryptography & Compliance, Virtual Workspaces, and Cotejo Web platform.
+  - High-resolution Cotejo web UI screenshots with interactive fullscreen zoomable lightbox.
+
+### Fixed
+- **Version-Controlled `.niebla/` Visibility**: Fixed `.nieblaignore` built-in ignore rule so that the `.niebla/` governance directory (`OWNERS.toml`, `hooks.toml`, `agents.toml`) can be tracked in version control while ignoring local workspace scratch files.
+- **Workspace Cleanup & Force Delete**: Implemented idempotent force deletion (`niebla workspace delete --force`), lazy FUSE unmount detachment (`fusermount -u -z` / `MNT_DETACH`), and orphaned directory removal even if daemons crash or mounts are busy.
+- **FUSE UID/GID Attribution & File Visibility**: Preserved caller UID/GID attributes across files and directories created in FUSE mounts and enabled `AllowOther` so non-root processes and background daemons can read and write workspace files.
+- **Docs-Site UI & Formatting**: Fixed Starlight tab label wrapping, eliminated staggered double-underlines, and adjusted right padding to prevent clipping on Windows. Standardized unparsed math formulas to clean Unicode arrows and code badges.
+
 ## [0.1.1] - 2026-11-15
 
 ### Fixed
@@ -65,6 +92,7 @@ All notable changes to Niebla are documented in this file, adhering to [Keep a C
 - **Cotejo Inbox Review Routing**: Corrected query assignment filter so unassigned reviewers only see changelists where they are explicitly assigned rather than all open changelists.
 - **Review Approval Verdict Parameter**: Added backwards-compatible form handler mapping `action=approve` to `verdict=approved` in `POST /cl/{id}/approval`.
 
+[0.2.0]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.2.0
 [0.1.1]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.1.0
 
