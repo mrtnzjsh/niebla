@@ -43,7 +43,7 @@ echo "✅ Successfully built: $WIN_BIN"
 
 # Check if unattended container run was requested
 RUN_CONTAINER="${1:-check}"
-REMOTE_SERVER="${2:-10.0.2.2:55051}"
+REMOTE_SERVER="${2:-system.lan:55051}"
 
 STORAGE_DIR="/var/lib/windows-test-vm"
 
@@ -61,7 +61,7 @@ if [ "$RUN_CONTAINER" != "run" ]; then
     echo "  $0 run [ephemeral-server-addr:port]"
     echo ""
     echo "Example:"
-    echo "  $0 run 10.0.2.2:55051"
+    echo "  $0 run system.lan:55051"
     exit 0
 fi
 
@@ -89,7 +89,7 @@ cp "$WIN_BIN" "$TMP_DIR/niebla.exe"
 
 cat << 'POWERSHELL' > "$TMP_DIR/run_tests.ps1"
 param (
-    [string]$ServerAddr = "10.0.2.2:55051"
+    [string]$ServerAddr = "system.lan:55051"
 )
 
 $ErrorActionPreference = "Stop"

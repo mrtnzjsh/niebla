@@ -45,7 +45,7 @@ jobs:
 
       - name: Run Windows 11 KVM Verification Suite
         run: |
-          ./niebla/scripts/test_windows_container.sh run 10.0.2.2:55051
+          ./niebla/scripts/test_windows_container.sh run system.lan:55051
 
       - name: Run Release Candidate Integration Suite
         env:
