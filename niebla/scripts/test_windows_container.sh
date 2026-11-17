@@ -72,20 +72,22 @@ if [ ! -f "$STORAGE_DIR/data.img" ]; then
 fi
 
 echo "=== [3/4] Preparing Automated PowerShell Verification Harness ==="
-SHARED_DIR=$(mktemp -d -t niebla-win-shared-XXXXXX)
+TMP_DIR=$(mktemp -d -t niebla-win-tmp-XXXXXX)
 CONTAINER_NAME="niebla-win-runner-$$"
+SHARED_VOL="niebla-win-shared-$$"
 
 cleanup() {
-    echo "=== Cleaning up Windows test container and temporary files ==="
+    echo "=== Cleaning up Windows test container and temporary volumes ==="
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-    rm -rf "${SHARED_DIR:-}"
+    docker volume rm -f "$SHARED_VOL" 2>/dev/null || true
+    rm -rf "${TMP_DIR:-}"
 }
 trap cleanup EXIT INT TERM
 
-cp "$WIN_BIN" "$SHARED_DIR/niebla.exe"
+cp "$WIN_BIN" "$TMP_DIR/niebla.exe"
 
-cat << 'POWERSHELL' > "$SHARED_DIR/run_tests.ps1"
+cat << 'POWERSHELL' > "$TMP_DIR/run_tests.ps1"
 param (
     [string]$ServerAddr = "10.0.2.2:55051"
 )
@@ -98,7 +100,11 @@ $WorkDir = "C:\NieblaTest"
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 Set-Location $WorkDir
 
-$Niebla = "C:\shared\niebla.exe"
+# Copy binary from shared volume to local NTFS drive
+$NieblaSrc = "\\host.lan\Data\niebla.exe"
+$Niebla = "$WorkDir\niebla.exe"
+Copy-Item -Path $NieblaSrc -Destination $Niebla -Force
+
 $ConfigDir = "$WorkDir\config"
 $MountDir = "$WorkDir\win-ws"
 
@@ -153,6 +159,12 @@ Write-Host "   PASS: Workspace deleted." -ForegroundColor Green
 Write-Host "=== All Windows Confirmation Tests PASSED ===" -ForegroundColor Green
 POWERSHELL
 
+# Stream test harness directly into dedicated Docker volume over API socket
+echo "Streaming test files into ephemeral Docker volume ($SHARED_VOL)..."
+docker volume create "$SHARED_VOL" >/dev/null
+tar -C "$TMP_DIR" -cf - . | docker run -i --rm -v "$SHARED_VOL":/dest alpine:latest tar -C /dest -xf -
+rm -rf "$TMP_DIR"
+
 echo "=== [4/4] Launching KVM-Accelerated dockurr/windows Container with Pre-Warmed Disk ==="
 
 docker run -d --rm \
@@ -163,18 +175,18 @@ docker run -d --rm \
     -e RAM_SIZE="6G" \
     -e CPU_CORES="4" \
     -v "$STORAGE_DIR":/storage \
-    -v "$SHARED_DIR":/shared \
+    -v "$SHARED_VOL":/shared \
     dockurr/windows
 
 echo "Waiting for Windows VM to boot and complete test suite (timeout: 5m)..."
 MAX_WAIT=300
 ELAPSED=0
 while [ $ELAPSED -lt $MAX_WAIT ]; do
-    if [ -f "$SHARED_DIR/test_result.txt" ]; then
-        RESULT=$(tr -d '\r\n ' < "$SHARED_DIR/test_result.txt")
+    RESULT=$(docker run --rm -v "$SHARED_VOL":/shared alpine:latest sh -c '[ -f /shared/test_result.txt ] && cat /shared/test_result.txt || true' 2>/dev/null | tr -d '\r\n ' || true)
+    if [ -n "$RESULT" ]; then
         echo ""
         echo "=== Windows Test Execution Log ==="
-        cat "$SHARED_DIR/test_output.log" 2>/dev/null || true
+        docker run --rm -v "$SHARED_VOL":/shared alpine:latest cat /shared/test_output.log 2>/dev/null || true
         echo "=================================="
         if [ "$RESULT" = "PASS" ]; then
             echo "✅ Windows 11 KVM Verification Suite PASSED!"
