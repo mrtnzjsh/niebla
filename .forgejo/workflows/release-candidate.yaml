@@ -35,21 +35,43 @@ jobs:
         run: |
           docker info || podman info
 
-      - name: Launch Ephemeral Isolation Niebla Server
+      - name: Launch Dedicated Ephemeral Niebla Server & Database
         run: |
-          echo "=== Setting up hermetic ephemeral test environment ==="
-          PGPASSWORD=niebla psql -h 127.0.0.1 -p 5433 -U niebla -d postgres -c "DROP DATABASE IF EXISTS niebla_test_rc; CREATE DATABASE niebla_test_rc;"
+          echo "=== Setting up 100% isolated ephemeral test environment ==="
+          # Clean up any leftover test containers or processes on test ports
+          docker stop niebla-test-postgres-rc 2>/dev/null || true
+          docker rm -f niebla-test-postgres-rc 2>/dev/null || true
+          pkill -f "niebla-server.*55051" 2>/dev/null || true
+
+          # 1. Spin up dedicated ephemeral PostgreSQL container on isolated test port 55432
+          echo "Spinning up dedicated ephemeral PostgreSQL container on 127.0.0.1:55432..."
+          docker run -d --rm \
+            --name niebla-test-postgres-rc \
+            -e POSTGRES_USER=niebla \
+            -e POSTGRES_PASSWORD=niebla \
+            -e POSTGRES_DB=niebla_test \
+            -p 55432:5432 \
+            postgres:16-alpine
+
+          echo "Waiting for ephemeral PostgreSQL to accept connections..."
+          for i in {1..30}; do
+            if docker exec niebla-test-postgres-rc pg_isready -U niebla >/dev/null 2>&1; then
+              echo "✅ Ephemeral PostgreSQL container ready on port 55432"
+              break
+            fi
+            sleep 1
+          done
+
+          # 2. Prepare isolated ephemeral CAS storage
           TMP_CAS="$(mktemp -d /tmp/niebla-test-cas-XXXXXX)"
           echo "TMP_CAS=$TMP_CAS" >> "$GITHUB_ENV"
 
-          # Ensure port 55051 is free
-          fuser -k 55051/tcp 2>/dev/null || true
-
+          # 3. Spawn dedicated ephemeral niebla-server on isolated test port 55051
           echo "Starting ephemeral niebla-server on 0.0.0.0:55051..."
           NIEBLA_CAS_PATH="$TMP_CAS" go -C niebla run ./cmd/niebla-server \
             --host 0.0.0.0 \
             --port 55051 \
-            --db "postgres://niebla:niebla@127.0.0.1:5433/niebla_test_rc?sslmode=disable" &
+            --db "postgres://niebla:niebla@127.0.0.1:55432/niebla_test?sslmode=disable" &
           echo $! > /tmp/niebla_ephemeral_55051.pid
           echo "Spawned ephemeral server PID: $(cat /tmp/niebla_ephemeral_55051.pid)"
 
@@ -134,20 +156,21 @@ jobs:
     if: always()
 
     steps:
-      - name: Teardown Ephemeral Server & Drop Isolated Test DB
+      - name: Teardown Dedicated Ephemeral Server & Database
         run: |
-          echo "=== Tearing down ephemeral test environment ==="
+          echo "=== Tearing down dedicated ephemeral test environment ==="
           if [ -f /tmp/niebla_ephemeral_55051.pid ]; then
             PID=$(cat /tmp/niebla_ephemeral_55051.pid)
             echo "Stopping ephemeral server PID $PID..."
             kill "$PID" 2>/dev/null || true
             rm -f /tmp/niebla_ephemeral_55051.pid
           fi
-          fuser -k 55051/tcp 2>/dev/null || true
+          pkill -f "niebla-server.*55051" 2>/dev/null || true
 
-          echo "Dropping isolated test database..."
-          PGPASSWORD=niebla psql -h 127.0.0.1 -p 5433 -U niebla -d postgres -c "DROP DATABASE IF EXISTS niebla_test_rc;" 2>/dev/null || true
+          echo "Stopping and destroying ephemeral PostgreSQL container..."
+          docker stop niebla-test-postgres-rc 2>/dev/null || true
+          docker rm -f niebla-test-postgres-rc 2>/dev/null || true
 
           echo "Cleaning up ephemeral CAS storage..."
-          rm -rf /tmp/niebla-ephemeral-cas-* 2>/dev/null || true
-          echo "✅ Ephemeral test environment completely torn down. Production resources untouched."
+          rm -rf /tmp/niebla-test-cas-* 2>/dev/null || true
+          echo "✅ Dedicated ephemeral test environment completely destroyed. Zero production resources touched."
