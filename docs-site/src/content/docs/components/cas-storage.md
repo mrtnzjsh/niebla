@@ -75,7 +75,7 @@ flowchart TD
     Theirs --> Result
 ```
 
-Because every directory has a deterministic Merkle hash, the merge engine skips unchanged subtrees in $O(1)$ time:
+Because every directory has a deterministic Merkle hash, the merge engine skips unchanged subtrees in `O(1)` time:
 * If `H_ours == H_theirs`: Both sides are identical; keep `H_ours`.
 * If `H_base == H_ours`: Only upstream modified this directory; fast-forward the entire subtree to `H_theirs` without inspecting individual files.
 * If `H_base == H_theirs`: Only the child modified this directory; keep `H_ours`.

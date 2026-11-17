@@ -99,8 +99,7 @@ monorepo/
 ```
 
 ### Architectural Rules
-1. **Unidirectional Dependency Flow:**
-   $$\text{services} \longrightarrow \text{pkg} \longrightarrow \text{proto}$$
+1. **Unidirectional Dependency Flow:** `services/` → `pkg/` → `proto/`
    * `services/` may import from `pkg/` and `proto/`.
    * `pkg/` may import from `proto/` and other `pkg/` modules, but **never** from `services/`.
    * `proto/` is strictly standalone schema definitions with zero internal library dependencies.
@@ -213,7 +212,7 @@ Changelist #42 modifies:
 Both teams must cast an approval (`LGTM`) in Cotejo before `niebla submit` will succeed.
 
 ### B. Ignore Strategy (`.nieblaignore`)
-Because Niebla checks `status` and `diff` in $O(\text{changed})$ time against the local scratch layer, keep build artifacts ignored so scratch remains tiny:
+Because Niebla checks `status` and `diff` in `O(changed)` time against the local scratch layer, keep build artifacts ignored so scratch remains tiny:
 
 * **Place common rules in root `.nieblaignore`:**
   ```text

@@ -109,7 +109,7 @@ niebla workspace delete <name> [flags]
 
 ### `niebla status`
 
-Scans the local CoW scratch overlay ($O(\text{modified files})$) and lists pending workspace changes against the base [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree).
+Scans the local CoW scratch overlay (`O(modified files)`) and lists pending workspace changes against the base [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree).
 
 ```bash
 niebla status [--json]

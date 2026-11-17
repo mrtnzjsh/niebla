@@ -43,7 +43,7 @@ flowchart TD
 
 | Binary | Role | Key Responsibilities |
 | :--- | :--- | :--- |
-| `niebla` | Developer CLI | Creates workspaces, calculates $O(\text{changed})$ status and diffs against base [Merkle trees](https://en.wikipedia.org/wiki/Merkle_tree), shelves patchsets, and submits CLs to trunk. See [CLI Command Reference](/niebla/reference/cli/). |
+| `niebla` | Developer CLI | Creates workspaces, calculates `O(changed)` status and diffs against base [Merkle trees](https://en.wikipedia.org/wiki/Merkle_tree), shelves patchsets, and submits CLs to trunk. See [CLI Command Reference](/niebla/reference/cli/). |
 | `nieblafs` | Virtual Filesystem Daemon | Mounts workspaces via Linux `/dev/fuse` ([FUSE](https://en.wikipedia.org/wiki/Filesystem_in_Userspace)), serves directory trees from memory, streams file blobs on demand, and redirects writes to a [Copy-on-Write (CoW)](https://en.wikipedia.org/wiki/Copy-on-write) scratch folder. See [NieblaFS Internals](/niebla/architecture/fuse-internals/). |
 | `niebla-server` | Central Repository Daemon | Authoritative gRPC service (`:50051`) managing [Content-Addressable Storage (CAS)](https://en.wikipedia.org/wiki/Content-addressable_storage), PostgreSQL metadata, linear trunk revisions, and automated cascade rebases. See [Repository Server](/niebla/components/server/). |
 | `cotejo` | Web Code Review Server | Web interface (`:8080`) for reviewing patchsets, intra-line word diffs, threaded comments, attention sets, and one-click code suggestions. See [Cotejo Overview](/niebla/cotejo/overview/). |
