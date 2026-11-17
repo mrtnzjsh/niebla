@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-SERVER_ADDR="${1:-100.64.225.27:50051}"
+SERVER_ADDR="${1:-100.64.225.27:55051}"
 
 OS_NAME="$(uname -s)"
 ARCH_NAME="$(uname -m)"

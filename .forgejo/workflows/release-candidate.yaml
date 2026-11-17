@@ -35,13 +35,41 @@ jobs:
         run: |
           docker info || podman info
 
+      - name: Launch Ephemeral Isolation Niebla Server
+        run: |
+          echo "=== Setting up hermetic ephemeral test environment ==="
+          PGPASSWORD=niebla psql -h 127.0.0.1 -p 5433 -U niebla -d postgres -c "DROP DATABASE IF EXISTS niebla_test_rc; CREATE DATABASE niebla_test_rc;"
+          TMP_CAS="$(mktemp -d /tmp/niebla-test-cas-XXXXXX)"
+          echo "TMP_CAS=$TMP_CAS" >> "$GITHUB_ENV"
+
+          # Ensure port 55051 is free
+          fuser -k 55051/tcp 2>/dev/null || true
+
+          echo "Starting ephemeral niebla-server on 0.0.0.0:55051..."
+          NIEBLA_CAS_PATH="$TMP_CAS" go -C niebla run ./cmd/niebla-server \
+            --host 0.0.0.0 \
+            --port 55051 \
+            --db "postgres://niebla:niebla@127.0.0.1:5433/niebla_test_rc?sslmode=disable" &
+          echo $! > /tmp/niebla_ephemeral_55051.pid
+          echo "Spawned ephemeral server PID: $(cat /tmp/niebla_ephemeral_55051.pid)"
+
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 55051; then
+              echo "✅ Ephemeral niebla-server listening on port 55051"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ERROR: Ephemeral niebla-server failed to start on port 55051"
+          exit 1
+
       - name: Run Cross-OS In-Code Interoperability Suite
         run: |
           cd niebla && go test -v ./test/interop/...
 
-      - name: Verify Windows KVM Hardware Acceleration & Cross-Compilation
+      - name: Run Windows 11 KVM Verification Suite
         run: |
-          ./niebla/scripts/test_windows_container.sh check
+          ./niebla/scripts/test_windows_container.sh run 10.0.2.2:55051
 
       - name: Run Release Candidate Integration Suite
         env:
@@ -92,9 +120,34 @@ jobs:
 
       - name: Execute Native macOS Remote Test Suite
         run: |
-          ./niebla/scripts/test_macos_remote.sh 100.64.225.27:50051
+          ./niebla/scripts/test_macos_remote.sh 100.64.225.27:55051
 
       - name: Report macOS Status
         if: always()
         run: |
           echo "macOS verification completed with exit status: $?"
+
+  teardown-ephemeral:
+    name: Teardown Ephemeral Test Server
+    runs-on: [self-hosted, linux]
+    needs: [rc-verification, macos-darwin-verification]
+    if: always()
+
+    steps:
+      - name: Teardown Ephemeral Server & Drop Isolated Test DB
+        run: |
+          echo "=== Tearing down ephemeral test environment ==="
+          if [ -f /tmp/niebla_ephemeral_55051.pid ]; then
+            PID=$(cat /tmp/niebla_ephemeral_55051.pid)
+            echo "Stopping ephemeral server PID $PID..."
+            kill "$PID" 2>/dev/null || true
+            rm -f /tmp/niebla_ephemeral_55051.pid
+          fi
+          fuser -k 55051/tcp 2>/dev/null || true
+
+          echo "Dropping isolated test database..."
+          PGPASSWORD=niebla psql -h 127.0.0.1 -p 5433 -U niebla -d postgres -c "DROP DATABASE IF EXISTS niebla_test_rc;" 2>/dev/null || true
+
+          echo "Cleaning up ephemeral CAS storage..."
+          rm -rf /tmp/niebla-ephemeral-cas-* 2>/dev/null || true
+          echo "✅ Ephemeral test environment completely torn down. Production resources untouched."

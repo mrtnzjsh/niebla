@@ -3,7 +3,7 @@
 # Niebla Tier 2 Release Candidate: Real Windows OS Confirmation Container
 # ==============================================================================
 # This script provisions and runs a KVM-accelerated Windows container on nixdev
-# using 'dockur/windows' to test native Windows behavior:
+# using 'dockurr/windows' to test native Windows behavior:
 # 1. Cross-compiles niebla.exe for Windows amd64
 # 2. Dials an ephemeral/remote niebla-server instance over network gRPC
 # 3. Executes workspace creation in --no-fuse mode on native NTFS
@@ -43,30 +43,51 @@ echo "✅ Successfully built: $WIN_BIN"
 
 # Check if unattended container run was requested
 RUN_CONTAINER="${1:-check}"
-REMOTE_SERVER="${2:-100.64.225.27:50051}"
+REMOTE_SERVER="${2:-10.0.2.2:55051}"
+
+STORAGE_DIR="/var/lib/windows-test-vm"
 
 if [ "$RUN_CONTAINER" != "run" ]; then
     echo ""
     echo "=== [Dry Run / Prerequisite Check Complete] ==="
-    echo "The host environment is 100% ready for KVM-accelerated Windows testing."
+    if [ -f "$STORAGE_DIR/data.img" ]; then
+        echo "✅ Pre-warmed Windows disk image confirmed at $STORAGE_DIR/data.img"
+    else
+        echo "⚠️ Pre-warmed Windows disk image NOT found at $STORAGE_DIR/data.img"
+    fi
+    echo "The host environment is ready for KVM-accelerated Windows testing."
     echo ""
     echo "To run the automated containerized test suite on nixdev, execute:"
-    echo "  $0 run [remote-server-addr:port]"
+    echo "  $0 run [ephemeral-server-addr:port]"
     echo ""
     echo "Example:"
-    echo "  $0 run 127.0.0.1:50051"
+    echo "  $0 run 10.0.2.2:55051"
     exit 0
+fi
+
+if [ ! -f "$STORAGE_DIR/data.img" ]; then
+    echo "ERROR: Pre-warmed Windows disk image not found at $STORAGE_DIR/data.img"
+    echo "The Windows 11 VM disk must be warmed up once before running tests."
+    exit 1
 fi
 
 echo "=== [3/4] Preparing Automated PowerShell Verification Harness ==="
 SHARED_DIR=$(mktemp -d -t niebla-win-shared-XXXXXX)
-trap 'rm -rf "$SHARED_DIR"' EXIT
+CONTAINER_NAME="niebla-win-runner-$$"
+
+cleanup() {
+    echo "=== Cleaning up Windows test container and temporary files ==="
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+    rm -rf "${SHARED_DIR:-}"
+}
+trap cleanup EXIT INT TERM
 
 cp "$WIN_BIN" "$SHARED_DIR/niebla.exe"
 
 cat << 'POWERSHELL' > "$SHARED_DIR/run_tests.ps1"
 param (
-    [string]$ServerAddr = "10.0.2.2:50051"
+    [string]$ServerAddr = "10.0.2.2:55051"
 )
 
 $ErrorActionPreference = "Stop"
@@ -132,16 +153,15 @@ Write-Host "   PASS: Workspace deleted." -ForegroundColor Green
 Write-Host "=== All Windows Confirmation Tests PASSED ===" -ForegroundColor Green
 POWERSHELL
 
-echo "=== [4/4] Launching KVM-Accelerated dockur/windows Container ==="
-CONTAINER_NAME="niebla-win-runner-$$"
+echo "=== [4/4] Launching KVM-Accelerated dockurr/windows Container with Pre-Warmed Disk ==="
 
 docker run --rm \
     --name "$CONTAINER_NAME" \
     --device /dev/kvm \
     --cap-add NET_ADMIN \
-    -p 8006:8006 \
     -e VERSION="11" \
-    -e RAM_SIZE="4G" \
-    -e CPU_CORES="2" \
+    -e RAM_SIZE="6G" \
+    -e CPU_CORES="4" \
+    -v "$STORAGE_DIR":/storage \
     -v "$SHARED_DIR":/shared \
-    dockur/windows
+    dockurr/windows
