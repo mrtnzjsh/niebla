@@ -151,7 +151,7 @@ file-types = ["gitignore", "nieblaignore"]
 
 If your team uses diverse editors and terminal environments, you can embed editor modeline comments at the very top of `.nieblaignore`. These activate `gitignore` syntax highlighting automatically without requiring manual per-user editor configuration:
 
-```gitignore
+```text
 # -*- mode: gitignore -*-
 # vim: set ft=gitignore:
 ```
@@ -185,7 +185,7 @@ Even before a `.nieblaignore` file is added, Niebla's engine automatically ignor
 
 Copy and paste the template below into `.nieblaignore` at the root of your workspace:
 
-```gitignore
+```text
 # -*- mode: gitignore -*-
 # vim: set ft=gitignore:
 #
