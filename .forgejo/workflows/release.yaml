@@ -12,9 +12,10 @@ concurrency:
 jobs:
   build-and-release:
     name: Cross-Compile Binaries, Replicate Git & Publish Release
-    # Explicitly pins execution to nixdev (which advertises self-hosted:host).
+    # Explicitly pins execution to nixdev (which advertises self-hosted:host and linux:host).
     # nixserv only advertises native:host and ubuntu-latest, so this job will NEVER run on nixserv.
-    runs-on: self-hosted
+    # macbook-air-m1 advertises macos:host and darwin:host, so this job will NEVER run on macbook.
+    runs-on: [self-hosted, linux]
     timeout-minutes: 30
 
     steps:

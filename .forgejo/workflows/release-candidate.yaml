@@ -14,7 +14,7 @@ concurrency:
 jobs:
   rc-verification:
     name: Multi-Region Concurrency & Cotejo UI Verification
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux]
     timeout-minutes: 40
     outputs:
       macos_available: ${{ steps.probe-macos.outputs.macos_available }}
