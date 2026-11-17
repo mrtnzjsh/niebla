@@ -14,6 +14,15 @@ sidebar:
 
 ---
 
+## The Cotejo Review Interface
+
+Cotejo provides a single, unified interface for reviewing code, evaluating subtree ownership policies, and approving changelists:
+
+![Cotejo Review Interface Overview](../../../assets/cotejo/cotejo-cl-full-review.png)
+*Figure 1: The Cotejo changelist view (`/cl/2`), featuring stack hierarchy, attention-set controls, patchset comparison, and an expanded side-by-side diff.*
+
+---
+
 ## 1. Patchsets vs. Pull Requests
 
 | Pull Request Friction | Cotejo Patchset Model |

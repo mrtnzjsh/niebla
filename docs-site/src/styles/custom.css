@@ -930,6 +930,67 @@ html[data-theme='light'] .mermaid-zoom-badge:hover {
 }
 
 /* ==========================================================================
+   Documentation Screenshot Zoom Lightbox & Figures
+   ========================================================================== */
+.image-zoom-wrapper {
+	position: relative !important;
+	margin: 1.75rem 0 0.75rem 0 !important;
+	display: block !important;
+	text-align: center !important;
+	border: 1px solid var(--sl-color-hairline) !important;
+	border-radius: 0.875rem !important;
+	padding: 0 !important;
+	overflow: hidden !important;
+	cursor: zoom-in !important;
+	transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+	            box-shadow 0.25s ease,
+	            transform 0.25s ease !important;
+}
+
+html[data-theme='dark'] .image-zoom-wrapper {
+	background: rgba(14, 22, 34, 0.85) !important;
+	box-shadow: 0 4px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(241, 245, 249, 0.08) !important;
+}
+
+html[data-theme='dark'] .image-zoom-wrapper:hover {
+	border-color: var(--sl-color-larimar) !important;
+	box-shadow: 0 8px 32px rgba(45, 212, 191, 0.25), inset 0 1px 0 rgba(45, 212, 191, 0.15) !important;
+}
+
+html[data-theme='light'] .image-zoom-wrapper {
+	background: #F8FAFC !important;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05) !important;
+}
+
+html[data-theme='light'] .image-zoom-wrapper:hover {
+	border-color: var(--sl-color-ultramar) !important;
+	box-shadow: 0 8px 25px rgba(2, 132, 199, 0.18) !important;
+}
+
+.image-zoom-wrapper img {
+	display: block !important;
+	width: 100% !important;
+	height: auto !important;
+	border-radius: inherit !important;
+}
+
+html[data-theme='dark'] .image-zoom-wrapper:hover .mermaid-zoom-badge,
+html[data-theme='dark'] .image-zoom-wrapper .mermaid-zoom-badge:hover {
+	border-color: var(--sl-color-larimar) !important;
+	color: var(--sl-color-larimar-high) !important;
+	background: rgba(14, 22, 34, 0.98) !important;
+	box-shadow: 0 0 12px rgba(45, 212, 191, 0.35) !important;
+}
+
+html[data-theme='light'] .image-zoom-wrapper:hover .mermaid-zoom-badge,
+html[data-theme='light'] .image-zoom-wrapper .mermaid-zoom-badge:hover {
+	border-color: var(--sl-color-ultramar) !important;
+	color: var(--sl-color-ultramar) !important;
+	background: #FFFFFF !important;
+	box-shadow: 0 0 12px rgba(2, 132, 199, 0.25) !important;
+}
+
+/* ==========================================================================
    Mermaid Fullscreen Interactive Zoom Modal
    ========================================================================== */
 .mermaid-modal {
@@ -1119,6 +1180,16 @@ html[data-theme='light'] .mermaid-modal-btn:hover {
 	visibility: visible !important;
 	opacity: 1 !important;
 	filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.5)) !important;
+}
+
+.mermaid-modal-stage img {
+	max-width: none !important;
+	max-height: none !important;
+	display: block !important;
+	visibility: visible !important;
+	opacity: 1 !important;
+	border-radius: 0.5rem !important;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65) !important;
 }
 
 /* Ensure modal stage inherits all Mermaid Paleta Quisqueyana theme styles */

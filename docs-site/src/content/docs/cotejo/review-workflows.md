@@ -14,6 +14,9 @@ This guide covers how to inspect diffs, compare patchset revisions, publish batc
 
 When viewing a changelist (`/cl/{id}`), you can switch between **Side-by-Side** and **Unified** diff layouts.
 
+![Cotejo Side-by-Side Diff Table](../../../assets/cotejo/cotejo-side-by-side-diff.png)
+*Figure 1: Cotejo's side-by-side diff table, showing line additions in `.niebla/OWNERS.toml` and interactive comment anchors.*
+
 Rather than highlighting an entire modified line as a single block, Cotejo runs a two-pass diff engine:
 1. **Line-Level Diff:** Identifies added, deleted, and modified line blocks using [Longest Common Subsequence (LCS)](https://en.wikipedia.org/wiki/Longest_common_subsequence).
 2. **Intra-Line Word Slicing:** Within modified lines, isolates the exact tokens or characters that changed while preserving language syntax highlighting (`alecthomas/chroma/v2`).

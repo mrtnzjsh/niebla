@@ -261,6 +261,9 @@
 
   function openMermaidModal(sourceSvg) {
     const modal = ensureMermaidModal();
+    const title = modal.querySelector('.mermaid-modal-title');
+    if (title) title.textContent = 'Diagram Viewer';
+
     const stage = modal.querySelector('.mermaid-modal-stage');
     const viewport = modal.querySelector('.mermaid-modal-viewport');
     stage.innerHTML = '';
@@ -330,6 +333,109 @@
     if (!modalInstance) return;
     modalInstance.style.display = 'none';
     document.body.style.overflow = '';
+  }
+
+  function openImageModal(sourceImg) {
+    const modal = ensureMermaidModal();
+    const title = modal.querySelector('.mermaid-modal-title');
+    if (title) {
+      title.textContent = sourceImg.alt || 'Screenshot Viewer';
+    }
+
+    const stage = modal.querySelector('.mermaid-modal-stage');
+    const viewport = modal.querySelector('.mermaid-modal-viewport');
+    stage.innerHTML = '';
+
+    const cloned = document.createElement('img');
+    cloned.src = sourceImg.currentSrc || sourceImg.src;
+    cloned.alt = sourceImg.alt || '';
+
+    const naturalWidth = sourceImg.naturalWidth || sourceImg.width || 1600;
+    const naturalHeight = sourceImg.naturalHeight || sourceImg.height || 1000;
+
+    cloned.setAttribute('width', naturalWidth);
+    cloned.setAttribute('height', naturalHeight);
+    cloned.style.setProperty('width', naturalWidth + 'px', 'important');
+    cloned.style.setProperty('height', naturalHeight + 'px', 'important');
+    cloned.style.setProperty('min-width', naturalWidth + 'px', 'important');
+    cloned.style.setProperty('min-height', naturalHeight + 'px', 'important');
+    cloned.style.setProperty('max-width', 'none', 'important');
+    cloned.style.setProperty('max-height', 'none', 'important');
+    cloned.style.setProperty('display', 'block', 'important');
+    cloned.style.setProperty('visibility', 'visible', 'important');
+    cloned.style.setProperty('opacity', '1', 'important');
+
+    stage.appendChild(cloned);
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    // Calculate initial fit scale immediately
+    const vWidth = viewport.clientWidth || (window.innerWidth * 0.95);
+    const vHeight = viewport.clientHeight || (window.innerHeight * 0.88);
+
+    const scaleX = (vWidth - 80) / naturalWidth;
+    const scaleY = (vHeight - 80) / naturalHeight;
+    baseFitScale = Math.min(scaleX, scaleY, 1.0);
+    if (!isFinite(baseFitScale) || baseFitScale <= 0.05) baseFitScale = 1.0;
+
+    currentScale = baseFitScale;
+    currentTranslateX = 0;
+    currentTranslateY = 0;
+
+    stage.style.transform = `translate(${currentTranslateX}px, ${currentTranslateY}px) scale(${currentScale})`;
+    modal.querySelector('.mermaid-modal-zoom-val').textContent = `${Math.round((currentScale / baseFitScale) * 100)}%`;
+  }
+
+  function renderAllImages() {
+    const contentArea = document.querySelector('.sl-markdown-content') || document.querySelector('article') || document.querySelector('main');
+    if (!contentArea) return;
+
+    const imgs = contentArea.querySelectorAll('img:not(.no-zoom)');
+    imgs.forEach(img => {
+      if (img.closest('.image-zoom-wrapper') || img.closest('.mermaid-wrapper')) return;
+      if (img.width && img.width < 60 && img.height && img.height < 60) return;
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'image-zoom-wrapper not-content';
+      wrapper.setAttribute('title', 'Click to expand image in interactive zoom viewer');
+
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'mermaid-zoom-badge';
+      badge.setAttribute('aria-label', 'Expand and zoom image');
+      badge.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="11" y1="8" x2="11" y2="14"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+        <span>Expand</span>
+      `;
+
+      wrapper.addEventListener('click', (e) => {
+        e.preventDefault();
+        openImageModal(img);
+      });
+
+      const parent = img.parentElement;
+      if (parent && parent.tagName === 'P') {
+        const textWithoutImg = parent.textContent.trim();
+        if (parent.children.length === 1 && !textWithoutImg) {
+          parent.replaceWith(wrapper);
+          wrapper.appendChild(img);
+          wrapper.appendChild(badge);
+        } else {
+          parent.parentElement.insertBefore(wrapper, parent);
+          wrapper.appendChild(img);
+          wrapper.appendChild(badge);
+        }
+      } else {
+        img.replaceWith(wrapper);
+        wrapper.appendChild(img);
+        wrapper.appendChild(badge);
+      }
+    });
   }
 
   async function renderAllMermaid() {
@@ -513,11 +619,16 @@
     svgEl.style.overflow = 'visible';
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', renderAllMermaid);
-  } else {
+  function initAll() {
+    renderAllImages();
     renderAllMermaid();
   }
 
-  document.addEventListener('astro:page-load', renderAllMermaid);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAll);
+  } else {
+    initAll();
+  }
+
+  document.addEventListener('astro:page-load', initAll);
 })();
