@@ -6,13 +6,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"niebla/pkg/ai"
 	"niebla/pkg/tree"
 )
 
@@ -102,11 +105,31 @@ func TestCotejoFullReviewLifecycle(t *testing.T) {
 		return resp, string(respBytes)
 	}
 
-	// 2. Author adds reviewer 'bob'
-	addReviewerForm := url.Values{"reviewers": {reviewer}}.Encode()
+	// 2. Reviewer Management: Add, Remove, and Re-add reviewer 'bob'
+	addReviewerForm := url.Values{"reviewer": {reviewer}}.Encode()
 	resp, body := sendReq("POST", fmt.Sprintf("/cl/%d/reviewers", clID), author, strings.NewReader(addReviewerForm), "application/x-www-form-urlencoded")
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound {
 		t.Errorf("Add reviewer returned unexpected status %d: %s", resp.StatusCode, body)
+	}
+	reviewers, err := cluster.DB.ListReviewers(ctx, clID)
+	if err != nil || len(reviewers) != 1 || reviewers[0].Reviewer != reviewer {
+		t.Fatalf("Expected reviewer %s assigned, got %v (err: %v)", reviewer, reviewers, err)
+	}
+
+	// Remove reviewer 'bob'
+	resp, body = sendReq("DELETE", fmt.Sprintf("/cl/%d/reviewers/%s", clID, reviewer), author, nil, "")
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound {
+		t.Errorf("Remove reviewer returned unexpected status %d: %s", resp.StatusCode, body)
+	}
+	reviewers, err = cluster.DB.ListReviewers(ctx, clID)
+	if err != nil || len(reviewers) != 0 {
+		t.Fatalf("Expected 0 reviewers after removal, got %v (err: %v)", reviewers, err)
+	}
+
+	// Re-add reviewer 'bob'
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/reviewers", clID), author, strings.NewReader(addReviewerForm), "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound {
+		t.Errorf("Re-add reviewer returned unexpected status %d: %s", resp.StatusCode, body)
 	}
 
 	// 3. Reviewer Bob views the CL and verifies UI rendering & static assets
@@ -165,13 +188,44 @@ func TestCotejoFullReviewLifecycle(t *testing.T) {
 	assertStaticAsset("/static/styles.css", "text/css")
 	assertStaticAsset("/static/htmx.min.js", "application/javascript")
 
-	// 4. Reviewer Bob views file diff for main.go
-	resp, body = sendReq("GET", fmt.Sprintf("/cl/%d/file/main.go", clID), reviewer, nil, "")
+	// 4. Interactive Comment Box retrieval
+	resp, body = sendReq("GET", fmt.Sprintf("/cl/%d/comment-box?file=main.go&line=4&side=modified&ps=1", clID), reviewer, nil, "")
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("GET file diff failed with status %d", resp.StatusCode)
+		t.Fatalf("GET comment-box failed with status %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, fmt.Sprintf("/cl/%d/comments", clID)) {
+		t.Errorf("Comment box missing hx-post target /cl/%d/comments, got:\n%s", clID, body)
 	}
 
-	// 5. Reviewer Bob posts an inline comment
+	// 5. Comment authoring, resolution, and discard lifecycle
+	// 5a. Post a temporary draft comment and discard it
+	draftForm := url.Values{
+		"file_path":   {"main.go"},
+		"line_number": {"3"},
+		"body":        {"Temporary draft note to be discarded."},
+		"patchset":    {"1"},
+	}.Encode()
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/comments", clID), reviewer, strings.NewReader(draftForm), "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Post draft comment failed with status %d: %s", resp.StatusCode, body)
+	}
+	line3Comments, err := cluster.DB.ListCommentsForLine(ctx, clID, "main.go", 3, "modified")
+	if err != nil || len(line3Comments) == 0 {
+		t.Fatalf("Failed to find created draft comment on line 3: %v", err)
+	}
+	draftID := line3Comments[0].ID
+
+	// Discard the draft comment
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/comments/%d/discard", clID, draftID), reviewer, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Discard draft failed with status %d: %s", resp.StatusCode, body)
+	}
+	line3AfterDiscard, err := cluster.DB.ListCommentsForLine(ctx, clID, "main.go", 3, "modified")
+	if err != nil || len(line3AfterDiscard) != 0 {
+		t.Errorf("Expected line 3 comments to be empty after discard, got %v", line3AfterDiscard)
+	}
+
+	// 5b. Post a persistent comment on line 4
 	commentForm := url.Values{
 		"file_path":   {"main.go"},
 		"line_number": {"4"},
@@ -180,24 +234,150 @@ func TestCotejoFullReviewLifecycle(t *testing.T) {
 	}.Encode()
 	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/comments", clID), reviewer, strings.NewReader(commentForm), "application/x-www-form-urlencoded")
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Post comment failed with status %d: %s", resp.StatusCode, body)
+		t.Fatalf("Post persistent comment failed with status %d: %s", resp.StatusCode, body)
+	}
+	line4Comments, err := cluster.DB.ListCommentsForLine(ctx, clID, "main.go", 4, "modified")
+	if err != nil || len(line4Comments) == 0 {
+		t.Fatalf("Failed to find created comment on line 4: %v", err)
+	}
+	activeCommentID := line4Comments[0].ID
+
+	// Resolve the comment thread
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/comments/%d/resolve?resolved=true", clID, activeCommentID), reviewer, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Resolve comment failed with status %d: %s", resp.StatusCode, body)
+	}
+	comm, err := cluster.DB.GetComment(ctx, activeCommentID)
+	if err != nil || !comm.Resolved {
+		t.Errorf("Expected comment %d to be marked resolved, got %v (err: %v)", activeCommentID, comm, err)
 	}
 
-	// 6. Reviewer Bob approves the CL (+1 / LGTM)
+	// 6. AI Hint Generation with Mock OpenAI Endpoint
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		hintResp, _ := json.Marshal(ai.HintResponse{
+			SufficientContext:    true,
+			Explanation:          "Return explicit error tuple rather than raw string",
+			ReplacementStartLine: 3,
+			ReplacementEndLine:   5,
+			ReplacementCode:      "func Run() (string, error) {\n\treturn \"initial draft\", nil\n}",
+		})
+		outer, _ := json.Marshal(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": string(hintResp)}},
+			},
+		})
+		_, _ = w.Write(outer)
+	}))
+	defer mockLLM.Close()
+
+	// Reconfigure Critique AI settings and refresh handler
+	cluster.Config.Critique.AI.Enabled = true
+	cluster.Config.Critique.AI.Endpoint = mockLLM.URL + "/v1"
+	cluster.Config.Critique.AI.APIKey = "test-key"
+	cluster.CommentsHandler.SetDependencies(cluster.CASStorage, cluster.Config)
+
+	// Verify comment-box now surfaces AI hint UI
+	resp, body = sendReq("GET", fmt.Sprintf("/cl/%d/comment-box?file=main.go&line=4&side=modified&ps=1", clID), reviewer, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET comment-box after AI config failed: %d", resp.StatusCode)
+	}
+	if !strings.Contains(body, "Provide AI hint") && !strings.Contains(body, "Generate Hint") {
+		t.Errorf("Expected AI hint UI controls in comment box after enabling AI, got:\n%s", body)
+	}
+
+	// Trigger AI hint generation
+	aiHintForm := url.Values{
+		"cl_id":           {fmt.Sprintf("%d", clID)},
+		"file_path":       {"main.go"},
+		"line_number":     {"3"},
+		"end_line_number": {"5"},
+		"patchset_number": {"1"},
+		"body":            {"Return explicit error tuple"},
+	}.Encode()
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/ai-hint/generate", clID), reviewer, strings.NewReader(aiHintForm), "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Generate AI hint failed with status %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "AI Hint Preview") {
+		t.Errorf("Expected 'AI Hint Preview' in response HTML")
+	}
+	if !strings.Contains(body, "Return explicit error tuple rather than raw string") {
+		t.Errorf("Expected AI hint explanation in response HTML")
+	}
+
+	// 7. Code Suggestion Application
+	// Bob submits a comment with a code suggestion
+	suggCode := "func Run() (string, error) {\n\treturn \"initial draft\", nil\n}"
+	suggCommentForm := url.Values{
+		"file_path":             {"main.go"},
+		"line_number":           {"3"},
+		"end_line_number":       {"5"},
+		"side":                  {"modified"},
+		"patchset_number":       {"1"},
+		"body":                  {"Suggesting explicit error return tuple."},
+		"suggestion_code":       {suggCode},
+		"suggestion_start_line": {"3"},
+		"suggestion_end_line":   {"5"},
+	}.Encode()
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/comments", clID), reviewer, strings.NewReader(suggCommentForm), "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to post suggestion comment: %d: %s", resp.StatusCode, body)
+	}
+
+	// Locate the suggestion comment
+	line3Comments, err = cluster.DB.ListCommentsForLine(ctx, clID, "main.go", 5, "modified")
+	if err != nil || len(line3Comments) == 0 {
+		t.Fatalf("Failed to locate suggestion comment on lines 3-5: %v", err)
+	}
+	suggCommentID := line3Comments[0].ID
+
+	// 8. Reviewer Bob publishes review
+	publishForm := url.Values{}.Encode()
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/publish", clID), reviewer, strings.NewReader(publishForm), "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("Publish review failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	// Author Alice applies the published suggestion
+	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/comments/%d/apply-suggestion", clID, suggCommentID), author, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Apply suggestion failed with status %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "Applied in PS 2") {
+		t.Errorf("Expected 'Applied in PS 2' badge in response HTML, got:\n%s", body)
+	}
+
+	// Verify DB state: Patchset 2 created
+	latestPS, err := cluster.DB.GetLatestPatchsetNumber(ctx, clID)
+	if err != nil || latestPS != 2 {
+		t.Fatalf("Expected latest patchset number to be 2, got %d (err: %v)", latestPS, err)
+	}
+
+	// Verify file diff reflects the applied suggestion live
+	resp, body = sendReq("GET", fmt.Sprintf("/cl/%d/file/main.go", clID), reviewer, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET file diff after applied suggestion failed: %d", resp.StatusCode)
+	}
+	if !strings.Contains(body, "(string, error)") {
+		t.Errorf("Diff does not reflect applied suggestion '(string, error)', got:\n%s", body)
+	}
+
+	// 9. Reviewer Bob approves CL
 	approvalForm := url.Values{"verdict": {"approved"}}.Encode()
 	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/approval", clID), reviewer, strings.NewReader(approvalForm), "application/x-www-form-urlencoded")
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound {
 		t.Errorf("Approval submission failed with status %d: %s", resp.StatusCode, body)
 	}
 
-	// 7. Author Alice views updated status and submits via Cotejo UI
+	// 10. Author Alice views updated status and submits via Cotejo UI
 	submitForm := url.Values{}.Encode()
 	resp, body = sendReq("POST", fmt.Sprintf("/cl/%d/submit", clID), author, strings.NewReader(submitForm), "application/x-www-form-urlencoded")
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("Submit CL via Cotejo returned status %d: %s", resp.StatusCode, body)
 	}
 
-	// 8. Verify DB status is 'submitted'
+	// 11. Verify DB status is 'submitted'
 	clRecord, err := cluster.DB.GetCL(ctx, clID)
 	if err != nil {
 		t.Fatalf("failed to query CL %d: %v", clID, err)
@@ -209,7 +389,7 @@ func TestCotejoFullReviewLifecycle(t *testing.T) {
 		t.Errorf("expected CL %d to have valid positive trunk revision, got %v", clID, clRecord.TrunkRevision)
 	}
 
-	// 9. Verify Inbox segregation
+	// 12. Verify Inbox segregation
 	resp, body = sendReq("GET", "/cls?tab=merged", author, nil, "")
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("GET /cls?tab=merged failed with status %d", resp.StatusCode)
@@ -218,4 +398,3 @@ func TestCotejoFullReviewLifecycle(t *testing.T) {
 		t.Errorf("Merged tab did not contain submitted CL %d", clID)
 	}
 }
-

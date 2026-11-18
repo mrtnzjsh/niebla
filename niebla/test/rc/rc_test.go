@@ -42,8 +42,10 @@ type RCTestCluster struct {
 	GRPCClient     nieblav1.NieblaServiceClient
 	CotejoServer   *httptest.Server
 	CotejoMux      *http.ServeMux
-	Config         *config.Config
-	cleanupFunc    func()
+	Config          *config.Config
+	CommentsHandler *handlers.CommentsHandler
+	CLHandler       *handlers.CLHandler
+	cleanupFunc     func()
 }
 
 // SetupRCCluster spins up a complete, isolated release candidate cluster
@@ -163,6 +165,7 @@ func SetupRCCluster(t *testing.T) *RCTestCluster {
 	mux.HandleFunc("POST /cl/{id}/approval", clHandler.HandleApproval)
 	mux.HandleFunc("POST /cl/{id}/file-review", clHandler.HandleFileReview)
 	mux.HandleFunc("POST /cl/{id}/reviewers", clHandler.HandleAddReviewers)
+	mux.HandleFunc("POST /cl/{id}/reviewers/{user}/remove", clHandler.HandleRemoveReviewer)
 	mux.HandleFunc("DELETE /cl/{id}/reviewers/{user}", clHandler.HandleRemoveReviewer)
 	mux.HandleFunc("POST /cl/{id}/submit", clHandler.HandleSubmitCL)
 	mux.HandleFunc("POST /cl/{id}/reply", clHandler.HandlePublishReview)
@@ -201,10 +204,12 @@ func SetupRCCluster(t *testing.T) *RCTestCluster {
 		GRPCServerAddr: grpcAddr,
 		GRPCConn:       grpcConn,
 		GRPCClient:     grpcClient,
-		CotejoServer:   cotejoServer,
-		CotejoMux:      mux,
-		Config:         appConfig,
-		cleanupFunc:    cleanup,
+		CotejoServer:    cotejoServer,
+		CotejoMux:       mux,
+		Config:          appConfig,
+		CommentsHandler: commentsHandler,
+		CLHandler:       clHandler,
+		cleanupFunc:     cleanup,
 	}
 }
 

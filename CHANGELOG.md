@@ -9,10 +9,15 @@ All notable changes to Niebla are documented in this file, adhering to [Keep a C
   - Native Windows client compilation (`niebla.exe`) with `%PATHEXT%` support, cross-platform path canonicalization, and `--no-fuse` direct materialization.
   - Native Unicode NFC normalization (`golang.org/x/text/unicode/norm`) on Merkle tree calculation, preventing hash divergence between Linux (NFC) and macOS APFS (decomposed NFD).
   - APFS and NTFS case-collision detection alerting users to case-folding conflicts before Merkle tree hashing.
+  - WSL (Windows Subsystem for Linux) compatibility: bidirectional DrvFS path translation (`/mnt/c` $\leftrightarrow$ `C:\`), CRLF $\leftrightarrow$ LF Merkle hash stability, and DrvFS synthetic `0777` permission masking to standard Git modes.
 - **Cross-OS Release Candidate Automation**:
   - Automated Forgejo Actions release candidate pipeline (`release-candidate.yaml`) supporting multi-platform verification.
-  - KVM hardware-accelerated Windows container harness (`scripts/test_windows_container.sh`) verifying Windows binary execution and NTFS file locking under `/dev/kvm`.
+  - Dedicated hermetic ephemeral test cluster (`scripts/ephemeral_test_cluster.sh`) with isolated PostgreSQL and gRPC server containers on a private Docker network (`niebla-test-net`), guaranteeing zero production collision and complete teardown.
+  - KVM hardware-accelerated Windows container harness (`scripts/test_windows_container.sh`) with unattended guest execution and Docker volume streaming bypassing systemd `PrivateTmp` namespaces.
   - Non-blocking Apple Silicon macOS verification runner integration (`scripts/test_macos_remote.sh`) with automated Tailscale device discovery.
+  - Hermetic documentation verification suite (`scripts/test_docs_container.sh`) auditing Astro/Starlight static output inside `node:22-alpine` for broken links, missing anchors, and unresolvable images.
+- **Cotejo Web Review & Interactive Automation**:
+  - Expanded end-to-end integration suite (`test/rc/cotejo_lifecycle_test.go`) automating live Cotejo HTMX routes: reviewer assignment/removal, draft comment discard, thread resolution toggles, AI hint generation against mock OpenAI endpoints, and one-click code suggestion application creating new patchsets.
 - **FUSE Virtual Filesystem Mutations & Write-Support**:
   - Implemented full FUSE directory creation (`Mkdir`), file creation (`Create`), file writing, deletion, and truncation directing writes into the CoW scratch overlay.
   - Auto-configuration of FUSE device permissions (`/dev/fuse`) and group membership during NixOS module installation.

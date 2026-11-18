@@ -103,10 +103,23 @@ jobs:
         run: |
           echo "macOS verification completed with exit status: $?"
 
+  docs-site-verification:
+    name: Documentation Site & Link Integrity Verification
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Run Hermetic Docs Site Container Verification
+        run: |
+          ./niebla/scripts/test_docs_container.sh
+
   teardown-ephemeral:
     name: Teardown Ephemeral Test Server
     runs-on: [self-hosted, linux]
-    needs: [rc-verification, macos-darwin-verification]
+    needs: [rc-verification, macos-darwin-verification, docs-site-verification]
     if: always()
 
     steps:
