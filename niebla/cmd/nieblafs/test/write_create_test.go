@@ -1,8 +1,10 @@
 package test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"bazil.org/fuse/fs/fstestutil"
@@ -122,5 +124,37 @@ func TestFUSE_POSIX_MutationsAndStatus(t *testing.T) {
 	}
 	if err := os.Remove(nestedDir); err != nil {
 		t.Fatalf("failed to rmdir nested/sub/dir: %v", err)
+	}
+
+	// Test 8: Non-empty directory removal returns ENOTEMPTY (not EIO) and supports IDE recursive deletion
+	ideDir := filepath.Join(mnt.Dir, "ide_test_dir")
+	if err := os.Mkdir(ideDir, 0755); err != nil {
+		t.Fatalf("failed to mkdir ide_test_dir: %v", err)
+	}
+	ideFile := filepath.Join(ideDir, "file.txt")
+	if err := os.WriteFile(ideFile, []byte("content"), 0644); err != nil {
+		t.Fatalf("failed to write ide_test_dir/file.txt: %v", err)
+	}
+
+	// Direct rmdir on non-empty dir must return ENOTEMPTY (and explicitly NOT EIO)
+	rmErr := os.Remove(ideDir)
+	if rmErr == nil {
+		t.Fatalf("expected rmdir on non-empty directory to fail, but it succeeded")
+	}
+	var pe *os.PathError
+	if errors.As(rmErr, &pe) {
+		if pe.Err != syscall.ENOTEMPTY && pe.Err != syscall.EEXIST {
+			t.Fatalf("expected ENOTEMPTY or EEXIST for rmdir of non-empty directory, got: %v", pe.Err)
+		}
+	} else {
+		t.Fatalf("expected PathError, got: %v", rmErr)
+	}
+
+	// Recursive removal (as performed by IDEs / os.RemoveAll / Node.js fs.rm) must succeed
+	if err := os.RemoveAll(ideDir); err != nil {
+		t.Fatalf("failed to RemoveAll ide_test_dir (IDE recursive deletion): %v", err)
+	}
+	if _, err := os.Stat(ideDir); !os.IsNotExist(err) {
+		t.Fatalf("expected ide_test_dir to be removed, but stat returned: %v", err)
 	}
 }

@@ -144,13 +144,13 @@ func (f *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 
 	if req.Valid.Size() {
 		if err := os.Truncate(f.scratchPath, int64(req.Size)); err != nil {
-			return err
+			return toSyscallErr(err)
 		}
 		f.size = int64(req.Size)
 	}
 	if req.Valid.Mode() {
 		if err := os.Chmod(f.scratchPath, req.Mode); err != nil {
-			return err
+			return toSyscallErr(err)
 		}
 		f.mode = uint32(req.Mode)
 	}
@@ -170,13 +170,13 @@ func (f *File) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.Wri
 
 	file, err := os.OpenFile(f.scratchPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		return err
+		return toSyscallErr(err)
 	}
 	defer file.Close()
 
 	n, err := file.WriteAt(req.Data, req.Offset)
 	if err != nil {
-		return err
+		return toSyscallErr(err)
 	}
 	resp.Size = n
 	return nil
@@ -190,14 +190,14 @@ func fileExists(p string) bool {
 func readFromFileAt(filePath string, offset int64, size int, resp *fuse.ReadResponse) error {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return toSyscallErr(err)
 	}
 	defer file.Close()
 
 	buf := make([]byte, size)
 	n, err := file.ReadAt(buf, offset)
 	if err != nil && err != io.EOF {
-		return err
+		return toSyscallErr(err)
 	}
 	resp.Data = buf[:n]
 	return nil

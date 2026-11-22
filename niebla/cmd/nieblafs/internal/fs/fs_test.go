@@ -596,3 +596,108 @@ func TestFS_Dir_And_File_Attr_UidGid(t *testing.T) {
 		t.Errorf("expected fileAttr.Gid == %d, got %d", expectedGID, fileAttr.Gid)
 	}
 }
+
+func TestFS_Dir_Remove_NonEmptyScratch_ReturnsENOTEMPTY(t *testing.T) {
+	tmpDir := t.TempDir()
+	scratchDir := filepath.Join(tmpDir, "scratch")
+	cacheDir := filepath.Join(tmpDir, "cache")
+	_ = os.MkdirAll(scratchDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0755)
+
+	cache := metadata.NewMetadataCache()
+	fsInstance := NewFS(scratchDir, cacheDir, cache)
+	rootNode, err := fsInstance.Root()
+	if err != nil {
+		t.Fatalf("Root failed: %v", err)
+	}
+	root := rootNode.(*Dir)
+
+	// 1. Create a directory in scratch
+	dirNode, err := root.Mkdir(context.Background(), &fuse.MkdirRequest{Name: "my_dir", Mode: 0755})
+	if err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+	dir := dirNode.(*Dir)
+
+	// 2. Create a child file inside that directory
+	_, _, err = dir.Create(context.Background(), &fuse.CreateRequest{Name: "child.txt", Mode: 0644}, &fuse.CreateResponse{})
+	if err != nil {
+		t.Fatalf("Create child file failed: %v", err)
+	}
+
+	// 3. Attempt to remove the non-empty directory -> must return syscall.ENOTEMPTY, NOT EIO
+	err = root.Remove(context.Background(), &fuse.RemoveRequest{Name: "my_dir", Dir: true})
+	if err != syscall.ENOTEMPTY {
+		t.Fatalf("expected syscall.ENOTEMPTY when removing non-empty scratch dir, got %v", err)
+	}
+
+	// 4. Remove the child file
+	if err := dir.Remove(context.Background(), &fuse.RemoveRequest{Name: "child.txt", Dir: false}); err != nil {
+		t.Fatalf("Remove child file failed: %v", err)
+	}
+
+	// 5. Attempt to remove the now-empty directory -> must succeed
+	if err := root.Remove(context.Background(), &fuse.RemoveRequest{Name: "my_dir", Dir: true}); err != nil {
+		t.Fatalf("expected removing empty scratch dir to succeed, got %v", err)
+	}
+
+	// 6. Verify directory no longer exists in scratch
+	if _, err := os.Stat(filepath.Join(scratchDir, "my_dir")); !os.IsNotExist(err) {
+		t.Errorf("expected scratch my_dir to be removed, got err: %v", err)
+	}
+}
+
+func TestFS_Dir_Remove_NonEmptyBase_ReturnsENOTEMPTY(t *testing.T) {
+	tmpDir := t.TempDir()
+	scratchDir := filepath.Join(tmpDir, "scratch")
+	cacheDir := filepath.Join(tmpDir, "cache")
+	_ = os.MkdirAll(scratchDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0755)
+
+	cache := metadata.NewMetadataCache()
+	// Set up base directory and base child file in cache
+	cache.Set("base_folder", metadata.Metadata{
+		Name: "base_folder",
+		Mode: syscall.S_IFDIR | 0755,
+	})
+	cache.Set("base_folder/child.txt", metadata.Metadata{
+		Name:     "base_folder/child.txt",
+		Mode:     0644,
+		ByteSize: 10,
+	})
+
+	fsInstance := NewFS(scratchDir, cacheDir, cache)
+	rootNode, err := fsInstance.Root()
+	if err != nil {
+		t.Fatalf("Root failed: %v", err)
+	}
+	root := rootNode.(*Dir)
+
+	// 1. Attempt to remove non-empty base directory -> must return syscall.ENOTEMPTY
+	err = root.Remove(context.Background(), &fuse.RemoveRequest{Name: "base_folder", Dir: true})
+	if err != syscall.ENOTEMPTY {
+		t.Fatalf("expected syscall.ENOTEMPTY for non-empty base dir, got %v", err)
+	}
+
+	// 2. Lookup child folder node
+	childDirNode, err := root.Lookup(context.Background(), "base_folder")
+	if err != nil {
+		t.Fatalf("Lookup base_folder failed: %v", err)
+	}
+	childDir := childDirNode.(*Dir)
+
+	// 3. Remove the base child file (creates whiteout marker)
+	if err := childDir.Remove(context.Background(), &fuse.RemoveRequest{Name: "child.txt", Dir: false}); err != nil {
+		t.Fatalf("Remove base child file failed: %v", err)
+	}
+
+	// 4. Now remove base directory -> must succeed
+	if err := root.Remove(context.Background(), &fuse.RemoveRequest{Name: "base_folder", Dir: true}); err != nil {
+		t.Fatalf("expected removing whiteouted base dir to succeed, got %v", err)
+	}
+
+	// 5. Whiteout for the folder itself must be written
+	if _, err := os.Stat(filepath.Join(scratchDir, ".wh.base_folder")); err != nil {
+		t.Errorf("expected whiteout marker .wh.base_folder, got err: %v", err)
+	}
+}

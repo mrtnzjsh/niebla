@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,25 @@ import (
 	"niebla/pkg/cas"
 	"niebla/pkg/tree"
 )
+
+// toSyscallErr unrolls *os.PathError or wrapped errno types into bare syscall.Errno
+// so bazil.org/fuse does not degrade them into EIO.
+func toSyscallErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		if errno, ok := pe.Err.(syscall.Errno); ok {
+			return errno
+		}
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno
+	}
+	return err
+}
 
 // FS represents the virtual Niebla filesystem backend.
 type FS struct {
@@ -319,7 +339,7 @@ func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error
 		mode = 0755
 	}
 	if err := os.Mkdir(scratchPath, mode); err != nil {
-		return nil, err
+		return nil, toSyscallErr(err)
 	}
 
 	_ = os.Remove(whiteoutPath)
@@ -362,7 +382,7 @@ func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.Cr
 
 	f, err := os.OpenFile(scratchPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, toSyscallErr(err)
 	}
 	_ = f.Close()
 
@@ -421,27 +441,52 @@ func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	}
 
 	if req.Dir {
+		if scratchExists && !scratchInfo.IsDir() {
+			return syscall.ENOTDIR
+		}
+
+		// Check if directory contains active files in scratch overlay
 		if scratchExists {
-			if !scratchInfo.IsDir() {
-				return syscall.ENOTDIR
+			entries, err := os.ReadDir(scratchPath)
+			if err != nil && !os.IsNotExist(err) {
+				return toSyscallErr(err)
 			}
-			if err := os.Remove(scratchPath); err != nil {
-				return err
+			for _, entry := range entries {
+				if !strings.HasPrefix(entry.Name(), ".wh.") {
+					return syscall.ENOTEMPTY
+				}
 			}
 		}
+
+		// Check if directory contains active files in base CAS tree
 		if inBase {
 			if d.fs.Cache != nil {
 				_ = d.fs.EnsureDirectoryLoaded(ctx, relPath)
 				children := d.fs.Cache.ListDir(relPath)
-				if len(children) > 0 {
-					return syscall.ENOTEMPTY
+				for _, child := range children {
+					childName := filepath.Base(child.Name)
+					childWhiteout := filepath.Join(scratchPath, ".wh."+childName)
+					if _, err := os.Lstat(childWhiteout); err != nil {
+						// Not whiteouted, directory still has active base children
+						return syscall.ENOTEMPTY
+					}
 				}
 			}
+		}
+
+		// Directory is empty of active files: remove scratch directory (including any leftover whiteouts)
+		if scratchExists {
+			if err := os.RemoveAll(scratchPath); err != nil {
+				return toSyscallErr(err)
+			}
+		}
+
+		if inBase {
 			if err := os.MkdirAll(filepath.Dir(whiteoutPath), 0755); err != nil {
-				return err
+				return toSyscallErr(err)
 			}
 			if err := os.WriteFile(whiteoutPath, nil, 0644); err != nil {
-				return err
+				return toSyscallErr(err)
 			}
 		}
 	} else {
@@ -450,15 +495,15 @@ func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 				return syscall.EISDIR
 			}
 			if err := os.Remove(scratchPath); err != nil {
-				return err
+				return toSyscallErr(err)
 			}
 		}
 		if inBase {
 			if err := os.MkdirAll(filepath.Dir(whiteoutPath), 0755); err != nil {
-				return err
+				return toSyscallErr(err)
 			}
 			if err := os.WriteFile(whiteoutPath, nil, 0644); err != nil {
-				return err
+				return toSyscallErr(err)
 			}
 		}
 	}
@@ -525,7 +570,7 @@ func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Nod
 	}
 
 	if err := os.MkdirAll(filepath.Dir(newScratchPath), 0755); err != nil {
-		return err
+		return toSyscallErr(err)
 	}
 
 	_ = os.Remove(newWhiteoutPath)
@@ -533,12 +578,12 @@ func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Nod
 	if oldScratchExists {
 		_ = oldScratchInfo
 		if err := os.Rename(oldScratchPath, newScratchPath); err != nil {
-			return err
+			return toSyscallErr(err)
 		}
 	} else if oldInBase {
 		if oldMeta.SubTreeHash != "" || (oldMeta.Mode&syscall.S_IFDIR != 0) {
 			if err := os.MkdirAll(newScratchPath, 0755); err != nil {
-				return err
+				return toSyscallErr(err)
 			}
 		} else {
 			blobPath := d.fs.ResolveBlobPath(oldMeta.BlobSHA256)
@@ -562,7 +607,7 @@ func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Nod
 				}
 			} else {
 				if err := os.WriteFile(newScratchPath, nil, mode); err != nil {
-					return err
+					return toSyscallErr(err)
 				}
 			}
 		}
