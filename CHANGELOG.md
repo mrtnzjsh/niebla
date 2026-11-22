@@ -2,6 +2,30 @@
 
 All notable changes to Niebla are documented in this file, adhering to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-22
+
+### Fixed
+- **FUSE POSIX Error Translation (`nieblafs`)**:
+  - Implemented `toSyscallErr` in `cmd/nieblafs/internal/fs/root.go` and `file.go` to unwrap `*os.PathError` and wrapped error types into bare `syscall.Errno` codes, preventing `bazil.org/fuse` from defaulting unknown Go errors to `EIO` (I/O error).
+  - Validated directory emptiness across both the local CoW scratch overlay and base CAS tree before deletion, ensuring non-empty directory removal returns `syscall.ENOTEMPTY` (or `syscall.EEXIST`).
+  - Enabled IDEs (VS Code, Cursor, JetBrains) and runtimes (Node.js `fs.rm` / `rimraf`, Python, Go `os.RemoveAll`) to perform optimistic `rmdir` checks and recursively delete directories containing files without aborting with `Error: EIO: i/o error, rmdir ...`.
+  - Added unit tests (`TestFS_Dir_Remove_NonEmptyScratch_ReturnsENOTEMPTY`, `TestFS_Dir_Remove_NonEmptyBase_ReturnsENOTEMPTY`) and live FUSE integration tests (`Test 8` in `write_create_test.go`).
+- **Workspace Scratch Directory Preservation on Mount**:
+  - Decoupled cache directory resolution (`resolveCacheDir()`) from scratch directory initialization (`resolveScratchDir()`).
+  - Fixed `niebla workspace mount` so it no longer executes `os.RemoveAll(scratchDir)`, preventing unintentional data loss of unshelved scratch files and modifications during workspace remounting.
+  - Fixed `niebla workspace delete --force` to resolve scratch paths without prematurely wiping scratch contents before cleanup checks.
+  - Added regression test `TestWorkspaceMount_PreservesScratchDirectory` in `internal/cli/workspace_test.go`.
+
+### Added
+- **Stacked Changelist Pipeline Workflows**:
+  - Documented agentic and human stacked changelist workflows in `niebla` runbook (`SKILL.md`), detailing multi-part pipelines ($CL_1 \to CL_2 \to CL_3$), chained workspace provisioning (`--cl <parent_id>`), asynchronous cloud cascade rebase loops, on-demand `niebla sync` sync-through, and parent-relative stacked reviews in Cotejo.
+- **Accessibility & Internationalization Specifications**:
+  - Added engineering design specification in `plans/COTEJO_ACCESSIBILITY.md` for WCAG 2.1 AA accessibility hardening (keyboard-driven diff commenting, skip navigation, ARIA live regions for HTMX swaps, screen-reader diff indicators).
+  - Added engineering design specification in `plans/COTEJO_I18N.md` for internationalization, localization, and BiDi security (embedded translation bundles, automatic locale negotiation, and CVE-2021-42574 Trojan Source protection).
+  - Updated `ROADMAP.md` milestones for hermetic sandboxed builds with third-party dependencies and post-submit git mirroring / replication.
+- **Problem-First Landing Page Documentation**:
+  - Modernized `README.md` with problem-first narrative, interactive workflow walkthroughs, terminal demo snippets, and architecture diagrams.
+
 ## [0.2.0] - 2026-11-17
 
 ### Added
@@ -97,6 +121,7 @@ All notable changes to Niebla are documented in this file, adhering to [Keep a C
 - **Cotejo Inbox Review Routing**: Corrected query assignment filter so unassigned reviewers only see changelists where they are explicitly assigned rather than all open changelists.
 - **Review Approval Verdict Parameter**: Added backwards-compatible form handler mapping `action=approve` to `verdict=approved` in `POST /cl/{id}/approval`.
 
+[0.2.1]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.2.0
 [0.1.1]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mrtnzjsh/niebla/releases/tag/v0.1.0
