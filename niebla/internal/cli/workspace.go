@@ -331,7 +331,7 @@ func newWorkspaceDeleteCmd(rootFlags *RootFlags) *cobra.Command {
 				// When force is true, metadata might be missing or out of sync.
 				// Infer default workspace paths to clean up orphaned mounts and directories.
 				mountDir, _ := resolveWorkspaceMountDir("", name)
-				scratchDir, _, _ := provisionWorkspaceDirs(name)
+				scratchDir, _ := resolveScratchDir(name)
 				socketPath := filepath.Join(filepath.Dir(scratchDir), "nieblafs.sock")
 				ws = &config.WorkspaceConfig{
 					Name:       name,
@@ -439,9 +439,21 @@ func newWorkspaceMountCmd(rootFlags *RootFlags) *cobra.Command {
 				return fmt.Errorf("nieblafs binary not found: %w", err)
 			}
 
-			_, cacheDir, err := provisionWorkspaceDirs(name)
+			cacheDir, err := resolveCacheDir()
 			if err != nil {
 				return fmt.Errorf("failed to resolve workspace cache dir: %w", err)
+			}
+
+			if ws.ScratchDir == "" {
+				scratchDir, err := resolveScratchDir(name)
+				if err != nil {
+					return fmt.Errorf("failed to resolve workspace scratch dir: %w", err)
+				}
+				ws.ScratchDir = scratchDir
+			} else {
+				if err := os.MkdirAll(ws.ScratchDir, 0755); err != nil {
+					return fmt.Errorf("failed to ensure scratch directory %s: %w", ws.ScratchDir, err)
+				}
 			}
 
 			serverAddr := rootFlags.Server
@@ -529,31 +541,47 @@ func getCurrentUsername() string {
 	return "user"
 }
 
-func provisionWorkspaceDirs(name string) (scratchDir, cacheDir string, err error) {
+func resolveCacheDir() (string, error) {
 	// Preferred cache: /niebla/cache -> fallback: ~/.cache/niebla/blobs
-	cacheDir = "/niebla/cache"
+	cacheDir := "/niebla/cache"
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		home, hErr := os.UserHomeDir()
 		if hErr != nil {
-			return "", "", fmt.Errorf("cannot resolve home directory: %w", hErr)
+			return "", fmt.Errorf("cannot resolve home directory: %w", hErr)
 		}
 		cacheDir = filepath.Join(home, ".cache", "niebla", "blobs")
 		if err := os.MkdirAll(cacheDir, 0755); err != nil {
-			return "", "", fmt.Errorf("failed to create fallback cache directory %s: %w", cacheDir, err)
+			return "", fmt.Errorf("failed to create fallback cache directory %s: %w", cacheDir, err)
 		}
 	}
+	return cacheDir, nil
+}
 
+func resolveScratchDir(name string) (string, error) {
 	// Preferred scratch: /scratch/niebla/workspaces/<name> -> fallback: ~/.niebla/workspaces/<name>/scratch
-	scratchDir = filepath.Join("/scratch/niebla/workspaces", name)
+	scratchDir := filepath.Join("/scratch/niebla/workspaces", name)
 	if err := os.MkdirAll(scratchDir, 0755); err != nil {
 		home, hErr := os.UserHomeDir()
 		if hErr != nil {
-			return "", "", fmt.Errorf("cannot resolve home directory: %w", hErr)
+			return "", fmt.Errorf("cannot resolve home directory: %w", hErr)
 		}
 		scratchDir = filepath.Join(home, ".niebla", "workspaces", name, "scratch")
 		if err := os.MkdirAll(scratchDir, 0755); err != nil {
-			return "", "", fmt.Errorf("failed to create fallback scratch directory %s: %w", scratchDir, err)
+			return "", fmt.Errorf("failed to create fallback scratch directory %s: %w", scratchDir, err)
 		}
+	}
+	return scratchDir, nil
+}
+
+func provisionWorkspaceDirs(name string) (scratchDir, cacheDir string, err error) {
+	cacheDir, err = resolveCacheDir()
+	if err != nil {
+		return "", "", err
+	}
+
+	scratchDir, err = resolveScratchDir(name)
+	if err != nil {
+		return "", "", err
 	}
 
 	// Clean any previous stale contents so a fresh workspace starts empty

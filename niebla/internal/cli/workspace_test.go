@@ -16,6 +16,60 @@ import (
 	"niebla/internal/cli/config"
 )
 
+func TestWorkspaceMount_PreservesScratchDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	configDir := filepath.Join(tempDir, "workspaces")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	mgr, err := config.NewManager(configDir)
+	if err != nil {
+		t.Fatalf("failed to create config manager: %v", err)
+	}
+
+	mountDir := filepath.Join(tempDir, "mount")
+	scratchDir := filepath.Join(tempDir, "scratch")
+	_ = os.MkdirAll(mountDir, 0755)
+	_ = os.MkdirAll(scratchDir, 0755)
+	defer func() { _ = unmountWorkspace(mountDir, true) }()
+
+	testScratchFile := filepath.Join(scratchDir, "unshelved_work.txt")
+	if err := os.WriteFile(testScratchFile, []byte("important user work"), 0644); err != nil {
+		t.Fatalf("failed to write test scratch file: %v", err)
+	}
+
+	wsConfig := &config.WorkspaceConfig{
+		WorkspaceID:  "ws-preserve-scratch",
+		Name:         "preserve-ws",
+		BaseCL:       1,
+		RootTreeHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		MountDir:     mountDir,
+		ScratchDir:   scratchDir,
+		PID:          0,
+		NoFuse:       false,
+	}
+	if err := mgr.Save(wsConfig); err != nil {
+		t.Fatalf("failed to save ws config: %v", err)
+	}
+
+	rootFlags := &RootFlags{
+		ConfigDir: configDir,
+	}
+
+	mountCmd := newWorkspaceMountCmd(rootFlags)
+	mountCmd.SetArgs([]string{"preserve-ws"})
+	_ = mountCmd.Execute()
+
+	data, err := os.ReadFile(testScratchFile)
+	if err != nil {
+		t.Fatalf("expected scratch file %s to be preserved across mount, but it was deleted: %v", testScratchFile, err)
+	}
+	if string(data) != "important user work" {
+		t.Errorf("scratch file content was corrupted, got: %s", string(data))
+	}
+}
+
 func TestWorkspaceMountUnmountCmd(t *testing.T) {
 	tempDir := t.TempDir()
 	configDir := filepath.Join(tempDir, "workspaces")
@@ -426,4 +480,3 @@ func TestWorkspaceDelete_Force_DanglingMount_And_MissingMetadata(t *testing.T) {
 		t.Errorf("expected directory %s to be removed from disk, but it still exists", targetMountDir)
 	}
 }
-
