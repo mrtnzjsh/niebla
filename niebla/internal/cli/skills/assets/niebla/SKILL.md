@@ -170,7 +170,9 @@ Niebla supports optional TLS 1.3 transport encryption and Bearer token authentic
 
 ---
 
-## 3. Standard Agent Workflow
+## 3. Agent Workflows
+
+### 3.1 Single-CL Task Workflow
 
 ```bash
 # 1. Create a task workspace (if not already inside one)
@@ -193,6 +195,62 @@ niebla shelve -m "auth: fix token expiration handling"
 niebla submit
 ```
 
+### 3.2 Stacked Changelist Workflow (Agentic Multi-CL Pipelines)
+
+When implementing complex multi-part designs, large features, or plan steps agentically, break work into a sequence of small, reviewable changelists where each CL builds upon the previous one ($CL_1 \to CL_2 \to CL_3$):
+
+1. **Provision Isolated Workspaces Per CL:**
+   Because Niebla workspaces are zero-clone virtual mounts (<15ms, <100 KB initial disk), never attempt to juggle multiple logical features or stacked CLs inside a single workspace. Provision a dedicated workspace for each step in the chain.
+
+2. **Chaining Dependent Workspaces (`--cl <parent_id>`):**
+   * **Step 1 (CL 1):**
+     ```bash
+     niebla workspace create ws-part1 --json
+     cd /niebla/workspaces/ws-part1
+     # ... make changes ...
+     niebla shelve -m "feat(core): part 1 data models" --json
+     # Parse response JSON -> returns "cl_id": 101
+     ```
+   * **Step 2 (CL 2 stacked on CL 1):**
+     Pass `--cl 101` when provisioning the next workspace so it inherits CL 101's exact Merkle tree:
+     ```bash
+     niebla workspace create ws-part2 --cl 101 --json
+     cd /niebla/workspaces/ws-part2
+     # ws-part2 immediately sees all files from CL 101 as clean base
+     # ... make changes ...
+     niebla shelve -m "feat(api): part 2 endpoint implementation" --json
+     # Server automatically links ParentCL: 101 -> returns "cl_id": 102
+     ```
+   * **Step 3 (CL 3 stacked on CL 2):**
+     ```bash
+     niebla workspace create ws-part3 --cl 102 --json
+     cd /niebla/workspaces/ws-part3
+     # ... make changes ...
+     niebla shelve -m "feat(web): part 3 UI consumption" --json
+     # Returns "cl_id": 103 (ParentCL: 102)
+     ```
+
+3. **Revising Upstream CLs & The Cascade Rebase Loop:**
+   If review feedback or CI requires updates to an upstream changelist (e.g. CL 101):
+   * **Update the upstream CL:**
+     ```bash
+     cd /niebla/workspaces/ws-part1
+     # ... apply fixes ...
+     niebla shelve -m "feat(core): fix validation logic in models" --json
+     # Creates Patchset 2 on CL 101
+     ```
+   * **Cloud Cascade Rebase:**
+     `niebla-server` automatically detects that CL 102 (and downstream CL 103) depend on CL 101. It triggers recursive 3-way Merkle tree merges in the background (`CascadeStackRebase`), synthesizing automated rebase patchsets for clean merges.
+   * **Pull Updates in Downstream Workspaces (`niebla sync`):**
+     Before making further edits in downstream workspaces, run `niebla sync`:
+     ```bash
+     cd /niebla/workspaces/ws-part2
+     niebla sync --json
+     # Triggers on-demand SyncThrough, fast-forwarding ws-part2 to the rebased tree
+     ```
+   * **Resolving Conflicts:**
+     If overlapping edits caused a conflict, `niebla sync` injects standard conflict markers (`<<<<<<< PARENT`, `=======`, `>>>>>>> CHILD`). Edit the files to resolve the markers and run `niebla shelve` to record the resolved patchset.
+
 ---
 
 ## 4. Cotejo Code Review & Multi-Line Commenting
@@ -202,6 +260,7 @@ Cotejo is the web-based code review interface integrated into Niebla. Authors an
 ### Accessing the Review UI
 * **Web UI URL:** `http://127.0.0.1:7331/cl/<cl_id>` (or live port from `niebla config show`).
 * **Patchset Selector:** Switch between patchset versions (e.g. `Patchset 2 vs Patchset 1` or `Patchset 1 vs Base CL`).
+* **Stacked Changelist Review:** When viewing a dependent CL (`cl.ParentCL > 0`), Cotejo computes diffs relative to the parent CL's root tree, displaying a clickable `Parent CL #<id>` link in the review header. Reviewers only see the delta introduced by that specific CL. If an upstream rebase introduced conflicts, Cotejo flags *"Rebase Required: Conflicts detected with parent CL"* and disables trunk submission until resolved via `niebla sync`.
 
 ### Inline Commenting Mechanics
 
