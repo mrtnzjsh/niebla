@@ -45,6 +45,8 @@ Niebla adheres to a defense-in-depth model that decouples high-performance local
 * [ ] **Multi-Head Visual Revision Graph:** Interactive web visualization of linear patchset stacks and dependent Changelist trees (`niebla stack`).
 * [ ] **Live Collaborative Review Sessions:** WebSockets-backed collaborative cursor and comment drafting across active reviewers.
 * [ ] **Dark / Light Theme System Integration:** Native system color scheme synchronization and customizable editor themes in Cotejo.
+* [ ] **WCAG 2.1 AA Accessibility Hardening:** Comprehensive remediation of the Cotejo code review UI for full keyboard operability (keyboard-driven diff commenting, skip navigation link), programmatic form labels, ARIA live regions for asynchronous HTMX swaps, screen-reader-aware diff gutter indicators (`+`/`-`), and contrast tuning within the slate dark theme. Detailed specification in [plans/COTEJO_ACCESSIBILITY.md](plans/COTEJO_ACCESSIBILITY.md).
+* [ ] **Internationalization (i18n), Localization & BiDi Security:** Multi-language catalog infrastructure (`go-i18n` with embedded TOML/JSON translation bundles), automatic `Accept-Language` locale negotiation, client-side/locale-aware datetime formatting, bidirectional (RTL) layout mirroring, `dir="auto"` user content isolation, and diff-level visual warnings for Trojan Source (CVE-2021-42574) bidirectional Unicode overrides. Detailed specification in [plans/COTEJO_I18N.md](plans/COTEJO_I18N.md).
 
 ---
 
@@ -54,6 +56,8 @@ Niebla adheres to a defense-in-depth model that decouples high-performance local
 * [x] **Subtree Governance (`OWNERS.toml`):** Granular approval policies, review bot assignments, and subtree-specific green CI requirements (`require_green_ci = true`).
 * [x] **Automated Cross-OS RC Pipeline:** Automated Linux and macOS Apple Silicon test dispatching via Forgejo Actions with non-blocking offline fallbacks.
 * [ ] **CAS-Aware Distributed CI Caching:** Shared remote build cache protocol allowing CI runners to reuse intermediate compilation targets across patchsets.
+* [ ] **Sandboxed Builds with Third-Party Dependencies:** Enable hermetic, network-isolated builds that compile and test against in-tree third-party libraries with zero internet access. The target end state is to provide robust support for air-gapped development, leaving the concrete design open to evaluate vendoring patterns, governance policies, and auxiliary caching services as real-world requirements evolve.
+* [ ] **Post-Submit Git Mirroring & Replication:** Automated synchronization of committed trunk revisions to external Git remotes (self-hosted Forgejo, GitHub, etc.). The goal is to keep downstream Git mirrors reliably up to date with Niebla trunk commits, leaving the concrete design open to evaluate event-triggered Forgejo Actions (via webhook or workflow dispatch API), server-side submit hooks / execution sinks (e.g. Python bridge scripts), or direct export workers as operational requirements evolve.
 * [ ] **GitHub PR Bidirectional Gateway:** Automated synchronization agent that mirrors public GitHub Pull Requests into internal Cotejo Changelists and updates GitHub status checks.
 
 ---
